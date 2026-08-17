@@ -35,23 +35,25 @@ enum UsageClient {
         }
     }
 
-    static func fetchGrok(token: String) async -> Lane {
-        if token.isEmpty { return .empty(.grok, sub: "Run  grok login  in Terminal, then Refresh") }
+    static func fetchGrok(token ignored: String = "") async -> Lane {
+        guard var auth = TokenReader.loadGrokAuth() else {
+            return .empty(.grok, sub: "Run  grok login  once — we keep it signed in after that")
+        }
+        if auth.isStale, auth.canRefresh, let next = await refreshGrokOIDC(auth) {
+            auth = next
+            TokenReader.persist(auth)
+        }
         do {
-            var used = token
-            var rec = TokenReader.grokCLIRecord()
-            if let rec, rec.expiresAt < Date().addingTimeInterval(60), !rec.refresh.isEmpty {
-                if let next = await refreshGrokOIDC(rec) { used = next }
-            }
-            let json = try await get("https://cli-chat-proxy.grok.com/v1/billing?format=credits", token: used)
+            let json = try await get("https://cli-chat-proxy.grok.com/v1/billing?format=credits", token: auth.access)
             return parseGrok(json) ?? .error(.grok, message: "Weekly Heavy payload was incomplete")
         } catch AuthError.expired {
-            if let rec = TokenReader.grokCLIRecord(), let next = await refreshGrokOIDC(rec) {
-                if let json = try? await get("https://cli-chat-proxy.grok.com/v1/billing?format=credits", token: next) {
+            if auth.canRefresh, let next = await refreshGrokOIDC(auth) {
+                TokenReader.persist(next)
+                if let json = try? await get("https://cli-chat-proxy.grok.com/v1/billing?format=credits", token: next.access) {
                     return parseGrok(json) ?? .error(.grok, message: "Weekly Heavy payload was incomplete")
                 }
             }
-            return .error(.grok, message: "Grok CLI session expired — sign in again")
+            return .error(.grok, message: "Grok login expired — click Open grok login once")
         } catch {
             return .error(.grok, message: "Weekly Heavy quota not returned")
         }
@@ -93,20 +95,32 @@ enum UsageClient {
         return obj
     }
 
-    private static func refreshGrokOIDC(_ rec: (access: String, refresh: String, clientId: String, expiresAt: Date)) async -> String? {
-        guard !rec.refresh.isEmpty, !rec.clientId.isEmpty else { return nil }
+    private static func refreshGrokOIDC(_ rec: GrokAuth) async -> GrokAuth? {
+        guard rec.canRefresh else { return nil }
         var req = URLRequest(url: URL(string: "https://auth.x.ai/oauth2/token")!)
         req.httpMethod = "POST"
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        req.httpBody = "grant_type=refresh_token&refresh_token=\(rec.refresh)&client_id=\(rec.clientId)"
-            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
-            .flatMap { Data($0.utf8) }
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        var parts = URLComponents()
+        parts.queryItems = [
+            URLQueryItem(name: "grant_type", value: "refresh_token"),
+            URLQueryItem(name: "refresh_token", value: rec.refresh),
+            URLQueryItem(name: "client_id", value: rec.clientId),
+        ]
+        req.httpBody = parts.percentEncodedQuery?.data(using: .utf8)
         guard let (data, res) = try? await URLSession.shared.data(for: req),
               (res as? HTTPURLResponse)?.statusCode == 200,
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let access = obj["access_token"] as? String
+              let access = obj["access_token"] as? String, !access.isEmpty
         else { return nil }
-        return access
+        let refresh = (obj["refresh_token"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? rec.refresh
+        let expires: Date
+        if let seconds = obj["expires_in"] as? NSNumber {
+            expires = Date().addingTimeInterval(seconds.doubleValue)
+        } else {
+            expires = Date().addingTimeInterval(50 * 60)
+        }
+        return GrokAuth(access: access, refresh: refresh, clientId: rec.clientId, expiresAt: expires)
     }
 
     private static func num(_ v: Any?) -> Double? {

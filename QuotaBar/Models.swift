@@ -93,3 +93,18 @@ struct Snapshot {
         return "\(part(grok)) · \(part(cursor)) · \(part(bot))"
     }
 }
+
+struct GrokAuth: Codable, Equatable {
+    var access: String
+    var refresh: String
+    var clientId: String
+    var expiresAt: Date
+
+    var isStale: Bool {
+        expiresAt.timeIntervalSinceNow < 90
+    }
+
+    var canRefresh: Bool {
+        !refresh.isEmpty && !clientId.isEmpty
+    }
+}

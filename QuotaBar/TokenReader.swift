@@ -7,14 +7,18 @@ enum TokenReader {
         FileManager.default.homeDirectoryForCurrentUser
     }
 
+    static func grokDir() -> URL {
+        home().appendingPathComponent(".grok")
+    }
+
     static func grokAuthURL() -> URL {
-        grokCandidateFiles().first ?? home().appendingPathComponent(".grok/auth.json")
+        grokDir().appendingPathComponent("auth.json")
     }
 
     static func grokCandidateFiles() -> [URL] {
         let h = home()
         return [
-            h.appendingPathComponent(".grok/auth.json"),
+            grokAuthURL(),
             h.appendingPathComponent(".grok/user-settings.json"),
             h.appendingPathComponent(".config/grok/auth.json"),
             h.appendingPathComponent("Library/Application Support/Grok/auth.json"),
@@ -22,21 +26,59 @@ enum TokenReader {
         ]
     }
 
-    static func grokCLIAvailable() -> Bool {
-        grokCLIAccessToken() != nil
+    static func loadGrokAuth() -> GrokAuth? {
+        let disk = loadGrokAuthFromDisk()
+        let saved = KeychainStore.loadAuth()
+        switch (disk, saved) {
+        case let (d?, s?):
+            if d.canRefresh && (!s.canRefresh || d.expiresAt >= s.expiresAt) { return d }
+            if s.canRefresh { return s }
+            return d.access.isEmpty ? s : d
+        case let (d?, nil):
+            if d.canRefresh { KeychainStore.saveAuth(d) }
+            return d
+        case let (nil, s?):
+            return s
+        default:
+            return nil
+        }
     }
 
     static func grokCLIAccessToken() -> String? {
-        if let fromFiles = grokTokenFromDisk() { return fromFiles }
-        if let fromKeychain = grokTokenFromSystemKeychain() { return fromKeychain }
-        return KeychainStore.loadGrok()
+        loadGrokAuth()?.access
     }
 
-    static func grokTokenFromDisk() -> String? {
-        for url in grokCandidateFiles() + grokDeepFiles() {
-            if let token = extractAccess(from: url) { return token }
+    static func grokCLIAvailable() -> Bool {
+        loadGrokAuth() != nil
+    }
+
+    static func persist(_ auth: GrokAuth) {
+        KeychainStore.saveAuth(auth)
+        writeBackAuthFile(auth)
+    }
+
+    static func savePasted(_ raw: String) -> Bool {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        if let data = trimmed.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data),
+           let auth = firstRecord(in: obj)
+        {
+            persist(auth)
+            return true
         }
-        return nil
+        let token = scrub(trimmed)
+        guard !token.isEmpty else { return false }
+        persist(GrokAuth(access: token, refresh: "", clientId: "", expiresAt: .distantPast))
+        return true
+    }
+
+    static func loadGrokAuthFromDisk() -> GrokAuth? {
+        var found: [GrokAuth] = []
+        for url in grokCandidateFiles() + grokDeepFiles() {
+            if let auth = extractRecord(from: url) { found.append(auth) }
+        }
+        return found.first(where: \.canRefresh) ?? found.first
     }
 
     private static func grokDeepFiles() -> [URL] {
@@ -44,106 +86,100 @@ enum TokenReader {
         let h = home()
         var found: [URL] = []
         let roots = [
-            h.appendingPathComponent(".grok"),
+            grokDir(),
             h.appendingPathComponent("Library/Application Support/Grok"),
             h.appendingPathComponent("Library/Application Support/xAI"),
-            h.appendingPathComponent("Library/Containers"),
         ]
-        let names: Set<String> = ["auth.json", "user-settings.json", "credentials.json"]
+        let names: Set<String> = ["auth.json", "credentials.json"]
         for root in roots {
-            guard let en = fm.enumerator(at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { continue }
+            guard let en = fm.enumerator(at: root, includingPropertiesForKeys: nil) else { continue }
             var hops = 0
             while let url = en.nextObject() as? URL {
                 hops += 1
-                if hops > 400 { break }
+                if hops > 200 { break }
                 if names.contains(url.lastPathComponent) { found.append(url) }
             }
         }
         return found
     }
 
-    private static func grokTokenFromSystemKeychain() -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecMatchLimit as String: kSecMatchLimitAll,
-            kSecReturnAttributes as String: true,
-            kSecReturnData as String: true,
-        ]
-        var out: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &out) == errSecSuccess,
-              let items = out as? [[String: Any]]
-        else { return nil }
-        let needles = ["grok", "xai", "x.ai", "cli-chat"]
-        for item in items {
-            let hay = [
-                item[kSecAttrService as String] as? String,
-                item[kSecAttrAccount as String] as? String,
-                item[kSecAttrLabel as String] as? String,
-            ].compactMap { $0?.lowercased() }.joined(separator: " ")
-            guard needles.contains(where: { hay.contains($0) }) else { continue }
-            if let data = item[kSecValueData as String] as? Data,
-               let text = String(data: data, encoding: .utf8)
-            {
-                let token = scrub(text)
-                if token.count >= 20 { return token }
-            }
-        }
-        return nil
-    }
-
-    static func grokCLIRecord() -> (access: String, refresh: String, clientId: String, expiresAt: Date)? {
-        for url in grokCandidateFiles() {
-            if let rec = extractRecord(from: url) { return rec }
-        }
-        if let pasted = KeychainStore.loadGrok() {
-            return (pasted, "", "", .distantPast)
-        }
-        return nil
-    }
-
-    private static func extractAccess(from url: URL) -> String? {
-        extractRecord(from: url)?.access
-    }
-
-    private static func extractRecord(from url: URL) -> (access: String, refresh: String, clientId: String, expiresAt: Date)? {
+    private static func extractRecord(from url: URL) -> GrokAuth? {
         guard let data = try? Data(contentsOf: url),
               let obj = try? JSONSerialization.jsonObject(with: data)
         else { return nil }
         return firstRecord(in: obj)
     }
 
-    private static func firstRecord(in obj: Any) -> (access: String, refresh: String, clientId: String, expiresAt: Date)? {
-        if let rec = record(from: obj) { return rec }
-        if let dict = obj as? [String: Any] {
-            for value in dict.values {
-                if let rec = firstRecord(in: value) { return rec }
-            }
-        }
-        if let list = obj as? [Any] {
-            for value in list {
-                if let rec = firstRecord(in: value) { return rec }
-            }
-        }
-        return nil
+    static func firstRecord(in obj: Any, parentKey: String? = nil) -> GrokAuth? {
+        var bag: [GrokAuth] = []
+        collect(obj, parentKey: parentKey, into: &bag)
+        return bag.first(where: \.canRefresh) ?? bag.first
     }
 
-    private static func record(from obj: Any) -> (access: String, refresh: String, clientId: String, expiresAt: Date)? {
+    private static func collect(_ obj: Any, parentKey: String?, into bag: inout [GrokAuth]) {
+        if let rec = record(from: obj, parentKey: parentKey) { bag.append(rec) }
+        if let dict = obj as? [String: Any] {
+            for (key, value) in dict { collect(value, parentKey: key, into: &bag) }
+        } else if let list = obj as? [Any] {
+            for value in list { collect(value, parentKey: parentKey, into: &bag) }
+        }
+    }
+
+    private static func record(from obj: Any, parentKey: String?) -> GrokAuth? {
         guard let dict = obj as? [String: Any] else { return nil }
-        let accessKeys = ["key", "access_token", "accessToken", "apiKey", "api_key", "token"]
+        let accessKeys = ["key", "access_token", "accessToken"]
         var access: String?
         for k in accessKeys {
-            if let s = dict[k] as? String, !s.isEmpty { access = s; break }
+            if let s = dict[k] as? String, s.count >= 20 { access = s; break }
         }
         guard let access else { return nil }
         let refresh = (dict["refresh_token"] as? String) ?? (dict["refreshToken"] as? String) ?? ""
-        let clientId = (dict["oidc_client_id"] as? String) ?? (dict["client_id"] as? String) ?? ""
-        var expires = Date.distantPast
-        if let s = dict["expires_at"] as? String ?? dict["expiresAt"] as? String {
+        var clientId = (dict["oidc_client_id"] as? String) ?? (dict["client_id"] as? String) ?? ""
+        if clientId.isEmpty, let parentKey, parentKey.contains("::") {
+            clientId = parentKey.split(separator: ":").last.map(String.init) ?? ""
+        }
+        let expiresAt = parseExpiry(dict["expires_at"] ?? dict["expiresAt"])
+        return GrokAuth(access: access, refresh: refresh, clientId: clientId, expiresAt: expiresAt)
+    }
+
+    private static func parseExpiry(_ value: Any?) -> Date {
+        if let n = value as? NSNumber {
+            let v = n.doubleValue
+            if v > 1e12 { return Date(timeIntervalSince1970: v / 1000) }
+            if v > 1e9 { return Date(timeIntervalSince1970: v) }
+        }
+        if let s = value as? String {
+            if let n = Double(s), s.count >= 10, s.allSatisfy({ $0.isNumber || $0 == "." }) {
+                return s.count >= 13
+                    ? Date(timeIntervalSince1970: n / 1000)
+                    : Date(timeIntervalSince1970: n)
+            }
             let f = ISO8601DateFormatter()
             f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            expires = f.date(from: s) ?? ISO8601DateFormatter().date(from: s) ?? .distantPast
+            return f.date(from: s) ?? ISO8601DateFormatter().date(from: s) ?? .distantPast
         }
-        return (access, refresh, clientId, expires)
+        return .distantPast
+    }
+
+    private static func writeBackAuthFile(_ auth: GrokAuth) {
+        let url = grokAuthURL()
+        guard FileManager.default.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url),
+              var bag = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return }
+        var changed = false
+        for (key, value) in bag {
+            guard var rec = value as? [String: Any] else { continue }
+            rec["key"] = auth.access
+            if !auth.refresh.isEmpty { rec["refresh_token"] = auth.refresh }
+            rec["expires_at"] = ISO8601DateFormatter().string(from: auth.expiresAt)
+            bag[key] = rec
+            changed = true
+        }
+        guard changed,
+              let out = try? JSONSerialization.data(withJSONObject: bag, options: [.prettyPrinted, .sortedKeys])
+        else { return }
+        try? out.write(to: url)
     }
 
     static func cursorTokenFromLocalApp() -> String? {
@@ -193,6 +229,7 @@ enum TokenReader {
            let data = trimmed.data(using: .utf8),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         {
+            if let auth = firstRecord(in: obj) { return auth.access }
             for key in ["cursorToken", "access_token", "token", "accessToken", "key"] {
                 if let inner = obj[key] as? String, !inner.isEmpty { return scrub(inner) }
             }
@@ -211,10 +248,10 @@ enum TokenReader {
 
 enum KeychainStore {
     private static let service = "app.quotabar.mac"
-    private static let account = "grok-access"
+    private static let account = "grok-auth"
 
-    static func saveGrok(_ value: String) {
-        let data = Data(value.utf8)
+    static func saveAuth(_ auth: GrokAuth) {
+        guard let data = try? JSONEncoder().encode(auth) else { return }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -227,7 +264,7 @@ enum KeychainStore {
         SecItemAdd(add as CFDictionary, nil)
     }
 
-    static func loadGrok() -> String? {
+    static func loadAuth() -> GrokAuth? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -237,11 +274,21 @@ enum KeychainStore {
         ]
         var out: AnyObject?
         guard SecItemCopyMatching(query as CFDictionary, &out) == errSecSuccess,
-              let data = out as? Data,
-              let text = String(data: data, encoding: .utf8),
-              !text.isEmpty
+              let data = out as? Data
         else { return nil }
-        return TokenReader.scrub(text)
+        if let auth = try? JSONDecoder().decode(GrokAuth.self, from: data) { return auth }
+        if let text = String(data: data, encoding: .utf8), !text.isEmpty {
+            return GrokAuth(access: TokenReader.scrub(text), refresh: "", clientId: "", expiresAt: .distantPast)
+        }
+        return nil
+    }
+
+    static func saveGrok(_ value: String) {
+        _ = TokenReader.savePasted(value)
+    }
+
+    static func loadGrok() -> String? {
+        loadAuth()?.access
     }
 
     static func clearGrok() {

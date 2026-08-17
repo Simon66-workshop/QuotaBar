@@ -12,12 +12,15 @@ final class UsageStore: ObservableObject {
 
     private var timer: AnyCancellable?
     private var lastAlert: [LaneKey: Int] = [:]
+    private var authWatcher: DispatchSourceFileSystemObject?
+    private var watchFd: Int32 = -1
 
     init() {
         launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
         notifyEnabled = UserDefaults.standard.object(forKey: "notifyEnabled") as? Bool ?? true
+        watchGrokAuthFile()
         Task { await refresh() }
-        timer = Timer.publish(every: 120, on: .main, in: .common)
+        timer = Timer.publish(every: 90, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
                 Task { await self?.refresh() }
@@ -25,9 +28,7 @@ final class UsageStore: ObservableObject {
     }
 
     func connectGrok(_ raw: String) async {
-        let token = TokenReader.scrub(raw)
-        guard !token.isEmpty else { return }
-        KeychainStore.saveGrok(token)
+        guard TokenReader.savePasted(raw) else { return }
         await refresh()
     }
 
@@ -94,7 +95,34 @@ final class UsageStore: ObservableObject {
     }
 
     func quit() {
+        stopWatch()
         NSApplication.shared.terminate(nil)
+    }
+
+    private func watchGrokAuthFile() {
+        let dir = TokenReader.grokDir().path
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        watchFd = open(dir, O_EVTONLY)
+        guard watchFd >= 0 else { return }
+        let src = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: watchFd,
+            eventMask: [.write, .rename, .extend, .delete, .attrib],
+            queue: .main
+        )
+        src.setEventHandler { [weak self] in
+            Task { await self?.refresh() }
+        }
+        src.setCancelHandler { [weak self] in
+            if let fd = self?.watchFd, fd >= 0 { close(fd) }
+            self?.watchFd = -1
+        }
+        authWatcher = src
+        src.resume()
+    }
+
+    private func stopWatch() {
+        authWatcher?.cancel()
+        authWatcher = nil
     }
 
     private func notifyIfNeeded(_ snap: Snapshot) {

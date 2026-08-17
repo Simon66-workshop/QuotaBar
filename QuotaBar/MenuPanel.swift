@@ -161,7 +161,7 @@ private struct GrokConnectForm: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Connect Grok")
                 .font(.system(size: 11, weight: .semibold))
-            Text("Browser SuperGrok does not count. This Mac needs Grok CLI login.")
+            Text("Login once with Grok CLI. After that QuotaBar keeps the session alive by itself.")
                 .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
