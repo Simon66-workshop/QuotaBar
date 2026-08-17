@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
-   LastUpgradeVersion = "1540"
+   LastUpgradeVersion = "1600"
    version = "1.7">
    <BuildAction
       parallelizeBuildables = "YES"
@@ -14,7 +14,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "A140000000000000000001"
+               BlueprintIdentifier = "B11A2C3D4E5F60718293A006"
                BuildableName = "QuotaBar.app"
                BlueprintName = "QuotaBar"
                ReferencedContainer = "container:QuotaBar.xcodeproj">
@@ -42,7 +42,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "A140000000000000000001"
+            BlueprintIdentifier = "B11A2C3D4E5F60718293A006"
             BuildableName = "QuotaBar.app"
             BlueprintName = "QuotaBar"
             ReferencedContainer = "container:QuotaBar.xcodeproj">
@@ -59,7 +59,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "A140000000000000000001"
+            BlueprintIdentifier = "B11A2C3D4E5F60718293A006"
             BuildableName = "QuotaBar.app"
             BlueprintName = "QuotaBar"
             ReferencedContainer = "container:QuotaBar.xcodeproj">

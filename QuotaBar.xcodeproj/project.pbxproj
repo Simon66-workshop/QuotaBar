@@ -3,169 +3,142 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 56;
+	objectVersion = 77;
 	objects = {
 
-/* Begin PBXBuildFile section */
-		A110000000000000000001 /* QuotaBarApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000001 /* QuotaBarApp.swift */; };
-		A110000000000000000002 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000002 /* Models.swift */; };
-		A110000000000000000003 /* TokenReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000003 /* TokenReader.swift */; };
-		A110000000000000000004 /* UsageClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000004 /* UsageClient.swift */; };
-		A110000000000000000005 /* UsageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000005 /* UsageStore.swift */; };
-		A110000000000000000006 /* MenuPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000006 /* MenuPanel.swift */; };
-		A110000000000000000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A100000000000000000009 /* Assets.xcassets */; };
-		A110000000000000000010 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A100000000000000000010 /* libsqlite3.tbd */; };
-/* End PBXBuildFile section */
-
 /* Begin PBXFileReference section */
-		A100000000000000000001 /* QuotaBarApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaBarApp.swift; sourceTree = "<group>"; };
-		A100000000000000000002 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
-		A100000000000000000003 /* TokenReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenReader.swift; sourceTree = "<group>"; };
-		A100000000000000000004 /* UsageClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageClient.swift; sourceTree = "<group>"; };
-		A100000000000000000005 /* UsageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageStore.swift; sourceTree = "<group>"; };
-		A100000000000000000006 /* MenuPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuPanel.swift; sourceTree = "<group>"; };
-		A100000000000000000007 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		A100000000000000000008 /* QuotaBar.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = QuotaBar.entitlements; sourceTree = "<group>"; };
-		A100000000000000000009 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		A100000000000000000010 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
-		A1000000000000000000AA /* QuotaBar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = QuotaBar.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B11A2C3D4E5F60718293A001 /* QuotaBar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = QuotaBar.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		B11A2C3D4E5F60718293A002 /* QuotaBar */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				B11A2C3D4E5F60718293A011 /* Exceptions for "QuotaBar" folder in "QuotaBar" target */,
+			);
+			path = QuotaBar;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		B11A2C3D4E5F60718293A011 /* Exceptions for "QuotaBar" folder in "QuotaBar" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = B11A2C3D4E5F60718293A006 /* QuotaBar */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFrameworksBuildPhase section */
-		A120000000000000000001 /* Frameworks */ = {
+		B11A2C3D4E5F60718293A003 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A110000000000000000010 /* libsqlite3.tbd in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		A130000000000000000001 = {
+		B11A2C3D4E5F60718293A004 = {
 			isa = PBXGroup;
 			children = (
-				A130000000000000000002 /* QuotaBar */,
-				A130000000000000000003 /* Products */,
-				A130000000000000000004 /* Frameworks */,
+				B11A2C3D4E5F60718293A002 /* QuotaBar */,
+				B11A2C3D4E5F60718293A005 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		A130000000000000000002 /* QuotaBar */ = {
+		B11A2C3D4E5F60718293A005 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				A100000000000000000001 /* QuotaBarApp.swift */,
-				A100000000000000000002 /* Models.swift */,
-				A100000000000000000003 /* TokenReader.swift */,
-				A100000000000000000004 /* UsageClient.swift */,
-				A100000000000000000005 /* UsageStore.swift */,
-				A100000000000000000006 /* MenuPanel.swift */,
-				A100000000000000000009 /* Assets.xcassets */,
-				A100000000000000000007 /* Info.plist */,
-				A100000000000000000008 /* QuotaBar.entitlements */,
-			);
-			path = QuotaBar;
-			sourceTree = "<group>";
-		};
-		A130000000000000000003 /* Products */ = {
-			isa = PBXGroup;
-			children = (
-				A1000000000000000000AA /* QuotaBar.app */,
+				B11A2C3D4E5F60718293A001 /* QuotaBar.app */,
 			);
 			name = Products;
-			sourceTree = "<group>";
-		};
-		A130000000000000000004 /* Frameworks */ = {
-			isa = PBXGroup;
-			children = (
-				A100000000000000000010 /* libsqlite3.tbd */,
-			);
-			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		A140000000000000000001 /* QuotaBar */ = {
+		B11A2C3D4E5F60718293A006 /* QuotaBar */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = A160000000000000000003 /* Build configuration list for PBXNativeTarget "QuotaBar" */;
+			buildConfigurationList = B11A2C3D4E5F60718293A00C /* Build configuration list for PBXNativeTarget "QuotaBar" */;
 			buildPhases = (
-				A150000000000000000001 /* Sources */,
-				A120000000000000000001 /* Frameworks */,
-				A150000000000000000002 /* Resources */,
+				B11A2C3D4E5F60718293A007 /* Sources */,
+				B11A2C3D4E5F60718293A003 /* Frameworks */,
+				B11A2C3D4E5F60718293A008 /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
+			fileSystemSynchronizedGroups = (
+				B11A2C3D4E5F60718293A002 /* QuotaBar */,
+			);
 			name = QuotaBar;
+			packageProductDependencies = (
+			);
 			productName = QuotaBar;
-			productReference = A1000000000000000000AA /* QuotaBar.app */;
+			productReference = B11A2C3D4E5F60718293A001 /* QuotaBar.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		A170000000000000000001 /* Project object */ = {
+		B11A2C3D4E5F60718293A009 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 1540;
-				LastUpgradeCheck = 1540;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
 				TargetAttributes = {
-					A140000000000000000001 = {
-						CreatedOnToolsVersion = 15.4;
+					B11A2C3D4E5F60718293A006 = {
+						CreatedOnToolsVersion = 16.0;
 					};
 				};
 			};
-			buildConfigurationList = A160000000000000000001 /* Build configuration list for PBXProject "QuotaBar" */;
-			compatibilityVersion = "Xcode 14.0";
+			buildConfigurationList = B11A2C3D4E5F60718293A00B /* Build configuration list for PBXProject "QuotaBar" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
 				Base,
 			);
-			mainGroup = A130000000000000000001;
-			productRefGroup = A130000000000000000003 /* Products */;
+			mainGroup = B11A2C3D4E5F60718293A004;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = B11A2C3D4E5F60718293A005 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				A140000000000000000001 /* QuotaBar */,
+				B11A2C3D4E5F60718293A006 /* QuotaBar */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		A150000000000000000002 /* Resources */ = {
+		B11A2C3D4E5F60718293A008 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A110000000000000000009 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		A150000000000000000001 /* Sources */ = {
+		B11A2C3D4E5F60718293A007 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A110000000000000000001 /* QuotaBarApp.swift in Sources */,
-				A110000000000000000002 /* Models.swift in Sources */,
-				A110000000000000000003 /* TokenReader.swift in Sources */,
-				A110000000000000000004 /* UsageClient.swift in Sources */,
-				A110000000000000000005 /* UsageStore.swift in Sources */,
-				A110000000000000000006 /* MenuPanel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		A180000000000000000001 /* Debug */ = {
+		B11A2C3D4E5F60718293A00D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -177,12 +150,12 @@
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = macosx;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
 			name = Debug;
 		};
-		A180000000000000000002 /* Release */ = {
+		B11A2C3D4E5F60718293A00E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -196,23 +169,29 @@
 			};
 			name = Release;
 		};
-		A180000000000000000003 /* Debug */ = {
+		B11A2C3D4E5F60718293A00F /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = QuotaBar/QuotaBar.entitlements;
+				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = YES;
-				GENERATE_INFOPLIST_FILE = NO;
+				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = QuotaBar/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = QuotaBar;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = "-lsqlite3";
 				PRODUCT_BUNDLE_IDENTIFIER = app.quotabar.mac;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -220,23 +199,29 @@
 			};
 			name = Debug;
 		};
-		A180000000000000000004 /* Release */ = {
+		B11A2C3D4E5F60718293A010 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = QuotaBar/QuotaBar.entitlements;
+				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = YES;
-				GENERATE_INFOPLIST_FILE = NO;
+				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = QuotaBar/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = QuotaBar;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = "-lsqlite3";
 				PRODUCT_BUNDLE_IDENTIFIER = app.quotabar.mac;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -247,25 +232,25 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		A160000000000000000001 /* Build configuration list for PBXProject "QuotaBar" */ = {
+		B11A2C3D4E5F60718293A00B /* Build configuration list for PBXProject "QuotaBar" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				A180000000000000000001 /* Debug */,
-				A180000000000000000002 /* Release */,
+				B11A2C3D4E5F60718293A00D /* Debug */,
+				B11A2C3D4E5F60718293A00E /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		A160000000000000000003 /* Build configuration list for PBXNativeTarget "QuotaBar" */ = {
+		B11A2C3D4E5F60718293A00C /* Build configuration list for PBXNativeTarget "QuotaBar" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				A180000000000000000003 /* Debug */,
-				A180000000000000000004 /* Release */,
+				B11A2C3D4E5F60718293A00F /* Debug */,
+				B11A2C3D4E5F60718293A010 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 	};
-	rootObject = A170000000000000000001 /* Project object */;
+	rootObject = B11A2C3D4E5F60718293A009 /* Project object */;
 }
