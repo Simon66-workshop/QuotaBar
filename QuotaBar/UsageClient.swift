@@ -36,7 +36,7 @@ enum UsageClient {
     }
 
     static func fetchGrok(token: String) async -> Lane {
-        if token.isEmpty { return .empty(.grok, sub: "Weekly Heavy  ·  not connected") }
+        if token.isEmpty { return .empty(.grok, sub: "Run  grok login  in Terminal, then Refresh") }
         do {
             var used = token
             var rec = TokenReader.grokCLIRecord()

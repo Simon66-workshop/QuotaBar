@@ -10,6 +10,10 @@ struct MenuPanel: View {
                 if index > 0 { Divider().opacity(0.35) }
                 LaneRow(lane: lane)
             }
+            if store.snap.grok.tone == .empty || store.snap.grok.tone == .error {
+                GrokConnectForm()
+                    .padding(.top, 6)
+            }
             footer
         }
         .padding(14)
@@ -160,5 +164,40 @@ private struct Ring: View {
         case .crit, .error: .red
         default: .accentColor
         }
+    }
+}
+
+private struct GrokConnectForm: View {
+    @EnvironmentObject private var store: UsageStore
+    @State private var draft = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Connect Grok")
+                .font(.system(size: 11, weight: .semibold))
+            Text("In Terminal run  grok login  once. Or paste the access token / auth.json here.")
+                .font(.system(size: 10.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            SecureField("token or auth.json", text: $draft)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 11))
+            HStack {
+                Button("Save & refresh") {
+                    let value = draft
+                    draft = ""
+                    Task { await store.connectGrok(value) }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Clear") {
+                    Task { await store.disconnectGrok() }
+                }
+                .buttonStyle(.borderless)
+            }
+            .font(.system(size: 11, weight: .semibold))
+        }
+        .padding(8)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }

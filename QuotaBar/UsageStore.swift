@@ -24,7 +24,17 @@ final class UsageStore: ObservableObject {
             }
     }
 
-    var menuTitle: String { snap.menuTitle }
+    func connectGrok(_ raw: String) async {
+        let token = TokenReader.scrub(raw)
+        guard !token.isEmpty else { return }
+        KeychainStore.saveGrok(token)
+        await refresh()
+    }
+
+    func disconnectGrok() async {
+        KeychainStore.clearGrok()
+        await refresh()
+    }
 
     func refresh() async {
         busy = true
