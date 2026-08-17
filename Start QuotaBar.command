@@ -42,13 +42,15 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.0</string>
+  <string>1.2</string>
   <key>LSUIElement</key>
   <true/>
   <key>LSMinimumSystemVersion</key>
   <string>14.0</string>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>NSUserNotificationAlertStyle</key>
+  <string>alert</string>
 </dict>
 </plist>
 PLIST
@@ -58,6 +60,9 @@ SHA="$(cat "$SRC"/*.swift | shasum -a 256 | awk '{print $1}')"
 OLD="$(cat "$STAMP" 2>/dev/null || true)"
 if [[ ! -x "$BIN" || "$SHA" != "$OLD" ]]; then
   osascript -e 'display notification "正在编译 QuotaBar…" with title "QuotaBar"'
+  # Kill any running copy so the binary can be overwritten.
+  pkill -x QuotaBar 2>/dev/null || true
+  sleep 0.3
   swiftc -parse-as-library -O \
     "$SRC/QuotaBarApp.swift" \
     "$SRC/Models.swift" \
@@ -65,11 +70,14 @@ if [[ ! -x "$BIN" || "$SHA" != "$OLD" ]]; then
     "$SRC/UsageClient.swift" \
     "$SRC/UsageStore.swift" \
     "$SRC/MenuPanel.swift" \
+    "$SRC/GrokDeviceAuth.swift" \
     -o "$BIN" \
     -framework AppKit \
     -framework SwiftUI \
     -framework Combine \
     -framework UserNotifications \
+    -framework Security \
+    -framework CryptoKit \
     -lsqlite3
   chmod +x "$BIN"
   echo "$SHA" > "$STAMP"
