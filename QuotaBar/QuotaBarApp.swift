@@ -38,7 +38,7 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
     }
 
     @objc private func togglePanel() {
-        if let panel, panel.isVisible {
+        if panel?.isVisible == true {
             hidePanel()
         } else {
             showPanel()
@@ -46,79 +46,90 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
     }
 
     private func showPanel() {
+        hidePanel()
         guard let store, let button = statusItem?.button else { return }
         let host = ClearHosting(rootView: MenuPanel().environmentObject(store))
-        let fitted = host.sizeThatFits(in: NSSize(width: 352, height: 900))
-        let height = Swift.min(Swift.max(fitted.height, 380), 640)
+        let fitted = host.sizeThatFits(in: NSSize(width: 352, height: 720))
+        let height = Swift.min(Swift.max(fitted.height.isFinite ? fitted.height : 420, 360), 560)
         let size = NSSize(width: 352, height: height)
         host.view.frame = NSRect(origin: .zero, size: size)
 
-        let glass = GlassBackdrop(frame: host.view.bounds)
-        glass.autoresizingMask = [.width, .height]
+        let glass = GlassBackdrop(frame: NSRect(origin: .zero, size: size))
         host.view.autoresizingMask = [.width, .height]
         glass.addSubview(host.view)
 
         let panel = GlassPanel(
             contentRect: NSRect(origin: .zero, size: size),
-            styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
-        panel.level = .statusBar
+        panel.level = .popUpMenu
         panel.isFloatingPanel = true
-        panel.hidesOnDeactivate = false
+        panel.hidesOnDeactivate = true
         panel.becomesKeyOnlyIfNeeded = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        panel.collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
         panel.animationBehavior = .utilityWindow
-        panel.titleVisibility = .hidden
-        panel.titlebarAppearsTransparent = true
+        panel.hasShadow = true
         panel.contentView = glass
+        panel.setContentSize(size)
+        panel.minSize = size
+        panel.maxSize = size
         panel.appearance = NSApp.effectiveAppearance
 
-        position(panel, under: button)
-        panel.makeKeyAndOrderFront(nil)
+        position(panel, size: size, under: button)
+        panel.orderFront(nil)
         self.panel = panel
 
-        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             guard let self, let panel = self.panel, panel.isVisible else { return }
-            if self.store?.loginInProgress == true { return }
-            let loc = NSEvent.mouseLocation
-            if !panel.frame.contains(loc) {
+            if !panel.frame.contains(NSEvent.mouseLocation) {
                 self.hidePanel()
             }
         }
     }
 
     private func hidePanel() {
-        panel?.orderOut(nil)
         if let clickMonitor {
             NSEvent.removeMonitor(clickMonitor)
             self.clickMonitor = nil
         }
+        if let panel {
+            panel.orderOut(nil)
+            panel.contentView = nil
+            panel.close()
+        }
+        self.panel = nil
     }
 
-    private func position(_ panel: NSPanel, under button: NSView) {
-        guard let buttonWindow = button.window else { return }
+    private func position(_ panel: NSPanel, size: NSSize, under button: NSView) {
+        guard let buttonWindow = button.window else {
+            panel.setFrame(NSRect(origin: NSPoint(x: 80, y: 80), size: size), display: true)
+            return
+        }
         let buttonRect = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
-        var x = buttonRect.midX - panel.frame.width / 2
-        var y = buttonRect.minY - panel.frame.height - 6
+        var x = buttonRect.midX - size.width / 2
+        var y = buttonRect.minY - size.height - 6
         if let screen = buttonWindow.screen ?? NSScreen.main {
             let visible = screen.visibleFrame
-            x = Swift.min(Swift.max(x, visible.minX + 8), visible.maxX - panel.frame.width - 8)
+            x = Swift.min(Swift.max(x, visible.minX + 8), visible.maxX - size.width - 8)
             if y < visible.minY + 8 {
                 y = buttonRect.maxY + 6
             }
         }
-        panel.setFrameOrigin(NSPoint(x: x, y: y))
+        panel.setFrame(NSRect(x: x, y: y, width: size.width, height: size.height), display: true)
     }
 }
 
 final class GlassPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    override var contentRect(forFrameRect frameRect: NSRect) -> NSRect { frameRect }
+    override var frameRect(forContentRect contentRect: NSRect) -> NSRect { contentRect }
 }
 
 final class ClearHosting<Content: View>: NSHostingController<Content> {
@@ -131,22 +142,18 @@ final class ClearHosting<Content: View>: NSHostingController<Content> {
 }
 
 final class GlassBackdrop: NSView {
-    private let effect: NSView
+    private let effect: NSVisualEffectView
 
     override init(frame: NSRect) {
-        if let type = NSClassFromString("NSGlassEffectView") as? NSView.Type {
-            let glass = type.init(frame: frame)
-            if glass.responds(to: NSSelectorFromString("setCornerRadius:")) {
-                glass.setValue(18, forKey: "cornerRadius")
-            }
-            effect = glass
-        } else {
-            let fx = NSVisualEffectView(frame: frame)
-            fx.blendingMode = .behindWindow
-            fx.state = .active
-            fx.material = .underWindowBackground
-            effect = fx
-        }
+        let fx = NSVisualEffectView(frame: frame)
+        fx.blendingMode = .behindWindow
+        fx.state = .active
+        fx.material = .hudWindow
+        fx.wantsLayer = true
+        fx.layer?.cornerRadius = 18
+        fx.layer?.cornerCurve = .continuous
+        fx.layer?.masksToBounds = true
+        effect = fx
         super.init(frame: frame)
         wantsLayer = true
         layer?.isOpaque = false
@@ -155,9 +162,7 @@ final class GlassBackdrop: NSView {
         layer?.cornerCurve = .continuous
         layer?.masksToBounds = true
         layer?.borderWidth = 0.7
-        layer?.borderColor = NSColor.white.withAlphaComponent(0.55).cgColor
-        layer?.shadowOpacity = 0
-        effect.frame = bounds
+        layer?.borderColor = NSColor.white.withAlphaComponent(0.45).cgColor
         effect.autoresizingMask = [.width, .height]
         addSubview(effect, positioned: .below, relativeTo: nil)
     }
@@ -165,5 +170,10 @@ final class GlassBackdrop: NSView {
     required init?(coder: NSCoder) { nil }
 
     override var isOpaque: Bool { false }
-    override var wantsUpdateLayer: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let path = NSBezierPath(roundedRect: bounds, xRadius: 18, yRadius: 18)
+        guard path.contains(point) else { return nil }
+        return super.hitTest(point)
+    }
 }
