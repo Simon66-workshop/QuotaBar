@@ -40,10 +40,11 @@ enum UsageClient {
             return .empty(.grok, sub: "No ~/.grok/auth.json — run grok login once")
         }
         var access = auth.access
+        var persistNote: String?
         if auth.canRefresh {
             switch await refreshGrokOIDC(auth) {
             case .ok(let next):
-                TokenReader.persist(next)
+                persistNote = TokenReader.persist(next)
                 access = next.access
             case .failed(let detail):
                 return .error(.grok, message: "Grok refresh failed: \(detail)")
@@ -54,7 +55,13 @@ enum UsageClient {
 
         do {
             let json = try await get("https://cli-chat-proxy.grok.com/v1/billing?format=credits", token: access)
-            return parseGrok(json) ?? .error(.grok, message: "Grok billing 200 but missing creditUsagePercent / currentPeriod")
+            guard var lane = parseGrok(json) else {
+                return .error(.grok, message: "Grok billing 200 but no weekly usage in currentPeriod/productUsage")
+            }
+            if let persistNote {
+                lane.sub += "  ·  auth.json write failed: \(persistNote)"
+            }
+            return lane
         } catch AuthError.http(let code) where code == 401 || code == 403 {
             return .error(.grok, message: "Grok billing \(code) after \(auth.canRefresh ? "refresh" : "no refresh")")
         } catch AuthError.http(let code) {
@@ -210,10 +217,6 @@ enum UsageClient {
     private static func parseGrok(_ json: [String: Any]) -> Lane? {
         let config = json["config"] as? [String: Any] ?? json
         let period = config["currentPeriod"] as? [String: Any]
-        let used = num(config["creditUsagePercent"])
-            ?? num(period?["creditUsagePercent"])
-            ?? num(json["creditUsagePercent"])
-        guard let used else { return nil }
         let names: [String: String] = [
             "GrokChat": "Chat",
             "GrokAppBuilder": "Builder",
@@ -221,11 +224,14 @@ enum UsageClient {
             "GrokVoice": "Voice",
         ]
         var details: [LaneDetail] = []
-        if let products = (config["productUsage"] ?? period?["productUsage"] ?? json["productUsage"]) as? [[String: Any]] {
+        if let products = (period?["productUsage"] ?? config["productUsage"] ?? json["productUsage"]) as? [[String: Any]] {
             for item in products {
                 guard let product = item["product"] as? String else { continue }
                 details.append(LaneDetail(label: names[product] ?? product, usedPct: num(item["usagePercent"]) ?? 0))
             }
+        }
+        guard let used = pickGrokUsed(config: config, period: period, root: json, details: details) else {
+            return nil
         }
         var bits = ["Weekly SuperGrok Heavy Limit"]
         if let r = resetLabel(
@@ -235,6 +241,31 @@ enum UsageClient {
                 ?? json["billingPeriodEnd"]
         ) { bits.append(r) }
         return .used(.grok, percent: used, sub: bits.joined(separator: "  ·  "), details: details)
+    }
+
+    /// config.creditUsagePercent == 0 must not hide currentPeriod / productUsage.
+    private static func pickGrokUsed(
+        config: [String: Any],
+        period: [String: Any]?,
+        root: [String: Any],
+        details: [LaneDetail]
+    ) -> Double? {
+        let periodUsed = num(period?["creditUsagePercent"])
+        let configUsed = num(config["creditUsagePercent"])
+        let rootUsed = num(root["creditUsagePercent"])
+        let productSum = details.map(\.usedPct).reduce(0, +)
+        let productMax = details.map(\.usedPct).max() ?? 0
+
+        if let periodUsed, periodUsed > 0 { return periodUsed }
+        if let configUsed, configUsed > 0 { return configUsed }
+        if let rootUsed, rootUsed > 0 { return rootUsed }
+        if productSum > 0, productSum <= 100 { return productSum }
+        if productMax > 0 { return productMax }
+        if period != nil, let periodUsed { return periodUsed }
+        if period != nil || !details.isEmpty {
+            return periodUsed ?? configUsed ?? rootUsed ?? 0
+        }
+        return nil
     }
 
     private static func parseSand(_ json: [String: Any]) -> Lane? {

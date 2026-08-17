@@ -42,9 +42,14 @@ enum TokenReader {
         loadGrokAuth() != nil
     }
 
-    static func persist(_ auth: GrokAuth) {
+    static func persist(_ auth: GrokAuth) -> String? {
         KeychainStore.saveAuth(auth)
-        writeBackAuthFile(auth)
+        do {
+            try writeBackAuthFile(auth)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
     }
 
     static func savePasted(_ raw: String) -> Bool {
@@ -151,25 +156,57 @@ enum TokenReader {
         return .distantPast
     }
 
-    private static func writeBackAuthFile(_ auth: GrokAuth) {
+    private static func isoExpiry(_ date: Date) -> String {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        return f.string(from: date)
+    }
+
+    private static func writeBackAuthFile(_ auth: GrokAuth) throws {
         let url = grokAuthURL()
-        guard FileManager.default.fileExists(atPath: url.path),
-              let data = try? Data(contentsOf: url),
-              var bag = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return }
-        var changed = false
-        for (key, value) in bag {
-            guard var rec = value as? [String: Any] else { continue }
-            rec["key"] = auth.access
-            if !auth.refresh.isEmpty { rec["refresh_token"] = auth.refresh }
-            rec["expires_at"] = ISO8601DateFormatter().string(from: auth.expiresAt)
-            bag[key] = rec
-            changed = true
+        let fm = FileManager.default
+        try fm.createDirectory(at: grokDir(), withIntermediateDirectories: true)
+
+        var bag: [String: Any]
+        if fm.fileExists(atPath: url.path) {
+            let data = try Data(contentsOf: url)
+            guard let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw NSError(domain: "QuotaBar", code: 2, userInfo: [NSLocalizedDescriptionKey: "auth.json is not an object"])
+            }
+            bag = parsed
+        } else {
+            bag = [:]
         }
-        guard changed,
-              let out = try? JSONSerialization.data(withJSONObject: bag, options: [.prettyPrinted, .sortedKeys])
-        else { return }
-        try? out.write(to: url)
+
+        let slot = bag.keys.first(where: { $0.hasSuffix("::\(auth.clientId)") })
+            ?? bag.first(where: { _, value in
+                guard let rec = value as? [String: Any] else { return false }
+                return (rec["oidc_client_id"] as? String) == auth.clientId
+            })?.key
+            ?? bag.first(where: { _, value in
+                (value as? [String: Any])?["refresh_token"] != nil
+            })?.key
+            ?? (auth.clientId.isEmpty ? "https://auth.x.ai" : "https://auth.x.ai::\(auth.clientId)")
+
+        var rec = bag[slot] as? [String: Any] ?? [:]
+        rec["key"] = auth.access
+        if !auth.refresh.isEmpty { rec["refresh_token"] = auth.refresh }
+        if !auth.clientId.isEmpty { rec["oidc_client_id"] = auth.clientId }
+        rec["expires_at"] = isoExpiry(auth.expiresAt)
+        bag[slot] = rec
+
+        let out = try JSONSerialization.data(withJSONObject: bag, options: [.prettyPrinted, .sortedKeys])
+        try out.write(to: url, options: .atomic)
+
+        let check = try Data(contentsOf: url)
+        guard let again = try JSONSerialization.jsonObject(with: check) as? [String: Any],
+              let saved = again[slot] as? [String: Any],
+              let writtenKey = saved["key"] as? String, writtenKey == auth.access,
+              saved["expires_at"] != nil
+        else {
+            throw NSError(domain: "QuotaBar", code: 3, userInfo: [NSLocalizedDescriptionKey: "auth.json write verify failed"])
+        }
     }
 
     static func cursorTokenFromLocalApp() -> String? {
