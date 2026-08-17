@@ -28,12 +28,65 @@ enum TokenReader {
 
     static func grokCLIAccessToken() -> String? {
         if let fromFiles = grokTokenFromDisk() { return fromFiles }
+        if let fromKeychain = grokTokenFromSystemKeychain() { return fromKeychain }
         return KeychainStore.loadGrok()
     }
 
     static func grokTokenFromDisk() -> String? {
-        for url in grokCandidateFiles() {
+        for url in grokCandidateFiles() + grokDeepFiles() {
             if let token = extractAccess(from: url) { return token }
+        }
+        return nil
+    }
+
+    private static func grokDeepFiles() -> [URL] {
+        let fm = FileManager.default
+        let h = home()
+        var found: [URL] = []
+        let roots = [
+            h.appendingPathComponent(".grok"),
+            h.appendingPathComponent("Library/Application Support/Grok"),
+            h.appendingPathComponent("Library/Application Support/xAI"),
+            h.appendingPathComponent("Library/Containers"),
+        ]
+        let names: Set<String> = ["auth.json", "user-settings.json", "credentials.json"]
+        for root in roots {
+            guard let en = fm.enumerator(at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { continue }
+            var hops = 0
+            while let url = en.nextObject() as? URL {
+                hops += 1
+                if hops > 400 { break }
+                if names.contains(url.lastPathComponent) { found.append(url) }
+            }
+        }
+        return found
+    }
+
+    private static func grokTokenFromSystemKeychain() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+            kSecReturnAttributes as String: true,
+            kSecReturnData as String: true,
+        ]
+        var out: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &out) == errSecSuccess,
+              let items = out as? [[String: Any]]
+        else { return nil }
+        let needles = ["grok", "xai", "x.ai", "cli-chat"]
+        for item in items {
+            let hay = [
+                item[kSecAttrService as String] as? String,
+                item[kSecAttrAccount as String] as? String,
+                item[kSecAttrLabel as String] as? String,
+            ].compactMap { $0?.lowercased() }.joined(separator: " ")
+            guard needles.contains(where: { hay.contains($0) }) else { continue }
+            if let data = item[kSecValueData as String] as? Data,
+               let text = String(data: data, encoding: .utf8)
+            {
+                let token = scrub(text)
+                if token.count >= 20 { return token }
+            }
         }
         return nil
     }

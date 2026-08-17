@@ -47,27 +47,16 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
 
     private func showPanel() {
         guard let store, let button = statusItem?.button else { return }
-        let host = NSHostingController(rootView: MenuPanel().environmentObject(store))
-        host.view.wantsLayer = true
-        host.view.layer?.backgroundColor = NSColor.clear.cgColor
+        let host = ClearHosting(rootView: MenuPanel().environmentObject(store))
         let fitted = host.sizeThatFits(in: NSSize(width: 352, height: 900))
         let height = Swift.min(Swift.max(fitted.height, 380), 640)
         let size = NSSize(width: 352, height: height)
         host.view.frame = NSRect(origin: .zero, size: size)
 
-        let fx = NSVisualEffectView(frame: host.view.bounds)
-        fx.autoresizingMask = [.width, .height]
-        fx.blendingMode = .behindWindow
-        fx.state = .active
-        fx.material = .hudWindow
-        fx.wantsLayer = true
-        fx.layer?.cornerRadius = 18
-        fx.layer?.cornerCurve = .continuous
-        fx.layer?.masksToBounds = true
-        fx.layer?.borderWidth = 0.8
-        fx.layer?.borderColor = NSColor.white.withAlphaComponent(0.42).cgColor
+        let glass = GlassBackdrop(frame: host.view.bounds)
+        glass.autoresizingMask = [.width, .height]
         host.view.autoresizingMask = [.width, .height]
-        fx.addSubview(host.view)
+        glass.addSubview(host.view)
 
         let panel = GlassPanel(
             contentRect: NSRect(origin: .zero, size: size),
@@ -84,7 +73,9 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         panel.becomesKeyOnlyIfNeeded = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.animationBehavior = .utilityWindow
-        panel.contentView = fx
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
+        panel.contentView = glass
         panel.appearance = NSApp.effectiveAppearance
 
         position(panel, under: button)
@@ -127,4 +118,51 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
 final class GlassPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+}
+
+final class ClearHosting<Content: View>: NSHostingController<Content> {
+    override func loadView() {
+        super.loadView()
+        view.wantsLayer = true
+        view.layer?.isOpaque = false
+        view.layer?.backgroundColor = NSColor.clear.cgColor
+    }
+}
+
+final class GlassBackdrop: NSView {
+    private let effect: NSView
+
+    override init(frame: NSRect) {
+        if let type = NSClassFromString("NSGlassEffectView") as? NSView.Type {
+            let glass = type.init(frame: frame)
+            if glass.responds(to: NSSelectorFromString("setCornerRadius:")) {
+                glass.setValue(18, forKey: "cornerRadius")
+            }
+            effect = glass
+        } else {
+            let fx = NSVisualEffectView(frame: frame)
+            fx.blendingMode = .behindWindow
+            fx.state = .active
+            fx.material = .underWindowBackground
+            effect = fx
+        }
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.isOpaque = false
+        layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.cornerRadius = 18
+        layer?.cornerCurve = .continuous
+        layer?.masksToBounds = true
+        layer?.borderWidth = 0.7
+        layer?.borderColor = NSColor.white.withAlphaComponent(0.55).cgColor
+        layer?.shadowOpacity = 0
+        effect.frame = bounds
+        effect.autoresizingMask = [.width, .height]
+        addSubview(effect, positioned: .below, relativeTo: nil)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override var isOpaque: Bool { false }
+    override var wantsUpdateLayer: Bool { true }
 }

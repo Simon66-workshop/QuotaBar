@@ -20,37 +20,7 @@ struct MenuPanel: View {
         }
         .padding(16)
         .frame(width: 336)
-        .background {
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color.white.opacity(0.22),
-                        Color.white.opacity(0.04),
-                        Color.clear,
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.72),
-                                Color.white.opacity(0.10),
-                                Color.white.opacity(0.28),
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 0.9
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16.5, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.6)
-                            .padding(1.1)
-                    )
-            }
-        }
+        .background(Color.clear)
     }
 
     private var header: some View {
@@ -191,11 +161,15 @@ private struct GrokConnectForm: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Connect Grok")
                 .font(.system(size: 11, weight: .semibold))
-            Text("In Terminal run  grok login  once. Or paste the access token / auth.json here.")
+            Text("Browser SuperGrok does not count. This Mac needs Grok CLI login.")
                 .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            SecureField("token or auth.json", text: $draft)
+            Button("Open grok login") {
+                store.openGrokLogin()
+            }
+            .buttonStyle(.borderedProminent)
+            SecureField("or paste token / auth.json", text: $draft)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 11))
             HStack {

@@ -36,7 +36,19 @@ final class UsageStore: ObservableObject {
         await refresh()
     }
 
-    var menuTitle: String { snap.menuTitle }
+    func openGrokLogin() {
+        let script = """
+        tell application "Terminal"
+            activate
+            do script "command -v grok >/dev/null && grok login || echo '未找到 grok 命令。先安装 Grok CLI，再运行 grok login'"
+        end tell
+        """
+        NSAppleScript(source: script)?.executeAndReturnError(nil)
+        Task {
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            await refresh()
+        }
+    }
 
     func refresh() async {
         busy = true
