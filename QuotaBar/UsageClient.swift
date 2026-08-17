@@ -37,7 +37,10 @@ enum UsageClient {
 
     static func fetchGrok(token ignored: String = "") async -> Lane {
         guard let auth = TokenReader.loadGrokAuth() else {
-            return .empty(.grok, sub: "No ~/.grok/auth.json — run grok login once")
+            if FileManager.default.fileExists(atPath: TokenReader.grokAuthURL().path) {
+                return .error(.grok, message: "CLI 没落盘。auth.json 还是死会话。点 Sign in with Grok，由本 App 写回。")
+            }
+            return .error(.grok, message: "没有可用 Grok 会话。点 Sign in with Grok，不用跑 grok login。")
         }
         var access = auth.access
         var persistNote: String?

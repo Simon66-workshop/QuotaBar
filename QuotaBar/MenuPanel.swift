@@ -12,7 +12,7 @@ struct MenuPanel: View {
                 }
                 LaneRow(lane: lane)
             }
-            if store.snap.grok.tone == .empty || store.snap.grok.tone == .error {
+            if store.snap.grok.tone == .empty || store.snap.grok.tone == .error || store.loginInProgress {
                 GrokConnectForm()
                     .padding(.top, 8)
             }

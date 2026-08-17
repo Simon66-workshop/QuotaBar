@@ -84,6 +84,7 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
 
         clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
             guard let self, let panel = self.panel, panel.isVisible else { return }
+            if self.store?.loginInProgress == true { return }
             let loc = NSEvent.mouseLocation
             if !panel.frame.contains(loc) {
                 self.hidePanel()

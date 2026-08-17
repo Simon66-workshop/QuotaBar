@@ -11,6 +11,7 @@ final class UsageStore: ObservableObject {
     @Published var notifyEnabled: Bool
     @Published var deviceUserCode: String = ""
     @Published var deviceNote: String = ""
+    @Published var loginInProgress = false
 
     private var timer: AnyCancellable?
     private var lastAlert: [LaneKey: Int] = [:]
@@ -47,9 +48,15 @@ final class UsageStore: ObservableObject {
     func startDeviceLogin() {
         deviceTask?.cancel()
         deviceUserCode = ""
+        loginInProgress = true
         deviceNote = "Starting Grok device login…"
         deviceTask = Task { [weak self] in
             guard let self else { return }
+            defer {
+                Task { @MainActor in
+                    self.loginInProgress = false
+                }
+            }
             do {
                 let pending = try await GrokDeviceAuth.begin()
                 await MainActor.run {
