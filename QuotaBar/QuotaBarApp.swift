@@ -51,7 +51,8 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         host.view.wantsLayer = true
         host.view.layer?.backgroundColor = NSColor.clear.cgColor
         let fitted = host.sizeThatFits(in: NSSize(width: 352, height: 900))
-        let size = NSSize(width: 352, height: fitted.height.clamped(to: 380...640))
+        let height = Swift.min(Swift.max(fitted.height, 380), 640)
+        let size = NSSize(width: 352, height: height)
         host.view.frame = NSRect(origin: .zero, size: size)
 
         let fx = NSVisualEffectView(frame: host.view.bounds)
@@ -114,7 +115,7 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         var y = buttonRect.minY - panel.frame.height - 6
         if let screen = buttonWindow.screen ?? NSScreen.main {
             let visible = screen.visibleFrame
-            x = min(max(x, visible.minX + 8), visible.maxX - panel.frame.width - 8)
+            x = Swift.min(Swift.max(x, visible.minX + 8), visible.maxX - panel.frame.width - 8)
             if y < visible.minY + 8 {
                 y = buttonRect.maxY + 6
             }
@@ -126,10 +127,4 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
 final class GlassPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
-}
-
-private extension CGFloat {
-    func clamped(to range: ClosedRange<CGFloat>) -> CGFloat {
-        min(max(self, range.lowerBound), range.upperBound)
-    }
 }

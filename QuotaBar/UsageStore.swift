@@ -36,6 +36,8 @@ final class UsageStore: ObservableObject {
         await refresh()
     }
 
+    var menuTitle: String { snap.menuTitle }
+
     func refresh() async {
         busy = true
         defer { busy = false }
