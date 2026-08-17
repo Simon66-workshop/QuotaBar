@@ -19,7 +19,11 @@ Later launches: just double-click `Start QuotaBar.command` again.
 
 ## What it reads
 
-- Grok: `~/.grok/auth.json`
-- Cursor + Grok Bot: Cursor local session
+- **Grok**: `~/.grok/auth.json` (and Keychain). Grok CLI 0.2.111 often prints "Signed in" but does not write disk — use **Sign in with Grok** inside the panel; QuotaBar runs the same OIDC device flow and writes `auth.json` itself.
+- **Cursor + Grok Bot**: Cursor local session (`state.vscdb`)
 
 If Cursor shows `—`, open Cursor once, then start QuotaBar again.
+
+## Panel
+
+Click the menu bar title to open the glass panel. Click outside (or the title again) to close. Alerts fire at ≥80% usage.
