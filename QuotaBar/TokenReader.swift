@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Security
 import SQLite3
@@ -27,11 +28,47 @@ enum TokenReader {
     }
 
     static func loadGrokAuth() -> GrokAuth? {
+        clearStaleAuthLock()
         let disk = loadGrokAuthFromDisk()
         let saved = KeychainStore.loadAuth()
-        if let d = disk, d.canRefresh { return d }
-        if let s = saved, s.canRefresh { return s }
+        if let d = disk, d.canRefresh, !isDeadRefresh(d.refresh) { return d }
+        if let s = saved, s.canRefresh, !isDeadRefresh(s.refresh) { return s }
+        if let alt = discoverAlternateAuth() { return alt }
+        if let d = disk, !d.canRefresh || isDeadRefresh(d.refresh) { return nil }
         return disk ?? saved
+    }
+
+    static func markRefreshDead(_ refresh: String) {
+        guard !refresh.isEmpty else { return }
+        UserDefaults.standard.set(fingerprint(refresh), forKey: deadKey)
+    }
+
+    static func isDeadRefresh(_ refresh: String) -> Bool {
+        guard !refresh.isEmpty,
+              let dead = UserDefaults.standard.string(forKey: deadKey)
+        else { return false }
+        return dead == fingerprint(refresh)
+    }
+
+    static func discoverAlternateAuth() -> GrokAuth? {
+        clearStaleAuthLock()
+        let disk = loadGrokAuthFromDisk()
+        let dead = disk.map(\.refresh)
+        var found: [GrokAuth] = []
+        for url in alternateAuthFiles() {
+            if let auth = extractRecord(from: url), auth.canRefresh {
+                if let dead, fingerprint(auth.refresh) == fingerprint(dead) { continue }
+                if isDeadRefresh(auth.refresh) { continue }
+                found.append(auth)
+            }
+        }
+        if let fromLogs = newestAuthFromLogs() {
+            if !isDeadRefresh(fromLogs.refresh) { found.append(fromLogs) }
+        }
+        if let fromKey = newestAuthFromKeychain() {
+            if !isDeadRefresh(fromKey.refresh) { found.append(fromKey) }
+        }
+        return found.max(by: { $0.expiresAt < $1.expiresAt })
     }
 
     static func grokCLIAccessToken() -> String? {
@@ -73,7 +110,126 @@ enum TokenReader {
         for url in grokCandidateFiles() + grokDeepFiles() {
             if let auth = extractRecord(from: url) { found.append(auth) }
         }
-        return found.first(where: \.canRefresh) ?? found.first
+        return found.first(where: { $0.canRefresh && !isDeadRefresh($0.refresh) }) ?? found.first
+    }
+
+    private static let deadKey = "qb.deadGrokRefresh.sha"
+
+    private static func fingerprint(_ value: String) -> String {
+        SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func clearStaleAuthLock() {
+        let url = grokDir().appendingPathComponent("auth.json.lock")
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let mtime = attrs[.modificationDate] as? Date
+        else { return }
+        if Date().timeIntervalSince(mtime) > 60 {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    private static func alternateAuthFiles() -> [URL] {
+        let fm = FileManager.default
+        var urls: [URL] = []
+        let roots = [
+            grokDir().appendingPathComponent("auth"),
+            grokDir().appendingPathComponent("credentials"),
+            grokDir(),
+        ]
+        let names: Set<String> = [
+            "auth.json", "credentials.json", "mcp_credentials.json",
+            "session.json", "tokens.json", "oauth.json",
+        ]
+        for root in roots {
+            guard let en = fm.enumerator(at: root, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles]) else { continue }
+            var hops = 0
+            while let url = en.nextObject() as? URL {
+                hops += 1
+                if hops > 300 { break }
+                let ext = url.pathExtension.lowercased()
+                if names.contains(url.lastPathComponent) || ext == "json" {
+                    if url.lastPathComponent == "auth.json" { continue }
+                    urls.append(url)
+                }
+            }
+        }
+        return urls
+    }
+
+    private static func newestAuthFromLogs() -> GrokAuth? {
+        let fm = FileManager.default
+        let roots = [
+            grokDir().appendingPathComponent("logs"),
+            grokDir().appendingPathComponent("debug"),
+        ]
+        var best: GrokAuth?
+        for root in roots {
+            guard let en = fm.enumerator(at: root, includingPropertiesForKeys: nil) else { continue }
+            var hops = 0
+            while let url = en.nextObject() as? URL {
+                hops += 1
+                if hops > 80 { break }
+                guard let auth = extractAuthFromLog(url) else { continue }
+                if best == nil || auth.expiresAt > best!.expiresAt { best = auth }
+            }
+        }
+        return best
+    }
+
+    private static func extractAuthFromLog(_ url: URL) -> GrokAuth? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        let window = min(size, 1_500_000)
+        try? handle.seek(toOffset: size - window)
+        guard let data = try? handle.readToEnd(),
+              let text = String(data: data, encoding: .utf8)
+        else { return nil }
+        var best: GrokAuth?
+        for line in text.split(whereSeparator: \.isNewline).reversed() {
+            let raw = String(line)
+            guard raw.contains("refresh_token"),
+                  let data = raw.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data),
+                  let auth = firstRecord(in: obj), auth.canRefresh
+            else { continue }
+            best = auth
+            break
+        }
+        return best
+    }
+
+    private static func newestAuthFromKeychain() -> GrokAuth? {
+        let services = [
+            "xai-grok-cli", "grok-cli", "xai-grok-shell", "xai.grok",
+            "grok", "com.xai.grok", "xai-grok-auth",
+        ]
+        for service in services {
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecMatchLimit as String: kSecMatchLimitAll,
+                kSecReturnAttributes as String: true,
+                kSecReturnData as String: true,
+            ]
+            var out: AnyObject?
+            guard SecItemCopyMatching(query as CFDictionary, &out) == errSecSuccess,
+                  let items = out as? [[String: Any]]
+            else { continue }
+            for item in items {
+                guard let data = item[kSecValueData as String] as? Data else { continue }
+                if let auth = try? JSONDecoder().decode(GrokAuth.self, from: data), auth.canRefresh {
+                    return auth
+                }
+                if let obj = try? JSONSerialization.jsonObject(with: data),
+                   let auth = firstRecord(in: obj), auth.canRefresh
+                {
+                    return auth
+                }
+            }
+        }
+        return nil
     }
 
     private static func grokDeepFiles() -> [URL] {

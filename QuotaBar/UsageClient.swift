@@ -46,6 +46,28 @@ enum UsageClient {
             case .ok(let next):
                 persistNote = TokenReader.persist(next)
                 access = next.access
+            case .failed(let detail) where detail.contains("invalid_grant"):
+                TokenReader.markRefreshDead(auth.refresh)
+                if let live = TokenReader.discoverAlternateAuth(), !TokenReader.isDeadRefresh(live.refresh) {
+                    if live.canRefresh {
+                        switch await refreshGrokOIDC(live) {
+                        case .ok(let next):
+                            persistNote = TokenReader.persist(next)
+                            access = next.access
+                        case .failed(let second):
+                            return .error(.grok, message: "Grok refresh invalid_grant; newer CLI session also failed: \(second)")
+                        }
+                    } else {
+                        persistNote = TokenReader.persist(live)
+                        access = live.access
+                    }
+                } else {
+                    TokenReader.clearStaleAuthLock()
+                    return .error(
+                        .grok,
+                        message: "Grok refresh invalid_grant. 0.2.111 often prints Signed in without rewriting auth.json (loginmint persist failed / auth.json.lock). Cleared stale lock — run grok login again."
+                    )
+                }
             case .failed(let detail):
                 return .error(.grok, message: "Grok refresh failed: \(detail)")
             }
