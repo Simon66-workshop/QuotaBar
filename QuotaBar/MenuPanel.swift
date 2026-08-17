@@ -7,45 +7,61 @@ struct MenuPanel: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             ForEach(Array(store.snap.lanes.enumerated()), id: \.element.id) { index, lane in
-                if index > 0 { Divider().opacity(0.35) }
+                if index > 0 {
+                    Divider().opacity(0.18)
+                }
                 LaneRow(lane: lane)
             }
             if store.snap.grok.tone == .empty || store.snap.grok.tone == .error {
                 GrokConnectForm()
-                    .padding(.top, 6)
+                    .padding(.top, 8)
             }
             footer
         }
-        .padding(14)
+        .padding(16)
         .frame(width: 336)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.55),
-                            Color.white.opacity(0.08),
-                            Color.white.opacity(0.22),
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1.2
+        .background {
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.22),
+                        Color.white.opacity(0.04),
+                        Color.clear,
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
                 )
-        )
-        .padding(8)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.72),
+                                Color.white.opacity(0.10),
+                                Color.white.opacity(0.28),
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.9
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16.5, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.6)
+                            .padding(1.1)
+                    )
+            }
+        }
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text("QuotaBar")
-                .font(.system(size: 15, weight: .bold))
+                .font(.system(size: 15, weight: .semibold))
             Text(statusLine)
                 .font(.system(size: 11.5))
                 .foregroundStyle(.secondary)
         }
-        .padding(.bottom, 8)
+        .padding(.bottom, 10)
     }
 
     private var statusLine: String {
@@ -77,7 +93,7 @@ struct MenuPanel: View {
             Button("Quit") { store.quit() }
                 .buttonStyle(.borderless)
         }
-        .padding(.top, 10)
+        .padding(.top, 12)
         .font(.system(size: 12, weight: .semibold))
     }
 }
@@ -122,7 +138,7 @@ private struct LaneRow: View {
                                 .font(.system(size: 10.5, weight: .semibold))
                                 .padding(.horizontal, 7)
                                 .padding(.vertical, 3)
-                                .background(Color.primary.opacity(d.usedPct <= 0 ? 0.04 : 0.08), in: Capsule())
+                                .background(Color.white.opacity(d.usedPct <= 0 ? 0.10 : 0.16), in: Capsule())
                         }
                     }
                 } else {
@@ -149,7 +165,7 @@ private struct Ring: View {
 
     var body: some View {
         ZStack {
-            Circle().stroke(Color.primary.opacity(0.12), lineWidth: 3.2)
+            Circle().stroke(Color.white.opacity(0.28), lineWidth: 3.2)
             Circle()
                 .trim(from: 0, to: tone == .empty || tone == .error || value <= 0 ? 0 : max(value, 3) / 100)
                 .stroke(stroke, style: StrokeStyle(lineWidth: 3.2, lineCap: .round))
@@ -198,6 +214,6 @@ private struct GrokConnectForm: View {
             .font(.system(size: 11, weight: .semibold))
         }
         .padding(8)
-        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
