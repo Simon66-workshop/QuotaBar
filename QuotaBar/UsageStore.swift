@@ -1,6 +1,5 @@
 import AppKit
 import Combine
-import ServiceManagement
 import SwiftUI
 import UserNotifications
 
@@ -60,9 +59,9 @@ final class UsageStore: ObservableObject {
         UserDefaults.standard.set(launchAtLogin, forKey: "launchAtLogin")
         do {
             if launchAtLogin {
-                try SMAppService.mainApp.register()
+                try LaunchAgent.install()
             } else {
-                try SMAppService.mainApp.unregister()
+                try LaunchAgent.remove()
             }
         } catch {
             launchAtLogin.toggle()
@@ -93,5 +92,61 @@ final class UsageStore: ObservableObject {
             )
             UNUserNotificationCenter.current().add(req)
         }
+    }
+}
+
+enum LaunchAgent {
+    static var label: String { "app.quotabar.mac" }
+    static var plistURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/\(label).plist")
+    }
+
+    static func programPath() -> String {
+        if let exec = Bundle.main.executablePath, !exec.isEmpty { return exec }
+        return CommandLine.arguments[0]
+    }
+
+    static func install() throws {
+        let program = programPath()
+        let body = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>Label</key>
+            <string>\(label)</string>
+            <key>ProgramArguments</key>
+            <array>
+                <string>\(program)</string>
+            </array>
+            <key>RunAtLoad</key>
+            <true/>
+            <key>KeepAlive</key>
+            <false/>
+        </dict>
+        </plist>
+        """
+        try FileManager.default.createDirectory(at: plistURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try body.write(to: plistURL, atomically: true, encoding: .utf8)
+        _ = try? shell("/bin/launchctl", "unload", plistURL.path)
+        _ = try? shell("/bin/launchctl", "load", plistURL.path)
+    }
+
+    static func remove() throws {
+        _ = try? shell("/bin/launchctl", "unload", plistURL.path)
+        if FileManager.default.fileExists(atPath: plistURL.path) {
+            try FileManager.default.removeItem(at: plistURL)
+        }
+    }
+
+    @discardableResult
+    private static func shell(_ args: String...) throws -> Int32 {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: args[0])
+        task.arguments = Array(args.dropFirst())
+        try task.run()
+        task.waitUntilExit()
+        return task.terminationStatus
     }
 }

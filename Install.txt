@@ -1,28 +1,5 @@
-QuotaBar — Mac menu bar app
-===========================
+Do not open QuotaBar.xcodeproj.
 
-Needs: macOS 14 or later, Xcode (from the App Store), Cursor and/or Grok already signed in.
-
-1. Unzip this folder.
-2. Double-click QuotaBar.xcodeproj
-3. If Xcode asks for a Team: select your Apple ID (Signing & Capabilities).
-4. Press Command-R.
-
-QuotaBar appears in the right side of the menu bar as:
-    G 5 · C 0 · B 4
-
-It reads usage locally:
-  • Grok  — ~/.grok/auth.json  (Grok CLI / SuperGrok Heavy)
-  • Cursor + Grok Bot — Cursor’s local session (state.vscdb)
-No tokens are pasted. No website login.
-
-The panel:
-  Refresh     pull again
-  Alerts      notify at 80% used
-  Login       open QuotaBar when you log in
-  Quit
-
-It has no Dock icon (LSUIElement). Use the menu bar item.
-
-First launch: macOS may ask to allow notifications and outgoing network.
-If Cursor usage is “—”, quit Cursor and QuotaBar, open Cursor once, then run QuotaBar again.
+Right-click "Start QuotaBar.command" → Open.
+First run may ask to install Command Line Tools (not Xcode).
+Then the menu bar shows: G 5 · C 0 · B 4
