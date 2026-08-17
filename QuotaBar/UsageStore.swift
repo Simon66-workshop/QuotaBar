@@ -54,9 +54,9 @@ final class UsageStore: ObservableObject {
     func refresh() async {
         busy = true
         defer { busy = false }
-        let grokTok = TokenReader.grokCLIAccessToken() ?? ""
+        let grokAuth = TokenReader.loadGrokAuth()
         let cursorTok = TokenReader.cursorTokenFromLocalApp() ?? ""
-        async let grok = UsageClient.fetchGrok(token: grokTok)
+        async let grok = UsageClient.fetchGrok()
         async let cursor = UsageClient.fetchCursor(token: cursorTok)
         async let bot = UsageClient.fetchSand(token: cursorTok)
         let next = Snapshot(
@@ -64,7 +64,7 @@ final class UsageStore: ObservableObject {
             cursor: await cursor,
             bot: await bot,
             fetchedAt: Date(),
-            grokLinked: !grokTok.isEmpty,
+            grokLinked: grokAuth != nil,
             cursorLinked: !cursorTok.isEmpty
         )
         snap = next

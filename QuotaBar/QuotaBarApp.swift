@@ -24,7 +24,7 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
-        item.button?.title = store.menuTitle
+        item.button?.title = store.snap.menuTitle
         item.button?.target = self
         item.button?.action = #selector(togglePanel)
         item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])

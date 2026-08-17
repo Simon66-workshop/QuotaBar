@@ -29,19 +29,9 @@ enum TokenReader {
     static func loadGrokAuth() -> GrokAuth? {
         let disk = loadGrokAuthFromDisk()
         let saved = KeychainStore.loadAuth()
-        switch (disk, saved) {
-        case let (d?, s?):
-            if d.canRefresh && (!s.canRefresh || d.expiresAt >= s.expiresAt) { return d }
-            if s.canRefresh { return s }
-            return d.access.isEmpty ? s : d
-        case let (d?, nil):
-            if d.canRefresh { KeychainStore.saveAuth(d) }
-            return d
-        case let (nil, s?):
-            return s
-        default:
-            return nil
-        }
+        if let d = disk, d.canRefresh { return d }
+        if let s = saved, s.canRefresh { return s }
+        return disk ?? saved
     }
 
     static func grokCLIAccessToken() -> String? {
