@@ -161,12 +161,22 @@ private struct GrokConnectForm: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Connect Grok")
                 .font(.system(size: 11, weight: .semibold))
-            Text("Login once with Grok CLI. After that QuotaBar keeps the session alive by itself.")
+            Text("0.2.111 prints Signed in but often does not write auth.json or Keychain. Sign in here so QuotaBar writes key + expires_at itself.")
                 .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Button("Open grok login") {
-                store.openGrokLogin()
+            if !store.deviceUserCode.isEmpty {
+                Text(store.deviceUserCode)
+                    .font(.system(size: 18, weight: .bold).monospaced())
+            }
+            if !store.deviceNote.isEmpty {
+                Text(store.deviceNote)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button("Sign in with Grok") {
+                store.startDeviceLogin()
             }
             .buttonStyle(.borderedProminent)
             SecureField("or paste token / auth.json", text: $draft)

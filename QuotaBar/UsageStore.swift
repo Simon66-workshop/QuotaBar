@@ -9,11 +9,14 @@ final class UsageStore: ObservableObject {
     @Published var busy = false
     @Published var launchAtLogin: Bool
     @Published var notifyEnabled: Bool
+    @Published var deviceUserCode: String = ""
+    @Published var deviceNote: String = ""
 
     private var timer: AnyCancellable?
     private var lastAlert: [LaneKey: Int] = [:]
     private var authWatcher: DispatchSourceFileSystemObject?
     private var watchFd: Int32 = -1
+    private var deviceTask: Task<Void, Never>?
 
     init() {
         launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
@@ -38,16 +41,39 @@ final class UsageStore: ObservableObject {
     }
 
     func openGrokLogin() {
-        let script = """
-        tell application "Terminal"
-            activate
-            do script "command -v grok >/dev/null && grok login || echo '未找到 grok 命令。先安装 Grok CLI，再运行 grok login'"
-        end tell
-        """
-        NSAppleScript(source: script)?.executeAndReturnError(nil)
-        Task {
-            try? await Task.sleep(nanoseconds: 8_000_000_000)
-            await refresh()
+        startDeviceLogin()
+    }
+
+    func startDeviceLogin() {
+        deviceTask?.cancel()
+        deviceUserCode = ""
+        deviceNote = "Starting Grok device login…"
+        deviceTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let pending = try await GrokDeviceAuth.begin()
+                await MainActor.run {
+                    self.deviceUserCode = pending.userCode
+                    self.deviceNote = "Authorize this device, then wait — QuotaBar writes auth.json itself."
+                }
+                NSWorkspace.shared.open(pending.verifyURL)
+                let auth = try await GrokDeviceAuth.poll(pending)
+                if Task.isCancelled { return }
+                let writeErr = TokenReader.persist(auth)
+                await MainActor.run {
+                    if let writeErr {
+                        self.deviceNote = "CLI 没落盘；QuotaBar 也写失败：\(writeErr)"
+                    } else {
+                        self.deviceNote = "Signed in. Wrote key + expires_at to ~/.grok/auth.json"
+                        self.deviceUserCode = ""
+                    }
+                }
+                await refresh()
+            } catch {
+                await MainActor.run {
+                    self.deviceNote = "CLI 没落盘。QuotaBar device login failed: \(error.localizedDescription)"
+                }
+            }
         }
     }
 

@@ -65,7 +65,7 @@ enum UsageClient {
                     TokenReader.clearStaleAuthLock()
                     return .error(
                         .grok,
-                        message: "Grok refresh invalid_grant. 0.2.111 often prints Signed in without rewriting auth.json (loginmint persist failed / auth.json.lock). Cleared stale lock — run grok login again."
+                        message: "CLI 没落盘。0.2.111 登录成功也不写 auth.json / Keychain（loginmint persist failed）。点 Sign in with Grok，由 QuotaBar 写回 key + expires_at。"
                     )
                 }
             case .failed(let detail):
