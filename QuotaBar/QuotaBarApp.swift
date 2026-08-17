@@ -67,26 +67,30 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
-        panel.level = .popUpMenu
+        panel.level = .statusBar
         panel.isFloatingPanel = true
-        panel.hidesOnDeactivate = true
-        panel.becomesKeyOnlyIfNeeded = true
+        panel.hidesOnDeactivate = false
+        panel.becomesKeyOnlyIfNeeded = false
         panel.collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
         panel.animationBehavior = .utilityWindow
-        panel.hasShadow = true
         panel.contentView = glass
         panel.setContentSize(size)
-        panel.minSize = size
-        panel.maxSize = size
         panel.appearance = NSApp.effectiveAppearance
 
         position(panel, size: size, under: button)
-        panel.orderFront(nil)
+        panel.orderFrontRegardless()
         self.panel = panel
 
-        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            guard let self, let panel = self.panel, panel.isVisible else { return }
-            if !panel.frame.contains(NSEvent.mouseLocation) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self, self.panel === panel, panel.isVisible else { return }
+            self.clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+                guard let self, let panel = self.panel, panel.isVisible else { return }
+                let loc = NSEvent.mouseLocation
+                if panel.frame.contains(loc) { return }
+                if let button = self.statusItem?.button, let win = button.window {
+                    let bar = win.convertToScreen(button.convert(button.bounds, to: nil))
+                    if bar.contains(loc) { return }
+                }
                 self.hidePanel()
             }
         }
