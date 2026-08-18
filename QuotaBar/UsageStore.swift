@@ -166,6 +166,7 @@ final class UsageStore: ObservableObject {
         persistIgnored()
         forceDiskTick = true
         tickDisks()
+        requestPanelRelayout()
     }
 
     func unignoreDisk(_ id: String) {
@@ -173,6 +174,7 @@ final class UsageStore: ObservableObject {
         persistIgnored()
         forceDiskTick = true
         tickDisks()
+        requestPanelRelayout()
     }
 
     private func persistIgnored() {

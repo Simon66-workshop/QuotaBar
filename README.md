@@ -1,4 +1,4 @@
-# QuotaBar 1.8.4
+# QuotaBar 1.8.5
 
 Mac menu bar extra for live Grok / Cursor / Grok Bot / ChatGPT / Claude Code usage, plus local and external disks.
 
@@ -46,6 +46,10 @@ If Claude shows `—`, run `claude` once in Terminal, then click Refresh.
 Plug in a USB / Thunderbolt disk and it appears in the panel; eject it and it disappears. Hide Time Machine or VM disks from the panel — they stay off the bar until you Show them again.
 
 The bar only turns orange / red on a token that is actually high (85%+ services, 90%+ disks). A normal 60–80% day stays neutral.
+
+## 1.8.5
+
+Panel is 360pt so the 7-track grid (letter · name · used · meter · left/free · window/I/O · hide) can breathe. Hide/Show relayouts the glass.
 
 ## 1.8.4
 

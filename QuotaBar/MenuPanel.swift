@@ -23,7 +23,7 @@ struct MenuPanel: View {
             footer
         }
         .padding(16)
-        .frame(width: 336)
+        .frame(width: 360)
         .background(Color.clear)
     }
 
@@ -41,7 +41,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.8.4")
+                Text("v1.8.5")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -283,8 +283,8 @@ private struct UsageTable: View {
         }
     }
 
-        @ViewBuilder
-        private func laneRow(_ lane: Lane, zebra: Bool) -> some View {
+    @ViewBuilder
+    private func laneRow(_ lane: Lane, zebra: Bool) -> some View {
         GridRow {
             Text(lane.key.letter)
                 .font(.system(size: 11, weight: .bold).monospaced())
