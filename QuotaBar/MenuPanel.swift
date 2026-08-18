@@ -20,6 +20,12 @@ struct MenuPanel: View {
                 GrokConnectForm()
                     .padding(.top, 8)
             }
+            if store.snap.gpt.tone == .empty || store.snap.gpt.tone == .error {
+                ChatGPTConnectForm()
+                    .padding(.top, 8)
+            }
+            DiskSection(disks: store.disks)
+                .padding(.top, 10)
             footer
         }
         .padding(16)
@@ -33,7 +39,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.3.2")
+                Text("v1.4")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -259,5 +265,106 @@ private struct GrokConnectForm: View {
         }
         .padding(8)
         .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+private struct ChatGPTConnectForm: View {
+    @EnvironmentObject private var store: UsageStore
+    @State private var draft = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Connect ChatGPT")
+                .font(.system(size: 11, weight: .semibold))
+            Text("Reads ~/.codex/auth.json after `codex login`. No extra browser login needed if Codex is already signed in.")
+                .font(.system(size: 10.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            SecureField("or paste Codex auth.json / access token", text: $draft)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 11))
+            Button("Save ChatGPT") {
+                let value = draft
+                draft = ""
+                Task { await store.connectChatGPT(value) }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .font(.system(size: 11, weight: .semibold))
+        }
+        .padding(8)
+        .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+private struct DiskSection: View {
+    let disks: [DiskVolume]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Disks")
+                    .font(.system(size: 11, weight: .semibold))
+                Spacer()
+                Text(disks.isEmpty ? "none" : "\(disks.count) volume\(disks.count == 1 ? "" : "s")")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.tertiary)
+            }
+            if disks.isEmpty {
+                Text("Waiting for mounted volumes…")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(disks) { disk in
+                DiskRow(disk: disk)
+            }
+        }
+    }
+}
+
+private struct DiskRow: View {
+    let disk: DiskVolume
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(disk.name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                Spacer()
+                Text("\(Int(disk.usedPct.rounded()))%")
+                    .font(.system(size: 16, weight: .bold).monospacedDigit())
+                    .foregroundStyle(color)
+            }
+            ProgressView(value: min(max(disk.usedPct, 0), 100), total: 100)
+                .tint(color == .primary ? .accentColor : color)
+            HStack {
+                Text("\(disk.kindLabel) · \(disk.statusLabel)")
+                Spacer()
+                Text(disk.rateLabel)
+                    .monospacedDigit()
+            }
+            .font(.system(size: 10.5))
+            .foregroundStyle(.secondary)
+            HStack {
+                Text(disk.sizeLabel)
+                if let note = disk.justChanged {
+                    Spacer()
+                    Text(note)
+                        .foregroundStyle(.orange)
+                }
+            }
+            .font(.system(size: 10.5))
+            .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 6)
+    }
+
+    private var color: Color {
+        switch disk.tone {
+        case .warn: .orange
+        case .crit, .error: .red
+        default: .primary
+        }
     }
 }

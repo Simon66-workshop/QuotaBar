@@ -14,6 +14,7 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
     private var localMonitor: Any?
     private var globalMonitor: Any?
     private var lastBarToggle = Date.distantPast
+    private var lastTitle = ""
 
     static func main() {
         let app = NSApplication.shared
@@ -40,13 +41,12 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         self.store = store
 
         rebuildStatusItem()
-        applyTitle(store.snap)
+        applyTitle(store.snap, disks: store.disks)
 
-        titleWatch = store.$snap
+        titleWatch = Publishers.CombineLatest(store.$snap, store.$disks)
             .receive(on: RunLoop.main)
-            .sink { [weak self] snap in
-                self?.rebindBar()
-                self?.applyTitle(snap)
+            .sink { [weak self] snap, disks in
+                self?.applyTitle(snap, disks: disks)
             }
 
         // Local: clicks that still land on our status-item window after action dies.
@@ -89,7 +89,7 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         statusItem = item
         rebindBar()
         if let snap = store?.snap {
-            applyTitle(snap)
+            applyTitle(snap, disks: store?.disks ?? [])
         }
     }
 
@@ -176,7 +176,7 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         if !fitted.height.isFinite || fitted.height < 200 {
             fitted = NSSize(width: 352, height: 420)
         }
-        let height = Swift.min(Swift.max(fitted.height, 360), 660)
+        let height = Swift.min(Swift.max(fitted.height, 360), 780)
         let size = NSSize(width: 352, height: height)
         host.view.frame = NSRect(origin: .zero, size: size)
 
@@ -242,6 +242,15 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
             item.isEnabled = false
             menu.addItem(item)
         }
+        if !store.disks.isEmpty {
+            menu.addItem(.separator())
+            for disk in store.disks {
+                let line = "\(disk.name)  \(Int(disk.usedPct.rounded()))%  ·  \(disk.statusLabel)  ·  \(disk.rateLabel)"
+                let item = NSMenuItem(title: String(line.prefix(80)), action: nil, keyEquivalent: "")
+                item.isEnabled = false
+                menu.addItem(item)
+            }
+        }
 
         menu.addItem(.separator())
         menu.addItem(makeItem("Refresh now", #selector(menuRefresh)))
@@ -280,16 +289,20 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
     @objc func menuToggleLogin() { store?.toggleLaunchAtLogin() }
     @objc func menuQuit() { store?.quit() }
 
-    private func applyTitle(_ snap: Snapshot) {
+    private func applyTitle(_ snap: Snapshot, disks: [DiskVolume]) {
         guard let button = statusItem?.button else { return }
-        let raw = snap.menuTitle
+        let raw = snap.barTitle(disks: disks)
+        if raw != lastTitle {
+            lastTitle = raw
+            rebindBar()
+        }
         let attr = NSMutableAttributedString(string: raw)
         let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         attr.addAttribute(.font, value: font, range: NSRange(location: 0, length: attr.length))
         attr.addAttribute(.foregroundColor, value: NSColor.labelColor, range: NSRange(location: 0, length: attr.length))
 
-        func color(for lane: Lane) -> NSColor? {
-            switch lane.tone {
+        func color(for tone: Tone) -> NSColor? {
+            switch tone {
             case .warn: return .systemOrange
             case .crit, .error: return .systemRed
             default: return nil
@@ -300,16 +313,25 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
             (snap.grok, snap.grok.key.letter),
             (snap.cursor, snap.cursor.key.letter),
             (snap.bot, snap.bot.key.letter),
+            (snap.gpt, snap.gpt.key.letter),
         ]
         for (lane, letter) in parts {
-            guard let tint = color(for: lane) else { continue }
+            guard let tint = color(for: lane.tone) else { continue }
             let needle = "\(letter) \(lane.label == "—" ? "—" : "\(Int(lane.usedPct ?? 0))")"
             if let range = raw.range(of: needle) {
                 attr.addAttribute(.foregroundColor, value: tint, range: NSRange(range, in: raw))
             }
         }
+        if let hot = disks.max(by: { $0.usedPct < $1.usedPct }), let tint = color(for: hot.tone) {
+            let needle = "D \(Int(hot.usedPct.rounded()))"
+            if let range = raw.range(of: needle) {
+                attr.addAttribute(.foregroundColor, value: tint, range: NSRange(range, in: raw))
+            }
+        }
         button.attributedTitle = attr
-        button.toolTip = snap.lanes.map { "\($0.key.title) \($0.label) · \($0.sub)" }.joined(separator: "\n")
+        var tip = snap.lanes.map { "\($0.key.title) \($0.label) · \($0.sub)" }
+        tip.append(contentsOf: disks.map { "\($0.name) \(Int($0.usedPct.rounded()))% · \($0.sizeLabel) · \($0.rateLabel)" })
+        button.toolTip = tip.joined(separator: "\n")
     }
 
     private func position(_ panel: NSPanel, size: NSSize, under button: NSView) {

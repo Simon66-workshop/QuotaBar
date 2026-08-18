@@ -1,6 +1,6 @@
-# QuotaBar 1.3.2
+# QuotaBar 1.4
 
-Mac menu bar extra for live Grok / Cursor / Grok Bot usage.
+Mac menu bar extra for live Grok / Cursor / Grok Bot / ChatGPT usage, plus local and external disks.
 
 **Do not open `QuotaBar.xcodeproj`.** That path is retired.
 
@@ -13,12 +13,18 @@ Mac menu bar extra for live Grok / Cursor / Grok Bot usage.
 5. First run only: if asked to install **Command Line Tools**, accept. That is a small Apple installer, not the Xcode app.
 6. After it finishes, double-click `Start QuotaBar.command` again
 
-QuotaBar appears on the right of the menu bar as `G 5 · C 0 · B 4`. No Dock icon.
+QuotaBar appears on the right of the menu bar as `G 5 · C 0 · B 4 · O 12 · D 42`. No Dock icon.
+
+- **G** Grok SuperGrok Heavy weekly
+- **C** Cursor Ultra monthly
+- **B** Grok Bot (Sand) weekly
+- **O** ChatGPT / Codex (5-hour + weekly)
+- **D** fullest mounted disk used %
 
 - **Left-click** the bar → glass panel
 - **Right-click** the bar → native menu (always works even if the panel fails)
 
-The panel header should say **v1.3.2**. If it still says v1.3, the old build is running — quit QuotaBar and run `Start QuotaBar.command` again.
+The panel header should say **v1.4**. If it still says v1.3.x, quit QuotaBar and run `Start QuotaBar.command` again.
 
 Later launches: just double-click `Start QuotaBar.command` again.
 
@@ -26,24 +32,23 @@ Later launches: just double-click `Start QuotaBar.command` again.
 
 - Grok: `~/.grok/auth.json` + in-app device login (writes the file itself)
 - Cursor + Grok Bot: Cursor local session (`state.vscdb`)
+- ChatGPT: `~/.codex/auth.json` after `codex login` (refreshes the token itself)
+- Disks: mounted local + external volumes (auto add/remove), capacity, read/write rate, status
 
 If Cursor shows `—`, open Cursor once, then start QuotaBar again.
 
+If ChatGPT shows `—`, run `codex login` once in Terminal, then click Refresh.
+
+Plug in a USB / Thunderbolt disk and it appears in the panel; eject it and it disappears. Alerts fire on mount, eject, and when a disk crosses 80 / 90 / 95% full.
+
+## 1.4
+
+- ChatGPT / Codex usage (5h + weekly + credits)
+- Local and external disk capacity
+- Auto-detect add / remove
+- Live transfer rate and disk status
+- Disk-full and disk-mount alerts
+
 ## 1.3.2
 
-Safari OAuth used to kill the menu-bar click: `button.action` died, and the only click monitor ignored the bar itself. After Grok setup + browser authorize, left-click did nothing even though usage numbers updated.
-
-- Local + global click monitors (not only `button.action`)
-- Rebuild the status item after the browser opens and when login ends
-- Hide the panel when another app (Safari) becomes front — no zombie panel
-- Never `NSApp.activate` from the bar (that was the trigger)
-- Right-click fallback never assigns `statusItem.menu` (that also ate left-clicks)
-
-## 1.3
-
-- Panel host retain + no `.transient`
-- Right-click fallback menu
-- Colored bar numbers when usage is high
-- Remaining % + copy summary / copy device code
-- Account row (re-sign in / disconnect) when Grok is linked
-- Soft-fail token refresh; paste-only tokens work
+Safari OAuth used to kill the menu-bar click. Local + global monitors, rebuild the status item after the browser opens, never `NSApp.activate`.

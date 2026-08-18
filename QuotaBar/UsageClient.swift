@@ -36,59 +36,80 @@ enum UsageClient {
     }
 
     static func fetchGrok(token ignored: String = "") async -> Lane {
-        guard let auth = TokenReader.loadGrokAuth() else {
+        guard var auth = TokenReader.loadGrokAuth() else {
             if FileManager.default.fileExists(atPath: TokenReader.grokAuthURL().path) {
                 return .error(.grok, message: "CLI 没落盘。auth.json 还是死会话。点 Sign in with Grok，由本 App 写回。")
             }
             return .error(.grok, message: "没有可用 Grok 会话。点 Sign in with Grok，不用跑 grok login。")
         }
-        var access = auth.access
+
         var persistNote: String?
-        if auth.canRefresh {
+        // Refresh only when near expiry. Always-refresh burned tokens.
+        if auth.canRefresh, auth.isStale || auth.access.isEmpty {
             switch await refreshGrokOIDC(auth) {
             case .ok(let next):
                 persistNote = TokenReader.persist(next)
-                access = next.access
-            case .failed(let detail) where detail.contains("invalid_grant"):
+                auth = next
+            case .failed(let detail) where detail.localizedCaseInsensitiveContains("invalid_grant"):
                 TokenReader.markRefreshDead(auth.refresh)
                 if let live = TokenReader.discoverAlternateAuth(), !TokenReader.isDeadRefresh(live.refresh) {
-                    if live.canRefresh {
+                    if live.canRefresh, live.isStale || live.access.isEmpty {
                         switch await refreshGrokOIDC(live) {
                         case .ok(let next):
                             persistNote = TokenReader.persist(next)
-                            access = next.access
+                            auth = next
                         case .failed(let second):
-                            return .error(.grok, message: "Grok refresh invalid_grant; newer CLI session also failed: \(second)")
+                            return .error(.grok, message: "Grok refresh invalid_grant; alternate also failed: \(second)")
                         }
                     } else {
                         persistNote = TokenReader.persist(live)
-                        access = live.access
+                        auth = live
                     }
                 } else {
                     TokenReader.clearStaleAuthLock()
                     return .error(
                         .grok,
-                        message: "CLI 没落盘。0.2.111 登录成功也不写 auth.json / Keychain（loginmint persist failed）。点 Sign in with Grok，由 QuotaBar 写回 key + expires_at。"
+                        message: "CLI 没落盘。点 Sign in with Grok，由 QuotaBar 写回 key + expires_at。"
                     )
                 }
             case .failed(let detail):
-                return .error(.grok, message: "Grok refresh failed: \(detail)")
+                persistNote = "refresh soft-fail: \(detail)"
             }
-        } else if access.isEmpty {
+        } else if auth.access.isEmpty {
             return .empty(.grok, sub: "auth.json has no access or refresh_token")
         }
 
         do {
-            let json = try await get("https://cli-chat-proxy.grok.com/v1/billing?format=credits", token: access)
+            let json = try await get(
+                "https://cli-chat-proxy.grok.com/v1/billing?format=credits",
+                token: auth.access
+            )
             guard var lane = parseGrok(json) else {
                 return .error(.grok, message: "Grok billing 200 but no weekly usage in currentPeriod/productUsage")
             }
-            if let persistNote {
-                lane.sub += "  ·  auth.json write failed: \(persistNote)"
+            if let persistNote, persistNote.contains("write failed") {
+                lane.sub += "  ·  auth.json write failed"
             }
             return lane
         } catch AuthError.http(let code) where code == 401 || code == 403 {
-            return .error(.grok, message: "Grok billing \(code) after \(auth.canRefresh ? "refresh" : "no refresh")")
+            if auth.canRefresh, !TokenReader.isDeadRefresh(auth.refresh) {
+                switch await refreshGrokOIDC(auth) {
+                case .ok(let next):
+                    _ = TokenReader.persist(next)
+                    if let json = try? await get(
+                        "https://cli-chat-proxy.grok.com/v1/billing?format=credits",
+                        token: next.access
+                    ), let lane = parseGrok(json) {
+                        return lane
+                    }
+                case .failed(let detail) where detail.localizedCaseInsensitiveContains("invalid_grant"):
+                    TokenReader.markRefreshDead(auth.refresh)
+                    return .error(.grok, message: "Grok billing \(code) + invalid_grant. 点 Sign in with Grok。")
+                case .failed:
+                    break
+                }
+            }
+            return .error(.grok, message: "Grok billing \(code) after \(auth.canRefresh ? "refresh path" : "no refresh")")
         } catch AuthError.http(let code) {
             return .error(.grok, message: "Grok billing HTTP \(code)")
         } catch {
@@ -96,10 +117,54 @@ enum UsageClient {
         }
     }
 
+    static func fetchChatGPT() async -> Lane {
+        guard var auth = TokenReader.loadCodexAuth() else {
+            return .empty(.gpt, sub: "ChatGPT / Codex  ·  run `codex login` once")
+        }
+        if auth.canRefresh, auth.isStale || auth.access.isEmpty {
+            switch await refreshCodex(auth) {
+            case .ok(let next):
+                TokenReader.persistCodex(next)
+                auth = next
+            case .failed(let detail) where detail.localizedCaseInsensitiveContains("invalid"):
+                return .error(.gpt, message: "ChatGPT session expired — run `codex login`")
+            case .failed:
+                break
+            }
+        }
+        do {
+            let json = try await getChatGPTUsage(auth)
+            if let lane = parseChatGPT(json) { return lane }
+            return .error(.gpt, message: "ChatGPT usage 200 but no rate_limit window")
+        } catch AuthError.http(let code) where code == 401 || code == 403 {
+            if auth.canRefresh {
+                switch await refreshCodex(auth) {
+                case .ok(let next):
+                    TokenReader.persistCodex(next)
+                    if let json = try? await getChatGPTUsage(next), let lane = parseChatGPT(json) {
+                        return lane
+                    }
+                case .failed:
+                    break
+                }
+            }
+            return .error(.gpt, message: "ChatGPT usage \(code) — run `codex login`")
+        } catch AuthError.http(let code) {
+            return .error(.gpt, message: "ChatGPT usage HTTP \(code)")
+        } catch {
+            return .error(.gpt, message: "ChatGPT usage request failed")
+        }
+    }
+
     private enum AuthError: Error { case http(Int), bad }
 
     private enum RefreshResult {
         case ok(GrokAuth)
+        case failed(String)
+    }
+
+    private enum CodexRefresh {
+        case ok(CodexAuth)
         case failed(String)
     }
 
@@ -111,7 +176,7 @@ enum UsageClient {
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("1", forHTTPHeaderField: "Connect-Protocol-Version")
-        req.setValue("QuotaBar/1.0", forHTTPHeaderField: "User-Agent")
+        req.setValue("QuotaBar/1.4", forHTTPHeaderField: "User-Agent")
         req.httpBody = Data("{}".utf8)
         let (data, res) = try await URLSession.shared.data(for: req)
         return try decode(data, res)
@@ -123,9 +188,71 @@ enum UsageClient {
         req.timeoutInterval = timeout
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
-        req.setValue("QuotaBar/1.0", forHTTPHeaderField: "User-Agent")
+        req.setValue("QuotaBar/1.4", forHTTPHeaderField: "User-Agent")
         let (data, res) = try await URLSession.shared.data(for: req)
         return try decode(data, res)
+    }
+
+    private static func getChatGPTUsage(_ auth: CodexAuth) async throws -> [String: Any] {
+        var req = URLRequest(url: URL(string: "https://chatgpt.com/backend-api/wham/usage")!)
+        req.httpMethod = "GET"
+        req.timeoutInterval = timeout
+        req.setValue("Bearer \(auth.access)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue("QuotaBar/1.4", forHTTPHeaderField: "User-Agent")
+        if !auth.accountId.isEmpty {
+            req.setValue(auth.accountId, forHTTPHeaderField: "ChatGPT-Account-ID")
+        }
+        let (data, res) = try await URLSession.shared.data(for: req)
+        do {
+            return try decode(data, res)
+        } catch AuthError.http(let code) where code == 404 || code == 400 {
+            var alt = URLRequest(url: URL(string: "https://chatgpt.com/backend-api/codex/usage")!)
+            alt.httpMethod = "GET"
+            alt.timeoutInterval = timeout
+            alt.setValue("Bearer \(auth.access)", forHTTPHeaderField: "Authorization")
+            alt.setValue("application/json", forHTTPHeaderField: "Accept")
+            alt.setValue("QuotaBar/1.4", forHTTPHeaderField: "User-Agent")
+            if !auth.accountId.isEmpty {
+                alt.setValue(auth.accountId, forHTTPHeaderField: "ChatGPT-Account-ID")
+            }
+            let (data2, res2) = try await URLSession.shared.data(for: alt)
+            return try decode(data2, res2)
+        }
+    }
+
+    private static func refreshCodex(_ auth: CodexAuth) async -> CodexRefresh {
+        guard auth.canRefresh else { return .failed("missing refresh_token") }
+        var req = URLRequest(url: URL(string: "https://auth.openai.com/oauth/token")!)
+        req.httpMethod = "POST"
+        req.timeoutInterval = timeout
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        let body: [String: String] = [
+            "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
+            "grant_type": "refresh_token",
+            "refresh_token": auth.refresh,
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        do {
+            let (data, res) = try await URLSession.shared.data(for: req)
+            let code = (res as? HTTPURLResponse)?.statusCode ?? 0
+            let text = String(data: data, encoding: .utf8) ?? ""
+            if code != 200 {
+                let snippet = text.replacingOccurrences(of: "\n", with: " ")
+                let clipped = snippet.count > 140 ? String(snippet.prefix(140)) : snippet
+                return .failed("token HTTP \(code)\(clipped.isEmpty ? "" : " \(clipped)")")
+            }
+            guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let access = obj["access_token"] as? String, !access.isEmpty
+            else { return .failed("token 200 but no access_token") }
+            let refresh = (obj["refresh_token"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? auth.refresh
+            let expires = TokenReader.jwtExpiry(access)
+                ?? Date().addingTimeInterval(((obj["expires_in"] as? NSNumber)?.doubleValue) ?? 3600)
+            return .ok(CodexAuth(access: access, refresh: refresh, accountId: auth.accountId, expiresAt: expires))
+        } catch {
+            return .failed("token request \(error.localizedDescription)")
+        }
     }
 
     private static func decode(_ data: Data, _ res: URLResponse) throws -> [String: Any] {
@@ -298,5 +425,56 @@ enum UsageClient {
         var bits = ["Sand weekly usage"]
         if let r = resetLabel(json["nextResetTimestampUtc"]) { bits.append(r) }
         return .used(.bot, percent: used, sub: bits.joined(separator: "  ·  "))
+    }
+
+    private static func parseChatGPT(_ json: [String: Any]) -> Lane? {
+        let rate = json["rate_limit"] as? [String: Any]
+            ?? json["rate_limits"] as? [String: Any]
+            ?? json
+        let primary = windowDict(rate["primary_window"] ?? rate["primary"])
+        let secondary = windowDict(rate["secondary_window"] ?? rate["secondary"])
+        let primaryUsed = num(primary?["used_percent"]) ?? num(json["used_percent"])
+        let weeklyUsed = num(secondary?["used_percent"])
+        guard primaryUsed != nil || weeklyUsed != nil else { return nil }
+
+        let used = max(primaryUsed ?? 0, weeklyUsed ?? 0)
+        let plan = (json["plan_type"] as? String)
+            ?? (json["plan"] as? String)
+            ?? (rate["plan_type"] as? String)
+            ?? "ChatGPT"
+        var credits: Double?
+        if let bag = json["credits"] as? [String: Any] {
+            credits = num(bag["balance"]) ?? num(bag["available_count"])
+        } else {
+            credits = num(json["credits"])
+        }
+
+        var details: [LaneDetail] = []
+        if let primaryUsed {
+            details.append(LaneDetail(label: windowName(primary, fallback: "5h"), usedPct: primaryUsed))
+        }
+        if let weeklyUsed {
+            details.append(LaneDetail(label: windowName(secondary, fallback: "Weekly"), usedPct: weeklyUsed))
+        }
+
+        var bits: [String] = [plan.replacingOccurrences(of: "_", with: " ")]
+        if let credits { bits.append("\(Int(credits)) credits") }
+        if let r = resetLabel(primary?["reset_at"] ?? secondary?["reset_at"] ?? primary?["resets_at"]) {
+            bits.append(r)
+        }
+        return .used(.gpt, percent: used, sub: bits.joined(separator: "  ·  "), details: details)
+    }
+
+    private static func windowDict(_ value: Any?) -> [String: Any]? {
+        value as? [String: Any]
+    }
+
+    private static func windowName(_ window: [String: Any]?, fallback: String) -> String {
+        guard let secs = num(window?["limit_window_seconds"]) ?? num(window?["window_minutes"]).map({ $0 * 60 }) else {
+            return fallback
+        }
+        if secs <= 6 * 3600 { return "5h" }
+        if secs <= 2 * 24 * 3600 { return "Daily" }
+        return "Weekly"
     }
 }

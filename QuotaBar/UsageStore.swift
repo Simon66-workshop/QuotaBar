@@ -13,16 +13,20 @@ final class UsageStore: ObservableObject {
     @Published var deviceNote: String = ""
     @Published var loginInProgress = false
     @Published var copiedNote: String = ""
+    @Published var disks: [DiskVolume] = []
 
     var onWillOpenBrowser: (() -> Void)?
     var onLoginFinished: (() -> Void)?
 
     private var timer: AnyCancellable?
+    private var diskTimer: AnyCancellable?
     private var lastAlert: [LaneKey: Int] = [:]
+    private var lastDiskAlert: [String: Int] = [:]
     private var authWatcher: DispatchSourceFileSystemObject?
     private var watchFd: Int32 = -1
     private var deviceTask: Task<Void, Never>?
     private var watchDebounce: DispatchWorkItem?
+    private var disksPrimed = false
 
     init() {
         launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
@@ -31,11 +35,20 @@ final class UsageStore: ObservableObject {
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         }
         watchGrokAuthFile()
+        DiskMonitor.start { [weak self] in
+            self?.tickDisks()
+        }
+        tickDisks()
         Task { await refresh() }
         timer = Timer.publish(every: 90, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
                 Task { await self?.refresh() }
+            }
+        diskTimer = Timer.publish(every: 2, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.tickDisks()
             }
     }
 
@@ -123,10 +136,19 @@ final class UsageStore: ObservableObject {
         flashCopied("User code copied")
     }
 
+    func connectChatGPT(_ raw: String) async {
+        guard TokenReader.saveCodexPasted(raw) else { return }
+        await refresh()
+    }
+
     func copySummary() {
-        let text = snap.lanes.map { lane in
+        var lines = snap.lanes.map { lane in
             "\(lane.key.title): \(lane.label) — \(lane.sub)"
-        }.joined(separator: "\n")
+        }
+        for disk in disks {
+            lines.append("\(disk.name): \(Int(disk.usedPct.rounded()))% — \(disk.sizeLabel) · \(disk.statusLabel) · \(disk.rateLabel)")
+        }
+        let text = lines.joined(separator: "\n")
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         flashCopied("Summary copied")
@@ -146,16 +168,21 @@ final class UsageStore: ObservableObject {
         async let grok = UsageClient.fetchGrok()
         async let cursor = UsageClient.fetchCursor(token: cursorTok)
         async let bot = UsageClient.fetchSand(token: cursorTok)
+        async let gpt = UsageClient.fetchChatGPT()
         let grokLane = await grok
+        let gptLane = await gpt
         let next = Snapshot(
             grok: grokLane,
             cursor: await cursor,
             bot: await bot,
+            gpt: gptLane,
             fetchedAt: Date(),
             grokLinked: grokLane.tone != .empty && grokLane.tone != .error,
-            cursorLinked: !cursorTok.isEmpty
+            cursorLinked: !cursorTok.isEmpty,
+            gptLinked: gptLane.tone != .empty && gptLane.tone != .error
         )
         snap = next
+        tickDisks()
         notifyIfNeeded(next)
     }
 
@@ -184,6 +211,8 @@ final class UsageStore: ObservableObject {
 
     func quit() {
         stopWatch()
+        diskTimer?.cancel()
+        DiskMonitor.stop()
         deviceTask?.cancel()
         NSApplication.shared.terminate(nil)
     }
@@ -238,6 +267,71 @@ final class UsageStore: ObservableObject {
                 trigger: nil
             )
             UNUserNotificationCenter.current().add(req)
+        }
+        for disk in disks {
+            guard disk.usedPct >= 80 else { continue }
+            let bucket = disk.usedPct >= 95 ? 95 : disk.usedPct >= 90 ? 90 : 80
+            if lastDiskAlert[disk.id] == bucket { continue }
+            lastDiskAlert[disk.id] = bucket
+            let content = UNMutableNotificationContent()
+            content.title = "\(disk.name) is \(Int(disk.usedPct.rounded()))% full"
+            content.body = "\(disk.sizeLabel) · \(disk.kindLabel)"
+            content.sound = .default
+            let req = UNNotificationRequest(
+                identifier: "quotabar.disk.\(disk.id).\(bucket)",
+                content: content,
+                trigger: nil
+            )
+            UNUserNotificationCenter.current().add(req)
+        }
+    }
+
+    private func tickDisks() {
+        let previous = disks
+        var next = DiskMonitor.snapshot()
+        if disksPrimed {
+            let oldIds = Set(previous.map(\.id))
+            let newIds = Set(next.map(\.id))
+            let added = next.filter { !oldIds.contains($0.id) }
+            let removed = previous.filter { !newIds.contains($0.id) }
+            if !added.isEmpty || !removed.isEmpty {
+                announceDisks(added: added, removed: removed)
+            }
+            next = next.map { disk in
+                var copy = disk
+                if added.contains(where: { $0.id == disk.id }) {
+                    copy.justChanged = "just mounted"
+                }
+                return copy
+            }
+        }
+        disksPrimed = true
+        lastDiskAlert = lastDiskAlert.filter { key, _ in next.contains(where: { $0.id == key }) }
+        disks = next
+        if disksPrimed { notifyIfNeeded(snap) }
+    }
+
+    private func announceDisks(added: [DiskVolume], removed: [DiskVolume]) {
+        let bits = added.map { "\($0.name) mounted · \($0.sizeLabel)" }
+            + removed.map { "\($0.name) ejected" }
+        if !bits.isEmpty { flashCopied(bits.joined(separator: "  ·  ")) }
+        guard notifyEnabled else { return }
+        for disk in added {
+            let content = UNMutableNotificationContent()
+            content.title = "\(disk.name) mounted"
+            content.body = "\(disk.kindLabel) · \(disk.sizeLabel)"
+            content.sound = .default
+            UNUserNotificationCenter.current().add(
+                UNNotificationRequest(identifier: "quotabar.disk.add.\(disk.id).\(Int(Date().timeIntervalSince1970))", content: content, trigger: nil)
+            )
+        }
+        for disk in removed {
+            let content = UNMutableNotificationContent()
+            content.title = "\(disk.name) ejected"
+            content.body = disk.kindLabel
+            UNUserNotificationCenter.current().add(
+                UNNotificationRequest(identifier: "quotabar.disk.remove.\(disk.id).\(Int(Date().timeIntervalSince1970))", content: content, trigger: nil)
+            )
         }
     }
 }

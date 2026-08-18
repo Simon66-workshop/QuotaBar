@@ -31,16 +31,28 @@ enum TokenReader {
         clearStaleAuthLock()
         let disk = loadGrokAuthFromDisk()
         let saved = KeychainStore.loadAuth()
+
         if let d = disk, d.canRefresh, !isDeadRefresh(d.refresh) { return d }
         if let s = saved, s.canRefresh, !isDeadRefresh(s.refresh) { return s }
         if let alt = discoverAlternateAuth() { return alt }
-        if let d = disk, !d.canRefresh || isDeadRefresh(d.refresh) { return nil }
-        return disk ?? saved
+
+        // Fall back to any still-usable access token (paste-only / no refresh).
+        if let d = disk, !d.access.isEmpty, (d.refresh.isEmpty || !isDeadRefresh(d.refresh)) {
+            return d
+        }
+        if let s = saved, !s.access.isEmpty, (s.refresh.isEmpty || !isDeadRefresh(s.refresh)) {
+            return s
+        }
+        return nil
     }
 
     static func markRefreshDead(_ refresh: String) {
         guard !refresh.isEmpty else { return }
         UserDefaults.standard.set(fingerprint(refresh), forKey: deadKey)
+    }
+
+    static func clearDeadRefresh() {
+        UserDefaults.standard.removeObject(forKey: deadKey)
     }
 
     static func isDeadRefresh(_ refresh: String) -> Bool {
@@ -384,15 +396,19 @@ enum TokenReader {
         let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
         guard sqlite3_open_v2(url.path, &db, flags, nil) == SQLITE_OK, let db else { return nil }
         defer { sqlite3_close(db) }
-        let sql = "SELECT value FROM ItemTable WHERE key IN ('cursorAuth/accessToken','cursorAuth/cachedAccessToken') LIMIT 1;"
+        let sql = "SELECT key, value FROM ItemTable WHERE key IN ('cursorAuth/accessToken','cursorAuth/cachedAccessToken');"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return nil }
         defer { sqlite3_finalize(stmt) }
-        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
-        if let cstr = sqlite3_column_text(stmt, 0) {
-            return String(cString: cstr)
+        var access: String?
+        var cached: String?
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let key = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
+            let val = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+            if key.hasSuffix("accessToken") { access = val }
+            if key.hasSuffix("cachedAccessToken") { cached = val }
         }
-        return nil
+        return access ?? cached
     }
 
     private static func readCursorJSON(_ url: URL) -> String? {
@@ -426,6 +442,105 @@ enum TokenReader {
             return String(last)
         }
         return trimmed
+    }
+
+    static func loadCodexAuth() -> CodexAuth? {
+        for url in codexCandidateFiles() {
+            if let auth = extractCodex(from: url) { return auth }
+        }
+        return nil
+    }
+
+    static func persistCodex(_ auth: CodexAuth) {
+        let url = home().appendingPathComponent(".codex/auth.json")
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        var bag: [String: Any] = [:]
+        if let data = try? Data(contentsOf: url),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        {
+            bag = obj
+        }
+        var tokens = bag["tokens"] as? [String: Any] ?? [:]
+        tokens["access_token"] = auth.access
+        if !auth.refresh.isEmpty { tokens["refresh_token"] = auth.refresh }
+        if !auth.accountId.isEmpty { tokens["account_id"] = auth.accountId }
+        bag["tokens"] = tokens
+        bag["auth_mode"] = bag["auth_mode"] ?? "chatgpt"
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withInternetDateTime]
+        bag["last_refresh"] = fmt.string(from: Date())
+        if let data = try? JSONSerialization.data(withJSONObject: bag, options: [.prettyPrinted, .sortedKeys]) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    static func saveCodexPasted(_ raw: String) -> Bool {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        if let data = trimmed.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data),
+           let auth = extractCodex(from: obj)
+        {
+            persistCodex(auth)
+            return true
+        }
+        let token = scrub(trimmed)
+        guard token.count >= 20 else { return false }
+        persistCodex(CodexAuth(access: token, refresh: "", accountId: "", expiresAt: jwtExpiry(token) ?? .distantPast))
+        return true
+    }
+
+    static func jwtExpiry(_ token: String) -> Date? {
+        let parts = token.split(separator: ".")
+        guard parts.count >= 2 else { return nil }
+        var b64 = parts[1].replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        let pad = 4 - b64.count % 4
+        if pad < 4 { b64 += String(repeating: "=", count: pad) }
+        guard let data = Data(base64Encoded: b64),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        if let n = obj["exp"] as? NSNumber {
+            return Date(timeIntervalSince1970: n.doubleValue)
+        }
+        if let s = obj["exp"] as? String, let n = Double(s) {
+            return Date(timeIntervalSince1970: n)
+        }
+        return nil
+    }
+
+    private static func codexCandidateFiles() -> [URL] {
+        let h = home()
+        return [
+            h.appendingPathComponent(".codex/auth.json"),
+            h.appendingPathComponent(".config/codex/auth.json"),
+            h.appendingPathComponent("Library/Application Support/Codex/auth.json"),
+            h.appendingPathComponent("Library/Application Support/com.openai.codex/auth.json"),
+        ]
+    }
+
+    private static func extractCodex(from url: URL) -> CodexAuth? {
+        guard let data = try? Data(contentsOf: url),
+              let obj = try? JSONSerialization.jsonObject(with: data)
+        else { return nil }
+        return extractCodex(from: obj)
+    }
+
+    private static func extractCodex(from obj: Any) -> CodexAuth? {
+        guard let dict = obj as? [String: Any] else { return nil }
+        let tokens = dict["tokens"] as? [String: Any] ?? dict
+        let access = (tokens["access_token"] as? String)
+            ?? (dict["access_token"] as? String)
+            ?? (dict["OPENAI_API_KEY"] as? String)
+            ?? ""
+        guard !access.isEmpty, access.count >= 20 else { return nil }
+        let refresh = (tokens["refresh_token"] as? String) ?? (dict["refresh_token"] as? String) ?? ""
+        let account = (tokens["account_id"] as? String)
+            ?? (dict["account_id"] as? String)
+            ?? (dict["last_active_account_id"] as? String)
+            ?? ((dict["account"] as? [String: Any])?["id"] as? String)
+            ?? ""
+        let exp = jwtExpiry(access) ?? .distantPast
+        return CodexAuth(access: access, refresh: refresh, accountId: account, expiresAt: exp)
     }
 }
 
