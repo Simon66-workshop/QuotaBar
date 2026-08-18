@@ -8,10 +8,7 @@ struct MenuPanel: View {
             header
             if !listedLanes.isEmpty {
                 sectionLabel("Usage")
-                GridHeader(meta: "Left", extra: "Window", action: false)
-                ForEach(Array(listedLanes.enumerated()), id: \.element.id) { index, lane in
-                    LaneRow(lane: lane, zebra: index % 2 == 1)
-                }
+                UsageTable(lanes: listedLanes)
             }
             if store.snap.isLinked(.grok) {
                 AccountRow()
@@ -44,7 +41,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.8.3")
+                Text("v1.8.4")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -239,38 +236,104 @@ private enum Col {
     static let action: CGFloat = 28
 }
 
-private struct GridHeader: View {
-    let meta: String
-    let extra: String
-    var action: Bool = false
+private struct UsageTable: View {
+    let lanes: [Lane]
 
     var body: some View {
-        HStack(spacing: Col.gap) {
-            Text("")
-                .frame(width: Col.mark)
-            Text("Name")
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text("Used")
-                .frame(width: Col.used, alignment: .trailing)
-            Color.clear
-                .frame(width: Col.bar)
-            Text(meta)
-                .frame(width: Col.meta, alignment: .trailing)
-            Text(extra)
-                .frame(width: Col.extra, alignment: .trailing)
-            if action {
-                Color.clear
-                    .frame(width: Col.action)
+        Grid(alignment: .center, horizontalSpacing: Col.gap, verticalSpacing: 0) {
+            GridRow {
+                Text("").frame(width: Col.mark)
+                Text("Name").gridHeader()
+                Text("Used").frame(width: Col.used, alignment: .trailing)
+                Color.clear.frame(width: Col.bar)
+                Text("Left").frame(width: Col.meta, alignment: .trailing)
+                Text("Window").frame(width: Col.extra, alignment: .trailing)
+                Color.clear.frame(width: Col.action)
+            }
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(.tertiary)
+            ForEach(Array(lanes.enumerated()), id: \.element.id) { index, lane in
+                laneRow(lane, zebra: index % 2 == 1)
+                if (lane.key == .cursor || lane.key == .claude), !lane.details.isEmpty {
+                    ForEach(lane.details) { detail in
+                        GridRow {
+                            Color.clear.frame(width: Col.mark)
+                            Text(detail.label)
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Text("\(Int(detail.usedPct.rounded()))%")
+                                .font(.system(size: 11, weight: .medium).monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .frame(width: Col.used, alignment: .trailing)
+                            Meter(value: detail.usedPct, tone: .ok)
+                            Color.clear.frame(width: Col.meta)
+                            Color.clear.frame(width: Col.extra)
+                            Color.clear.frame(width: Col.action)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
             }
         }
-        .font(.system(size: 9, weight: .semibold))
-        .foregroundStyle(.tertiary)
-        .padding(.bottom, 3)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Color.white.opacity(0.12))
-                .frame(height: 0.5)
+        .padding(.top, 2)
+        .overlay(alignment: .top) {
+            Rectangle().fill(Color.white.opacity(0.12)).frame(height: 0.5).padding(.top, 16)
         }
+    }
+
+        @ViewBuilder
+        private func laneRow(_ lane: Lane, zebra: Bool) -> some View {
+        GridRow {
+            Text(lane.key.letter)
+                .font(.system(size: 11, weight: .bold).monospaced())
+                .foregroundStyle(lane.tone == .ok ? Color.secondary : toneColor(lane.tone))
+                .frame(width: Col.mark, alignment: .center)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(lane.key.title)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                if lane.tone == .error || lane.tone == .empty {
+                    Text(lane.sub)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Text(usedText(lane))
+                .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                .foregroundStyle(lane.tone == .ok ? Color.primary : toneColor(lane.tone))
+                .frame(width: Col.used, alignment: .trailing)
+            Meter(value: lane.usedPct ?? 0, tone: lane.tone)
+            Text(leftText(lane))
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: Col.meta, alignment: .trailing)
+            Text(lane.key.windowShort)
+                .font(.system(size: 10.5))
+                .foregroundStyle(.tertiary)
+                .frame(width: Col.extra, alignment: .trailing)
+                .lineLimit(1)
+            Color.clear.frame(width: Col.action)
+        }
+        .padding(.vertical, 5)
+        .padding(.horizontal, 2)
+        .background(zebra ? Color.white.opacity(0.045) : Color.clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+    }
+
+    private func usedText(_ lane: Lane) -> String {
+        if let n = lane.usedPct { return "\(Int(n))%" }
+        return "—"
+    }
+
+    private func leftText(_ lane: Lane) -> String {
+        guard let left = lane.remainingPct, lane.tone == .ok || lane.tone == .warn || lane.tone == .crit else {
+            return "—"
+        }
+        return "\(Int(left))%"
     }
 }
 
@@ -307,86 +370,9 @@ private func toneColor(_ tone: Tone) -> Color {
     }
 }
 
-private struct LaneRow: View {
-    let lane: Lane
-    var zebra: Bool = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: Col.gap) {
-                Text(lane.key.letter)
-                    .font(.system(size: 11, weight: .bold).monospaced())
-                    .foregroundStyle(lane.tone == .ok ? Color.secondary : toneColor(lane.tone))
-                    .frame(width: Col.mark, alignment: .center)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(lane.key.title)
-                        .font(.system(size: 12, weight: .medium))
-                        .lineLimit(1)
-                    if lane.tone == .error || lane.tone == .empty {
-                        Text(lane.sub)
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                Text(usedText)
-                    .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(lane.tone == .ok ? Color.primary : toneColor(lane.tone))
-                    .frame(width: Col.used, alignment: .trailing)
-                Meter(value: lane.usedPct ?? 0, tone: lane.tone)
-                Text(leftText)
-                    .font(.system(size: 11).monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(width: Col.meta, alignment: .trailing)
-                Text(windowText)
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(.tertiary)
-                    .frame(width: Col.extra, alignment: .trailing)
-                    .lineLimit(1)
-            }
-            if showsDetails {
-                ForEach(lane.details) { detail in
-                    HStack(spacing: Col.gap) {
-                        Color.clear.frame(width: Col.mark)
-                        Text(detail.label)
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Text("\(Int(detail.usedPct.rounded()))%")
-                            .font(.system(size: 11, weight: .medium).monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .frame(width: Col.used, alignment: .trailing)
-                        Meter(value: detail.usedPct, tone: .ok)
-                        Color.clear.frame(width: Col.meta)
-                        Color.clear.frame(width: Col.extra)
-                    }
-                }
-            }
-        }
-        .padding(.vertical, 5)
-        .padding(.horizontal, 2)
-        .background(zebra ? Color.white.opacity(0.045) : Color.clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-    }
-
-    private var usedText: String {
-        if let n = lane.usedPct { return "\(Int(n))%" }
-        return "—"
-    }
-
-    private var leftText: String {
-        guard let left = lane.remainingPct, lane.tone == .ok || lane.tone == .warn || lane.tone == .crit else {
-            return "—"
-        }
-        return "\(Int(left))%"
-    }
-
-    private var windowText: String { lane.key.windowShort }
-
-    private var showsDetails: Bool {
-        (lane.key == .cursor || lane.key == .claude) && !lane.details.isEmpty
+private extension Text {
+    func gridHeader() -> some View {
+        self.frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -531,10 +517,33 @@ private struct DiskSection: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             } else if !store.disks.isEmpty {
-                GridHeader(meta: "Free", extra: "I/O", action: true)
-                    .padding(.bottom, 1)
-                ForEach(Array(store.disks.prefix(8).enumerated()), id: \.element.id) { index, disk in
-                    DiskRow(disk: disk, zebra: index % 2 == 1)
+                Grid(alignment: .center, horizontalSpacing: Col.gap, verticalSpacing: 0) {
+                    GridRow {
+                        Text("").frame(width: Col.mark)
+                        Text("Name").frame(maxWidth: .infinity, alignment: .leading)
+                        Text("Used").frame(width: Col.used, alignment: .trailing)
+                        Color.clear.frame(width: Col.bar)
+                        Text("Free").frame(width: Col.meta, alignment: .trailing)
+                        Text("I/O").frame(width: Col.extra, alignment: .trailing)
+                        Color.clear.frame(width: Col.action)
+                    }
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    ForEach(Array(store.disks.prefix(8).enumerated()), id: \.element.id) { index, disk in
+                        diskRow(disk, zebra: index % 2 == 1)
+                        if store.expandedDiskID == disk.id {
+                            GridRow {
+                                Color.clear.frame(width: Col.mark)
+                                healthCell(disk)
+                                    .gridCellColumns(5)
+                                Color.clear.frame(width: Col.action)
+                            }
+                        }
+                    }
+                }
+                .padding(.top, 2)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(Color.white.opacity(0.12)).frame(height: 0.5).padding(.top, 16)
                 }
             }
             if store.disks.count > 8 {
@@ -590,88 +599,77 @@ private struct DiskSection: View {
         if ext == 0 { return "\(n)" }
         return "\(n)  ·  \(ext) external"
     }
-}
 
-private struct DiskRow: View {
-    @EnvironmentObject private var store: UsageStore
-    let disk: DiskVolume
-    var zebra: Bool = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: Col.gap) {
-                Button {
-                    store.toggleInspect(disk)
-                } label: {
-                    HStack(spacing: Col.gap) {
-                        Text(disk.barLetter)
-                            .font(.system(size: 11, weight: .bold).monospaced())
-                            .foregroundStyle(disk.kind == .external ? Color.accentColor : Color.secondary)
-                            .frame(width: Col.mark, alignment: .center)
-                        HStack(spacing: 4) {
-                            Text(disk.name)
-                                .font(.system(size: 12, weight: .medium))
-                                .lineLimit(1)
-                            if disk.justChanged != nil {
-                                Text("new")
-                                    .font(.system(size: 9, weight: .semibold))
-                                    .foregroundStyle(.orange)
-                            } else if disk.suggestedIgnore, let hint = disk.ignoreHint {
-                                Text(hint)
-                                    .font(.system(size: 9, weight: .medium))
-                                    .foregroundStyle(.tertiary)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        Text("\(Int(disk.usedPct.rounded()))%")
-                            .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                            .foregroundStyle(disk.tone == .ok ? Color.primary : toneColor(disk.tone))
-                            .frame(width: Col.used, alignment: .trailing)
-                        Meter(value: disk.usedPct, tone: disk.tone)
-                        Text(disk.freeLabel)
-                            .font(.system(size: 11).monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .frame(width: Col.meta, alignment: .trailing)
-                            .lineLimit(1)
-                        Text(disk.rateShort)
-                            .font(.system(size: 10.5).monospacedDigit())
-                            .foregroundStyle(disk.rateShort == "—" ? .tertiary : .secondary)
-                            .frame(width: Col.extra, alignment: .trailing)
-                            .lineLimit(1)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                Button("Hide") { store.ignoreDisk(disk.id) }
-                    .buttonStyle(.borderless)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.tertiary)
-                    .frame(width: Col.action, alignment: .trailing)
+    @ViewBuilder
+    private func diskRow(_ disk: DiskVolume, zebra: Bool) -> some View {
+        GridRow {
+            Button {
+                store.toggleInspect(disk)
+            } label: {
+                Text(disk.barLetter)
+                    .font(.system(size: 11, weight: .bold).monospaced())
+                    .foregroundStyle(disk.kind == .external ? Color.accentColor : Color.secondary)
+                    .frame(width: Col.mark, alignment: .center)
             }
-            if store.expandedDiskID == disk.id {
-                HStack(alignment: .firstTextBaseline, spacing: Col.gap) {
-                    Color.clear.frame(width: Col.mark)
-                    Group {
-                        if store.healthBusyID == disk.id {
-                            Text("Reading SMART…")
-                                .foregroundStyle(.tertiary)
-                        } else if let health = store.diskHealth[disk.id] {
-                            Text(healthLine(health))
-                                .foregroundStyle(health.smart.lowercased().contains("fail") ? .orange : .tertiary)
-                        }
+            .buttonStyle(.plain)
+            Button {
+                store.toggleInspect(disk)
+            } label: {
+                HStack(spacing: 4) {
+                    Text(disk.name)
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
+                    if disk.justChanged != nil {
+                        Text("new")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.orange)
                     }
-                    .font(.system(size: 10.5))
-                    .fixedSize(horizontal: false, vertical: true)
-                    Color.clear.frame(width: Col.action)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            Text("\(Int(disk.usedPct.rounded()))%")
+                .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                .foregroundStyle(disk.tone == .ok ? Color.primary : toneColor(disk.tone))
+                .frame(width: Col.used, alignment: .trailing)
+            Meter(value: disk.usedPct, tone: disk.tone)
+            Text(disk.freeLabel)
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: Col.meta, alignment: .trailing)
+                .lineLimit(1)
+            Text(disk.rateShort)
+                .font(.system(size: 10.5).monospacedDigit())
+                .foregroundStyle(disk.rateShort == "—" ? .tertiary : .secondary)
+                .frame(width: Col.extra, alignment: .trailing)
+                .lineLimit(1)
+            Button("Hide") { store.ignoreDisk(disk.id) }
+                .buttonStyle(.borderless)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.tertiary)
+                .frame(width: Col.action, alignment: .trailing)
         }
         .padding(.vertical, 5)
         .padding(.horizontal, 2)
         .background(zebra ? Color.white.opacity(0.045) : Color.clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
     }
 
-    private func healthLine(_ health: DiskHealth) -> String {
+    @ViewBuilder
+    private func healthCell(_ disk: DiskVolume) -> some View {
+        if store.healthBusyID == disk.id {
+            Text("Reading SMART…")
+                .font(.system(size: 10.5))
+                .foregroundStyle(.tertiary)
+        } else if let health = store.diskHealth[disk.id] {
+            Text(healthLine(health, disk))
+                .font(.system(size: 10.5))
+                .foregroundStyle(health.smart.lowercased().contains("fail") ? .orange : .tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func healthLine(_ health: DiskHealth, _ disk: DiskVolume) -> String {
         var parts = [health.smart]
         if !health.bus.isEmpty { parts.append(health.bus) }
         parts.append(disk.sizeLabel)

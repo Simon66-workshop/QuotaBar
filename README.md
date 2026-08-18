@@ -1,4 +1,4 @@
-# QuotaBar 1.8.3
+# QuotaBar 1.8.4
 
 Mac menu bar extra for live Grok / Cursor / Grok Bot / ChatGPT / Claude Code usage, plus local and external disks.
 
@@ -25,7 +25,7 @@ QuotaBar appears on the right of the menu bar. Unconnected services stay off the
 - **Left-click** the bar → glass panel (details, connect, hide disks)
 - **Right-click** the bar → short native menu (refresh / copy / alerts / quit)
 
-The panel header should say **v1.8.3**. If it still says v1.8.2, quit QuotaBar and run `Start QuotaBar.command` again.
+The panel header should say **v1.8.4**. If it still says v1.8.2, quit QuotaBar and run `Start QuotaBar.command` again.
 
 Later launches: just double-click `Start QuotaBar.command` again.
 
@@ -47,7 +47,7 @@ Plug in a USB / Thunderbolt disk and it appears in the panel; eject it and it di
 
 The bar only turns orange / red on a token that is actually high (85%+ services, 90%+ disks). A normal 60–80% day stays neutral.
 
-## 1.8.3
+## 1.8.4
 
 Usage and disk rows share one column grid (letter · name · used · bar · left/free · window/I/O). Capsule meters replace ProgressView so numbers line up. Section labels sit above the table, zebra rows help scanning.
 
