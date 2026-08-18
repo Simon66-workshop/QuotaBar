@@ -156,6 +156,45 @@ enum UsageClient {
         }
     }
 
+    static func fetchClaude() async -> Lane {
+        guard var auth = TokenReader.loadClaudeAuth() else {
+            return .empty(.claude, sub: "Claude Code 5h + 7d  ·  run `claude` once")
+        }
+        if auth.canRefresh, auth.isStale || auth.access.isEmpty {
+            switch await refreshClaude(auth) {
+            case .ok(let next):
+                TokenReader.persistClaude(next)
+                auth = next
+            case .failed(let detail) where detail.localizedCaseInsensitiveContains("invalid"):
+                return .error(.claude, message: "Claude session expired — run `claude` once")
+            case .failed:
+                break
+            }
+        }
+        do {
+            let json = try await getClaudeUsage(auth)
+            if let lane = parseClaude(json, auth: auth) { return lane }
+            return .error(.claude, message: "Claude usage 200 but no 5h / 7d window")
+        } catch AuthError.http(let code) where code == 401 || code == 403 {
+            if auth.canRefresh {
+                switch await refreshClaude(auth) {
+                case .ok(let next):
+                    TokenReader.persistClaude(next)
+                    if let json = try? await getClaudeUsage(next), let lane = parseClaude(json, auth: next) {
+                        return lane
+                    }
+                case .failed:
+                    break
+                }
+            }
+            return .error(.claude, message: "Claude usage \(code) — run `claude` once")
+        } catch AuthError.http(let code) {
+            return .error(.claude, message: "Claude usage HTTP \(code)")
+        } catch {
+            return .error(.claude, message: "Claude usage request failed")
+        }
+    }
+
     private enum AuthError: Error { case http(Int), bad }
 
     private enum RefreshResult {
@@ -168,6 +207,11 @@ enum UsageClient {
         case failed(String)
     }
 
+    private enum ClaudeRefresh {
+        case ok(ClaudeAuth)
+        case failed(String)
+    }
+
     private static func post(_ url: String, token: String) async throws -> [String: Any] {
         var req = URLRequest(url: URL(string: url)!)
         req.httpMethod = "POST"
@@ -176,7 +220,7 @@ enum UsageClient {
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("1", forHTTPHeaderField: "Connect-Protocol-Version")
-        req.setValue("QuotaBar/1.4", forHTTPHeaderField: "User-Agent")
+        req.setValue("QuotaBar/1.5", forHTTPHeaderField: "User-Agent")
         req.httpBody = Data("{}".utf8)
         let (data, res) = try await URLSession.shared.data(for: req)
         return try decode(data, res)
@@ -188,7 +232,7 @@ enum UsageClient {
         req.timeoutInterval = timeout
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
-        req.setValue("QuotaBar/1.4", forHTTPHeaderField: "User-Agent")
+        req.setValue("QuotaBar/1.5", forHTTPHeaderField: "User-Agent")
         let (data, res) = try await URLSession.shared.data(for: req)
         return try decode(data, res)
     }
@@ -199,7 +243,7 @@ enum UsageClient {
         req.timeoutInterval = timeout
         req.setValue("Bearer \(auth.access)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
-        req.setValue("QuotaBar/1.4", forHTTPHeaderField: "User-Agent")
+        req.setValue("QuotaBar/1.5", forHTTPHeaderField: "User-Agent")
         if !auth.accountId.isEmpty {
             req.setValue(auth.accountId, forHTTPHeaderField: "ChatGPT-Account-ID")
         }
@@ -212,7 +256,7 @@ enum UsageClient {
             alt.timeoutInterval = timeout
             alt.setValue("Bearer \(auth.access)", forHTTPHeaderField: "Authorization")
             alt.setValue("application/json", forHTTPHeaderField: "Accept")
-            alt.setValue("QuotaBar/1.4", forHTTPHeaderField: "User-Agent")
+            alt.setValue("QuotaBar/1.5", forHTTPHeaderField: "User-Agent")
             if !auth.accountId.isEmpty {
                 alt.setValue(auth.accountId, forHTTPHeaderField: "ChatGPT-Account-ID")
             }
@@ -253,6 +297,93 @@ enum UsageClient {
         } catch {
             return .failed("token request \(error.localizedDescription)")
         }
+    }
+
+    private static func getClaudeUsage(_ auth: ClaudeAuth) async throws -> [String: Any] {
+        var req = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
+        req.httpMethod = "GET"
+        req.timeoutInterval = timeout
+        req.setValue("Bearer \(auth.access)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        req.setValue("QuotaBar/1.5", forHTTPHeaderField: "User-Agent")
+        let (data, res) = try await URLSession.shared.data(for: req)
+        return try decode(data, res)
+    }
+
+    private static func refreshClaude(_ auth: ClaudeAuth) async -> ClaudeRefresh {
+        guard auth.canRefresh else { return .failed("missing refresh_token") }
+        var req = URLRequest(url: URL(string: "https://console.anthropic.com/v1/oauth/token")!)
+        req.httpMethod = "POST"
+        req.timeoutInterval = timeout
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue("anthropic", forHTTPHeaderField: "User-Agent")
+        let body: [String: String] = [
+            "grant_type": "refresh_token",
+            "refresh_token": auth.refresh,
+            "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        do {
+            let (data, res) = try await URLSession.shared.data(for: req)
+            let code = (res as? HTTPURLResponse)?.statusCode ?? 0
+            let text = String(data: data, encoding: .utf8) ?? ""
+            if code != 200 {
+                // Fallback older path used by some CLI builds.
+                if code == 404 || code == 405 {
+                    return await refreshClaudeAlt(auth)
+                }
+                let snippet = text.replacingOccurrences(of: "\n", with: " ")
+                let clipped = snippet.count > 140 ? String(snippet.prefix(140)) : snippet
+                return .failed("token HTTP \(code)\(clipped.isEmpty ? "" : " \(clipped)")")
+            }
+            return parseClaudeToken(data, fallback: auth)
+        } catch {
+            return .failed("token request \(error.localizedDescription)")
+        }
+    }
+
+    private static func refreshClaudeAlt(_ auth: ClaudeAuth) async -> ClaudeRefresh {
+        var req = URLRequest(url: URL(string: "https://platform.claude.com/v1/oauth/token")!)
+        req.httpMethod = "POST"
+        req.timeoutInterval = timeout
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        let body: [String: String] = [
+            "grant_type": "refresh_token",
+            "refresh_token": auth.refresh,
+            "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        do {
+            let (data, res) = try await URLSession.shared.data(for: req)
+            let code = (res as? HTTPURLResponse)?.statusCode ?? 0
+            if code != 200 {
+                let text = String(data: data, encoding: .utf8) ?? ""
+                let snippet = text.replacingOccurrences(of: "\n", with: " ")
+                let clipped = snippet.count > 140 ? String(snippet.prefix(140)) : snippet
+                return .failed("token HTTP \(code)\(clipped.isEmpty ? "" : " \(clipped)")")
+            }
+            return parseClaudeToken(data, fallback: auth)
+        } catch {
+            return .failed("token request \(error.localizedDescription)")
+        }
+    }
+
+    private static func parseClaudeToken(_ data: Data, fallback: ClaudeAuth) -> ClaudeRefresh {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let access = obj["access_token"] as? String, !access.isEmpty
+        else { return .failed("token 200 but no access_token") }
+        let refresh = (obj["refresh_token"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? fallback.refresh
+        let expires = Date().addingTimeInterval(((obj["expires_in"] as? NSNumber)?.doubleValue) ?? 3600)
+        return .ok(ClaudeAuth(
+            access: access,
+            refresh: refresh,
+            expiresAt: expires,
+            subscription: fallback.subscription,
+            tier: fallback.tier
+        ))
     }
 
     private static func decode(_ data: Data, _ res: URLResponse) throws -> [String: Any] {
@@ -476,5 +607,46 @@ enum UsageClient {
         if secs <= 6 * 3600 { return "5h" }
         if secs <= 2 * 24 * 3600 { return "Daily" }
         return "Weekly"
+    }
+
+    private static func parseClaude(_ json: [String: Any], auth: ClaudeAuth) -> Lane? {
+        let fiveUsed = utilizationValue(json["five_hour"] ?? json["fiveHour"] ?? json["five_hour_utilization"])
+        let sevenUsed = utilizationValue(json["seven_day"] ?? json["sevenDay"] ?? json["seven_day_utilization"])
+        let sonnetUsed = utilizationValue(json["seven_day_sonnet"] ?? json["sevenDaySonnet"])
+        let five = windowDict(json["five_hour"] ?? json["fiveHour"])
+        let seven = windowDict(json["seven_day"] ?? json["sevenDay"])
+        guard fiveUsed != nil || sevenUsed != nil else { return nil }
+
+        let used = max(fiveUsed ?? 0, sevenUsed ?? 0)
+        var details: [LaneDetail] = []
+        if let fiveUsed { details.append(LaneDetail(label: "5h", usedPct: fiveUsed)) }
+        if let sevenUsed { details.append(LaneDetail(label: "7d", usedPct: sevenUsed)) }
+        if let sonnetUsed { details.append(LaneDetail(label: "Sonnet 7d", usedPct: sonnetUsed)) }
+
+        var plan = auth.subscription
+        if plan.isEmpty { plan = (json["subscription_type"] as? String) ?? (json["plan"] as? String) ?? "Claude Code" }
+        if !auth.tier.isEmpty, !plan.lowercased().contains(auth.tier.lowercased()) {
+            plan = "\(plan) \(auth.tier)".trimmingCharacters(in: .whitespaces)
+        }
+        plan = plan.replacingOccurrences(of: "_", with: " ")
+
+        var bits: [String] = [plan]
+        if let r = resetLabel(five?["resets_at"] ?? five?["reset_at"] ?? seven?["resets_at"] ?? seven?["reset_at"]) {
+            bits.append(r)
+        }
+        return .used(.claude, percent: used, sub: bits.joined(separator: "  ·  "), details: details)
+    }
+
+    /// Claude returns 0–1. Some builds send 0–100. Treat ≤1.5 as a fraction.
+    private static func utilizationValue(_ value: Any?) -> Double? {
+        if let dict = value as? [String: Any] {
+            if let n = num(dict["utilization"]) ?? num(dict["used_percent"]) ?? num(dict["usedPercent"]) {
+                return n <= 1.5 ? n * 100 : n
+            }
+        }
+        if let n = num(value) {
+            return n <= 1.5 ? n * 100 : n
+        }
+        return nil
     }
 }

@@ -1,7 +1,7 @@
 import Foundation
 
 enum LaneKey: String, CaseIterable, Identifiable {
-    case grok, cursor, bot, gpt
+    case grok, cursor, bot, gpt, claude
     var id: String { rawValue }
 
     var title: String {
@@ -10,6 +10,7 @@ enum LaneKey: String, CaseIterable, Identifiable {
         case .cursor: "Cursor"
         case .bot: "Grok Bot"
         case .gpt: "ChatGPT"
+        case .claude: "Claude"
         }
     }
 
@@ -19,6 +20,7 @@ enum LaneKey: String, CaseIterable, Identifiable {
         case .cursor: "C"
         case .bot: "B"
         case .gpt: "O"
+        case .claude: "A"
         }
     }
 }
@@ -43,6 +45,8 @@ struct Lane: Identifiable {
     var tone: Tone
     var details: [LaneDetail]
 
+    var showsOnBar: Bool { tone != .empty }
+
     static func empty(_ key: LaneKey, sub: String) -> Lane {
         Lane(key: key, usedPct: nil, remainingPct: nil, label: "—", sub: sub, tone: .empty, details: [])
     }
@@ -53,7 +57,8 @@ struct Lane: Identifiable {
 
     static func used(_ key: LaneKey, percent: Double, sub: String, details: [LaneDetail] = []) -> Lane {
         let used = min(100, max(0, percent.rounded()))
-        let tone: Tone = used >= 90 ? .crit : used >= 80 ? .warn : .ok
+        // 85 / 95 so a typical 60–80% day stays neutral on the bar.
+        let tone: Tone = used >= 95 ? .crit : used >= 85 ? .warn : .ok
         return Lane(
             key: key,
             usedPct: used,
@@ -85,18 +90,21 @@ struct DiskVolume: Identifiable, Equatable {
     var isReadOnly: Bool
     var isRoot: Bool
     var justChanged: String?
+    var suggestedIgnore: Bool
+    var ignoreHint: String?
 
     var usedBytes: Int64 { max(0, totalBytes - freeBytes) }
 
     var tone: Tone {
-        if usedPct >= 95 { return .crit }
-        if usedPct >= 80 || isReadOnly { return .warn }
+        // Disks often sit at 70–85%. Only shout when actually tight.
+        if usedPct >= 96 { return .crit }
+        if usedPct >= 90 || isReadOnly { return .warn }
         return .ok
     }
 
     var statusLabel: String {
         if isReadOnly { return "Read-only" }
-        if usedPct >= 95 { return "Full" }
+        if usedPct >= 96 { return "Full" }
         if usedPct >= 90 { return "Almost full" }
         if readBps + writeBps >= 20_000_000 { return "Busy" }
         if readBps + writeBps < 50_000 { return "Idle" }
@@ -136,12 +144,15 @@ struct Snapshot {
     var cursor: Lane
     var bot: Lane
     var gpt: Lane
+    var claude: Lane
     var fetchedAt: Date
     var grokLinked: Bool
     var cursorLinked: Bool
     var gptLinked: Bool
+    var claudeLinked: Bool
 
-    var lanes: [Lane] { [grok, cursor, bot, gpt] }
+    var lanes: [Lane] { [grok, cursor, bot, gpt, claude] }
+    var barLanes: [Lane] { lanes.filter(\.showsOnBar) }
 
     static var vacant: Snapshot {
         Snapshot(
@@ -149,24 +160,32 @@ struct Snapshot {
             cursor: .empty(.cursor, sub: "Ultra monthly  ·  not connected"),
             bot: .empty(.bot, sub: "Sand weekly  ·  not connected"),
             gpt: .empty(.gpt, sub: "ChatGPT / Codex  ·  not connected"),
+            claude: .empty(.claude, sub: "Claude Code 5h + 7d  ·  not connected"),
             fetchedAt: .distantPast,
             grokLinked: false,
             cursorLinked: false,
-            gptLinked: false
+            gptLinked: false,
+            claudeLinked: false
         )
     }
 
     var menuTitle: String {
-        func part(_ lane: Lane) -> String {
+        let parts = barLanes.map { lane -> String in
             if let n = lane.usedPct { return "\(lane.key.letter) \(Int(n))" }
             return "\(lane.key.letter) —"
         }
-        return lanes.map(part).joined(separator: " · ")
+        return parts.isEmpty ? "QuotaBar" : parts.joined(separator: " · ")
     }
 
     func barTitle(disks: [DiskVolume]) -> String {
-        guard let hot = disks.max(by: { $0.usedPct < $1.usedPct }) else { return menuTitle }
-        return "\(menuTitle) · D \(Int(hot.usedPct.rounded()))"
+        var parts = barLanes.map { lane -> String in
+            if let n = lane.usedPct { return "\(lane.key.letter) \(Int(n))" }
+            return "\(lane.key.letter) —"
+        }
+        if let hot = disks.max(by: { $0.usedPct < $1.usedPct }) {
+            parts.append("D \(Int(hot.usedPct.rounded()))")
+        }
+        return parts.isEmpty ? "QuotaBar" : parts.joined(separator: " · ")
     }
 }
 
@@ -193,6 +212,22 @@ struct CodexAuth: Equatable {
 
     var isStale: Bool {
         expiresAt.timeIntervalSinceNow < 60
+    }
+
+    var canRefresh: Bool {
+        !refresh.isEmpty
+    }
+}
+
+struct ClaudeAuth: Equatable {
+    var access: String
+    var refresh: String
+    var expiresAt: Date
+    var subscription: String
+    var tier: String
+
+    var isStale: Bool {
+        expiresAt.timeIntervalSinceNow < 90
     }
 
     var canRefresh: Bool {

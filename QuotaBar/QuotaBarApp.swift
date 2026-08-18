@@ -233,39 +233,13 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
-        let header = NSMenuItem(title: store.snap.menuTitle, action: nil, keyEquivalent: "")
+        let header = NSMenuItem(title: store.snap.barTitle(disks: store.disks), action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
         menu.addItem(.separator())
-
-        for lane in store.snap.lanes {
-            let line = "\(lane.key.title)  \(lane.label)  ·  \(lane.sub)"
-            let item = NSMenuItem(title: String(line.prefix(80)), action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            menu.addItem(item)
-        }
-        if !store.disks.isEmpty {
-            menu.addItem(.separator())
-            for disk in store.disks {
-                let line = "\(disk.name)  \(Int(disk.usedPct.rounded()))%  ·  \(disk.statusLabel)  ·  \(disk.rateLabel)"
-                let item = NSMenuItem(title: String(line.prefix(80)), action: nil, keyEquivalent: "")
-                item.isEnabled = false
-                menu.addItem(item)
-            }
-        }
-
-        menu.addItem(.separator())
         menu.addItem(makeItem("Refresh now", #selector(menuRefresh)))
         menu.addItem(makeItem("Copy summary", #selector(menuCopy)))
-        if store.snap.grok.tone == .empty || store.snap.grok.tone == .error {
-            menu.addItem(makeItem("Sign in with Grok…", #selector(menuSignIn)))
-        } else {
-            menu.addItem(makeItem("Re-sign in with Grok…", #selector(menuSignIn)))
-            menu.addItem(makeItem("Disconnect Grok", #selector(menuDisconnect)))
-        }
-        menu.addItem(.separator())
         menu.addItem(makeItem(store.notifyEnabled ? "Alerts ✓" : "Alerts", #selector(menuToggleAlerts)))
-        menu.addItem(makeItem(store.launchAtLogin ? "Open at login ✓" : "Open at login", #selector(menuToggleLogin)))
         menu.addItem(.separator())
         menu.addItem(makeItem("Quit QuotaBar", #selector(menuQuit)))
 
@@ -311,13 +285,7 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
             }
         }
 
-        let parts: [(Lane, String)] = [
-            (snap.grok, snap.grok.key.letter),
-            (snap.cursor, snap.cursor.key.letter),
-            (snap.bot, snap.bot.key.letter),
-            (snap.gpt, snap.gpt.key.letter),
-        ]
-        for (lane, letter) in parts {
+        for (lane, letter) in snap.barLanes.map({ ($0, $0.key.letter) }) {
             guard let tint = color(for: lane.tone) else { continue }
             let needle = "\(letter) \(lane.label == "—" ? "—" : "\(Int(lane.usedPct ?? 0))")"
             if let range = raw.range(of: needle) {
@@ -331,9 +299,9 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
             }
         }
         button.attributedTitle = attr
-        var tip = snap.lanes.map { "\($0.key.title) \($0.label) · \($0.sub)" }
+        var tip = snap.barLanes.map { "\($0.key.title) \($0.label) · \($0.sub)" }
         tip.append(contentsOf: disks.map { "\($0.name) \(Int($0.usedPct.rounded()))% · \($0.sizeLabel) · \($0.rateLabel)" })
-        button.toolTip = tip.joined(separator: "\n")
+        button.toolTip = tip.isEmpty ? "QuotaBar" : tip.joined(separator: "\n")
     }
 
     private func position(_ panel: NSPanel, size: NSSize, under button: NSView) {

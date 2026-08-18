@@ -2,7 +2,7 @@ Do not open QuotaBar.xcodeproj.
 
 Right-click "Start QuotaBar.command" → Open.
 First run may ask to install Command Line Tools (not Xcode).
-Then the menu bar shows: G 5 · C 0 · B 4 · O 12 · D 42
+Then the menu bar shows only connected services, e.g. G 5 · A 40 · D 42
 
-G Grok  ·  C Cursor  ·  B Grok Bot  ·  O ChatGPT  ·  D fullest disk
-Panel header must say v1.4.1.
+G Grok  ·  C Cursor  ·  B Grok Bot  ·  O ChatGPT  ·  A Claude  ·  D fullest disk
+Panel header must say v1.5.

@@ -558,6 +558,188 @@ enum TokenReader {
         let exp = jwtExpiry(access) ?? .distantPast
         return CodexAuth(access: access, refresh: refresh, accountId: account, expiresAt: exp)
     }
+
+    static func claudeDir() -> URL {
+        home().appendingPathComponent(".claude")
+    }
+
+    static func loadClaudeAuth() -> ClaudeAuth? {
+        var found: [ClaudeAuth] = []
+        if let key = loadClaudeFromKeychain() { found.append(key) }
+        for url in claudeCandidateFiles() {
+            if let auth = extractClaude(from: url) { found.append(auth) }
+        }
+        return found.max(by: { $0.expiresAt < $1.expiresAt })
+    }
+
+    static func persistClaude(_ auth: ClaudeAuth) {
+        if let current = loadClaudeAuth(),
+           current.access == auth.access,
+           current.refresh == auth.refresh
+        {
+            return
+        }
+        var bag = loadClaudeBag() ?? [:]
+        var oauth = bag["claudeAiOauth"] as? [String: Any] ?? [:]
+        oauth["accessToken"] = auth.access
+        if !auth.refresh.isEmpty { oauth["refreshToken"] = auth.refresh }
+        oauth["expiresAt"] = Int64(auth.expiresAt.timeIntervalSince1970 * 1000)
+        if !auth.subscription.isEmpty { oauth["subscriptionType"] = auth.subscription }
+        if !auth.tier.isEmpty { oauth["rateLimitTier"] = auth.tier }
+        bag["claudeAiOauth"] = oauth
+        guard let data = try? JSONSerialization.data(withJSONObject: bag, options: [.prettyPrinted, .sortedKeys]) else { return }
+
+        let url = claudeDir().appendingPathComponent(".credentials.json")
+        try? FileManager.default.createDirectory(at: claudeDir(), withIntermediateDirectories: true)
+        try? data.write(to: url, options: .atomic)
+        writeClaudeKeychain(data)
+    }
+
+    static func saveClaudePasted(_ raw: String) -> Bool {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        if let data = trimmed.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data),
+           let auth = extractClaude(from: obj)
+        {
+            persistClaude(auth)
+            return true
+        }
+        let token = scrub(trimmed)
+        guard token.count >= 20 else { return false }
+        persistClaude(ClaudeAuth(
+            access: token,
+            refresh: "",
+            expiresAt: jwtExpiry(token) ?? .distantPast,
+            subscription: "",
+            tier: ""
+        ))
+        return true
+    }
+
+    private static func claudeCandidateFiles() -> [URL] {
+        let h = home()
+        return [
+            h.appendingPathComponent(".claude/.credentials.json"),
+            h.appendingPathComponent(".config/claude/.credentials.json"),
+            h.appendingPathComponent(".claude.json"),
+            h.appendingPathComponent("Library/Application Support/Claude/.credentials.json"),
+        ]
+    }
+
+    private static func loadClaudeBag() -> [String: Any]? {
+        if let data = loadClaudeKeychainData(),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        {
+            return obj
+        }
+        for url in claudeCandidateFiles() {
+            if let data = try? Data(contentsOf: url),
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            {
+                return obj
+            }
+        }
+        return nil
+    }
+
+    private static func extractClaude(from url: URL) -> ClaudeAuth? {
+        guard let data = try? Data(contentsOf: url),
+              let obj = try? JSONSerialization.jsonObject(with: data)
+        else { return nil }
+        return extractClaude(from: obj)
+    }
+
+    private static func extractClaude(from obj: Any) -> ClaudeAuth? {
+        guard let dict = obj as? [String: Any] else { return nil }
+        let oauth = dict["claudeAiOauth"] as? [String: Any] ?? dict
+        let access = (oauth["accessToken"] as? String)
+            ?? (oauth["access_token"] as? String)
+            ?? (dict["accessToken"] as? String)
+            ?? ""
+        guard !access.isEmpty, access.count >= 20 else { return nil }
+        let refresh = (oauth["refreshToken"] as? String)
+            ?? (oauth["refresh_token"] as? String)
+            ?? (dict["refreshToken"] as? String)
+            ?? ""
+        let sub = (oauth["subscriptionType"] as? String) ?? (dict["subscriptionType"] as? String) ?? ""
+        let tier = (oauth["rateLimitTier"] as? String) ?? (dict["rateLimitTier"] as? String) ?? ""
+        let exp = parseClaudeExpiry(oauth["expiresAt"] ?? oauth["expires_at"] ?? dict["expiresAt"])
+            ?? jwtExpiry(access)
+            ?? .distantPast
+        return ClaudeAuth(access: access, refresh: refresh, expiresAt: exp, subscription: sub, tier: tier)
+    }
+
+    private static func parseClaudeExpiry(_ value: Any?) -> Date? {
+        if let n = value as? NSNumber {
+            let v = n.doubleValue
+            if v > 1e12 { return Date(timeIntervalSince1970: v / 1000) }
+            if v > 1e9 { return Date(timeIntervalSince1970: v) }
+        }
+        if let s = value as? String, let n = Double(s) {
+            if n > 1e12 { return Date(timeIntervalSince1970: n / 1000) }
+            if n > 1e9 { return Date(timeIntervalSince1970: n) }
+        }
+        return nil
+    }
+
+    private static let claudeKeychainService = "Claude Code-credentials"
+
+    private static func loadClaudeFromKeychain() -> ClaudeAuth? {
+        guard let data = loadClaudeKeychainData(),
+              let obj = try? JSONSerialization.jsonObject(with: data)
+        else { return nil }
+        return extractClaude(from: obj)
+    }
+
+    private static func loadClaudeKeychainData() -> Data? {
+        let accounts = [NSUserName(), NSUserName().lowercased(), ""]
+        for account in accounts {
+            var query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: claudeKeychainService,
+                kSecReturnData as String: true,
+                kSecMatchLimit as String: kSecMatchLimitOne,
+            ]
+            if !account.isEmpty {
+                query[kSecAttrAccount as String] = account
+            }
+            var out: AnyObject?
+            if SecItemCopyMatching(query as CFDictionary, &out) == errSecSuccess,
+               let data = out as? Data, !data.isEmpty
+            {
+                return data
+            }
+        }
+        let all: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: claudeKeychainService,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+        ]
+        var out: AnyObject?
+        if SecItemCopyMatching(all as CFDictionary, &out) == errSecSuccess,
+           let items = out as? [Data]
+        {
+            return items.first
+        }
+        return nil
+    }
+
+    private static func writeClaudeKeychain(_ data: Data) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: claudeKeychainService,
+            kSecAttrAccount as String: NSUserName(),
+        ]
+        let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if status == errSecItemNotFound {
+            var add = query
+            add[kSecValueData as String] = data
+            add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+            SecItemAdd(add as CFDictionary, nil)
+        }
+    }
 }
 
 enum KeychainStore {

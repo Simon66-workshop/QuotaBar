@@ -14,6 +14,8 @@ final class UsageStore: ObservableObject {
     @Published var loginInProgress = false
     @Published var copiedNote: String = ""
     @Published var disks: [DiskVolume] = []
+    @Published var hiddenDisks: [DiskVolume] = []
+    @Published var ignoredIDs: Set<String>
 
     var onWillOpenBrowser: (() -> Void)?
     var onLoginFinished: (() -> Void)?
@@ -36,6 +38,7 @@ final class UsageStore: ObservableObject {
     init() {
         launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
         notifyEnabled = UserDefaults.standard.object(forKey: "notifyEnabled") as? Bool ?? true
+        ignoredIDs = Set(UserDefaults.standard.stringArray(forKey: "qb.ignoredDisks") ?? [])
         if notifyEnabled {
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         }
@@ -147,6 +150,29 @@ final class UsageStore: ObservableObject {
         await refresh()
     }
 
+    func connectClaude(_ raw: String) async {
+        guard TokenReader.saveClaudePasted(raw) else { return }
+        await refresh()
+    }
+
+    func ignoreDisk(_ id: String) {
+        ignoredIDs.insert(id)
+        persistIgnored()
+        forceDiskTick = true
+        tickDisks()
+    }
+
+    func unignoreDisk(_ id: String) {
+        ignoredIDs.remove(id)
+        persistIgnored()
+        forceDiskTick = true
+        tickDisks()
+    }
+
+    private func persistIgnored() {
+        UserDefaults.standard.set(Array(ignoredIDs), forKey: "qb.ignoredDisks")
+    }
+
     func copySummary() {
         var lines = snap.lanes.map { lane in
             "\(lane.key.title): \(lane.label) — \(lane.sub)"
@@ -188,17 +214,21 @@ final class UsageStore: ObservableObject {
         async let cursor = UsageClient.fetchCursor(token: cursorTok)
         async let bot = UsageClient.fetchSand(token: cursorTok)
         async let gpt = UsageClient.fetchChatGPT()
+        async let claude = UsageClient.fetchClaude()
         let grokLane = await grok
         let gptLane = await gpt
+        let claudeLane = await claude
         let next = Snapshot(
             grok: grokLane,
             cursor: await cursor,
             bot: await bot,
             gpt: gptLane,
+            claude: claudeLane,
             fetchedAt: Date(),
             grokLinked: grokLane.tone != .empty && grokLane.tone != .error,
             cursorLinked: !cursorTok.isEmpty,
-            gptLinked: gptLane.tone != .empty && gptLane.tone != .error
+            gptLinked: gptLane.tone != .empty && gptLane.tone != .error,
+            claudeLinked: claudeLane.tone != .empty && claudeLane.tone != .error
         )
         snap = next
         forceDiskTick = true
@@ -242,9 +272,11 @@ final class UsageStore: ObservableObject {
         let dirs = [
             TokenReader.grokDir().path,
             TokenReader.home().appendingPathComponent(".codex").path,
+            TokenReader.claudeDir().path,
         ]
         for dir in dirs {
-            if dir.hasSuffix(".codex") {
+            let isOptional = dir.hasSuffix(".codex") || dir.hasSuffix(".claude")
+            if isOptional {
                 if !FileManager.default.fileExists(atPath: dir) { continue }
             } else {
                 try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
@@ -327,9 +359,10 @@ final class UsageStore: ObservableObject {
         lastCapacityTick = Date()
 
         let previous = disks
+        let previousAll = disks + hiddenDisks
         var next = DiskMonitor.snapshot(includeIO: wantIO)
         if !wantIO {
-            let rates = Dictionary(uniqueKeysWithValues: previous.map { ($0.id, ($0.readBps, $0.writeBps)) })
+            let rates = Dictionary(uniqueKeysWithValues: previousAll.map { ($0.id, ($0.readBps, $0.writeBps)) })
             next = next.map { disk in
                 var copy = disk
                 if let rate = rates[disk.id] {
@@ -342,10 +375,10 @@ final class UsageStore: ObservableObject {
 
         let now = Date()
         if disksPrimed {
-            let oldIds = Set(previous.map(\.id))
+            let oldIds = Set(previousAll.map(\.id))
             let newIds = Set(next.map(\.id))
             let added = next.filter { !oldIds.contains($0.id) }
-            let removed = previous.filter { !newIds.contains($0.id) }
+            let removed = previousAll.filter { !newIds.contains($0.id) }
             if !added.isEmpty || !removed.isEmpty {
                 announceDisks(added: added, removed: removed)
             }
@@ -363,8 +396,21 @@ final class UsageStore: ObservableObject {
         }
         lastDiskAlert = lastDiskAlert.filter { key, _ in next.contains(where: { $0.id == key }) }
 
-        if sameDisks(previous, next) { return }
-        disks = next
+        next.sort { a, b in
+            let aNew = a.justChanged != nil
+            let bNew = b.justChanged != nil
+            if aNew != bNew { return aNew }
+            if abs(a.usedPct - b.usedPct) >= 0.5 { return a.usedPct > b.usedPct }
+            if a.isRoot != b.isRoot { return a.isRoot }
+            return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+        }
+
+        let visible = next.filter { !ignoredIDs.contains($0.id) }
+        let hidden = next.filter { ignoredIDs.contains($0.id) }
+
+        if sameDisks(previous, visible), hiddenDisks.map(\.id) == hidden.map(\.id) { return }
+        disks = visible
+        hiddenDisks = hidden
         notifyIfNeeded(snap)
     }
 

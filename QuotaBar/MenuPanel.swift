@@ -24,7 +24,11 @@ struct MenuPanel: View {
                 ChatGPTConnectForm()
                     .padding(.top, 8)
             }
-            DiskSection(disks: store.disks)
+            if store.snap.claude.tone == .empty || store.snap.claude.tone == .error {
+                ClaudeConnectForm()
+                    .padding(.top, 8)
+            }
+            DiskSection()
                 .padding(.top, 10)
             footer
         }
@@ -39,7 +43,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.4.1")
+                Text("v1.5")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -132,7 +136,7 @@ private struct LaneRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(lane.tone == .error || lane.tone == .empty ? 3 : 2)
                     .fixedSize(horizontal: false, vertical: true)
-                if lane.key == .cursor, !lane.details.isEmpty {
+                if lane.key == .cursor || lane.key == .claude, !lane.details.isEmpty {
                     ForEach(lane.details) { d in
                         HStack(spacing: 6) {
                             Text(d.label)
@@ -297,8 +301,37 @@ private struct ChatGPTConnectForm: View {
     }
 }
 
+private struct ClaudeConnectForm: View {
+    @EnvironmentObject private var store: UsageStore
+    @State private var draft = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Connect Claude Code")
+                .font(.system(size: 11, weight: .semibold))
+            Text("Reads ~/.claude/.credentials.json and the Claude Code keychain after you run `claude` once. 5-hour + 7-day windows.")
+                .font(.system(size: 10.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            SecureField("or paste .credentials.json / access token", text: $draft)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 11))
+            Button("Save Claude") {
+                let value = draft
+                draft = ""
+                Task { await store.connectClaude(value) }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .font(.system(size: 11, weight: .semibold))
+        }
+        .padding(8)
+        .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
 private struct DiskSection: View {
-    let disks: [DiskVolume]
+    @EnvironmentObject private var store: UsageStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -306,28 +339,63 @@ private struct DiskSection: View {
                 Text("Disks")
                     .font(.system(size: 11, weight: .semibold))
                 Spacer()
-                Text(disks.isEmpty ? "none" : "\(disks.count) volume\(disks.count == 1 ? "" : "s")")
+                Text(countLabel)
                     .font(.system(size: 10.5))
                     .foregroundStyle(.tertiary)
             }
-            if disks.isEmpty {
+            if store.disks.isEmpty && store.hiddenDisks.isEmpty {
                 Text("Waiting for mounted volumes…")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
-            ForEach(Array(disks.prefix(6))) { disk in
+            ForEach(Array(store.disks.prefix(6))) { disk in
                 DiskRow(disk: disk)
             }
-            if disks.count > 6 {
-                Text("+\(disks.count - 6) more volumes")
+            if store.disks.count > 6 {
+                Text("+\(store.disks.count - 6) more volumes")
                     .font(.system(size: 10.5))
                     .foregroundStyle(.tertiary)
             }
+            if !store.hiddenDisks.isEmpty {
+                HStack {
+                    Text("Hidden")
+                        .font(.system(size: 11, weight: .semibold))
+                    Spacer()
+                    Text("\(store.hiddenDisks.count)")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.top, 4)
+                ForEach(store.hiddenDisks) { disk in
+                    HStack {
+                        Text(disk.name)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        if let hint = disk.ignoreHint {
+                            Text(hint)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
+                        }
+                        Spacer()
+                        Button("Show") { store.unignoreDisk(disk.id) }
+                            .buttonStyle(.borderless)
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                }
+            }
         }
+    }
+
+    private var countLabel: String {
+        let n = store.disks.count
+        if n == 0 { return store.hiddenDisks.isEmpty ? "none" : "all hidden" }
+        return "\(n) volume\(n == 1 ? "" : "s")"
     }
 }
 
 private struct DiskRow: View {
+    @EnvironmentObject private var store: UsageStore
     let disk: DiskVolume
 
     var body: some View {
@@ -336,6 +404,14 @@ private struct DiskRow: View {
                 Text(disk.name)
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
+                if disk.suggestedIgnore, let hint = disk.ignoreHint {
+                    Text(hint)
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.white.opacity(0.10), in: Capsule())
+                }
                 Spacer()
                 Text("\(Int(disk.usedPct.rounded()))%")
                     .font(.system(size: 16, weight: .bold).monospacedDigit())
@@ -354,10 +430,15 @@ private struct DiskRow: View {
             HStack {
                 Text(disk.sizeLabel)
                 if let note = disk.justChanged {
-                    Spacer()
                     Text(note)
                         .foregroundStyle(.orange)
                 }
+                Spacer()
+                Button(disk.suggestedIgnore ? "Hide \(disk.ignoreHint ?? "disk")" : "Hide") {
+                    store.ignoreDisk(disk.id)
+                }
+                .buttonStyle(.borderless)
+                .font(.system(size: 10.5, weight: .semibold))
             }
             .font(.system(size: 10.5))
             .foregroundStyle(.secondary)
