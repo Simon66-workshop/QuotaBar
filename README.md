@@ -25,7 +25,7 @@ QuotaBar appears on the right of the menu bar. Unconnected services stay off the
 - **Left-click** the bar → glass panel (details, connect, hide disks)
 - **Right-click** the bar → short native menu (refresh / copy / alerts / quit)
 
-The panel header should say **v1.5**. If it still says v1.4.x, quit QuotaBar and run `Start QuotaBar.command` again.
+The panel header should say **v1.5.1**. If it still says v1.5, quit QuotaBar and run `Start QuotaBar.command` again.
 
 Later launches: just double-click `Start QuotaBar.command` again.
 
@@ -46,6 +46,10 @@ If Claude shows `—`, run `claude` once in Terminal, then click Refresh.
 Plug in a USB / Thunderbolt disk and it appears in the panel; eject it and it disappears. Hide Time Machine or VM disks from the panel — they stay off the bar until you Show them again.
 
 The bar only turns orange / red on a token that is actually high (85%+ services, 90%+ disks). A normal 60–80% day stays neutral.
+
+## 1.5.1
+
+Audit: Grok-not-connected no longer occupies the bar; usage alerts match the 85/95 and 90/96 color thresholds; IOKit mount/wake rebuilds are debounced; APFS parent walk no longer leaks io_objects; Claude persist never invents `~/.claude/.credentials.json`; unused providers skip their HTTP calls; disk timer is 12s closed / 3s open.
 
 ## 1.5
 

@@ -33,6 +33,8 @@ final class DiskMonitor {
 
     /// uuid -> (path, candidate BSD names including physical parents)
     private var bsdCache: [String: (path: String, names: [String])] = [:]
+    private var hintCache: [String: String] = [:]
+    private var rebuildWork: DispatchWorkItem?
 
     private init() {}
 
@@ -51,8 +53,7 @@ final class DiskMonitor {
         ]
         for name in names {
             let token = nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                self?.rebuildTopology()
-                self?.onChange?()
+                self?.scheduleRebuild()
             }
             observers.append(token)
         }
@@ -62,16 +63,29 @@ final class DiskMonitor {
         let nc = NSWorkspace.shared.notificationCenter
         for token in observers { nc.removeObserver(token) }
         observers.removeAll()
+        rebuildWork?.cancel()
+        rebuildWork = nil
         disarmIOKitNotifications()
         releaseTopology()
         onChange = nil
         bsdCache.removeAll()
+        hintCache.removeAll()
         lastBytes.removeAll()
     }
 
     func topologyDidChange() {
-        rebuildTopology()
-        onChange?()
+        scheduleRebuild()
+    }
+
+    private func scheduleRebuild() {
+        rebuildWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.rebuildTopology()
+            self.onChange?()
+        }
+        rebuildWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
     }
 
     func snapshot(includeIO: Bool) -> [DiskVolume] {
@@ -125,7 +139,7 @@ final class DiskMonitor {
             let internalDrive = values.volumeIsInternal == true
             let ejectable = values.volumeIsEjectable == true || values.volumeIsRemovable == true
             let kind: DiskKind = (!internalDrive && ejectable) ? .external : .internalDrive
-            let hint = ignoreHint(name: name, url: url)
+            let hint = ignoreHint(name: name, url: url, uuid: uuid)
 
             var readBps = 0.0
             var writeBps = 0.0
@@ -162,6 +176,7 @@ final class DiskMonitor {
 
         lastBytes = lastBytes.filter { key, _ in seen.contains(key) }
         bsdCache = bsdCache.filter { key, _ in seen.contains(key) }
+        hintCache = hintCache.filter { key, _ in seen.contains(key) }
         return out
     }
 
@@ -181,18 +196,30 @@ final class DiskMonitor {
         return false
     }
 
-    private func ignoreHint(name: String, url: URL) -> String? {
+    private func ignoreHint(name: String, url: URL, uuid: String) -> String? {
+        if let cached = hintCache[uuid] { return cached.isEmpty ? nil : cached }
         let n = name.lowercased()
         let p = url.path.lowercased()
-        if n.contains("time machine") || n.contains("timemachine") { return "Time Machine" }
-        let backup = url.appendingPathComponent("Backups.backupdb")
-        if FileManager.default.fileExists(atPath: backup.path) { return "Time Machine" }
-        let tm = url.appendingPathComponent(".com.apple.timemachine")
-        if FileManager.default.fileExists(atPath: tm.path) { return "Time Machine" }
-        let vmHints = ["parallels", "vmware", "virtualbox", "utm disk", "docker", "colima", "rancher", "lima"]
-        if vmHints.contains(where: { n.contains($0) || p.contains($0) }) { return "virtual machine" }
-        if p.contains("/library/containers/") { return "virtual machine" }
-        return nil
+        var hint: String?
+        if n.contains("time machine") || n.contains("timemachine") { hint = "Time Machine" }
+        else if vmHints.contains(where: { n.contains($0) || p.contains($0) }) { hint = "virtual machine" }
+        else if p.contains("/library/containers/") { hint = "virtual machine" }
+        else {
+            // Path probes only when the name didn't already tell us.
+            let backup = url.appendingPathComponent("Backups.backupdb")
+            let tm = url.appendingPathComponent(".com.apple.timemachine")
+            if FileManager.default.fileExists(atPath: backup.path)
+                || FileManager.default.fileExists(atPath: tm.path)
+            {
+                hint = "Time Machine"
+            }
+        }
+        hintCache[uuid] = hint ?? ""
+        return hint
+    }
+
+    private var vmHints: [String] {
+        ["parallels", "vmware", "virtualbox", "utm disk", "docker", "colima", "rancher", "lima"]
     }
 
     private func isDiskImage(_ url: URL) -> Bool {
@@ -268,7 +295,6 @@ final class DiskMonitor {
 
         var names: [String] = []
         var current = media
-        IOObjectRetain(current)
         var depth = 0
         while depth < 12 {
             if let bsd = cfString(current, "BSD Name"), bsd.hasPrefix("disk") {
@@ -372,7 +398,6 @@ final class DiskMonitor {
             driverNames.append(mediaNames(parent: service, depth: 0))
             service = IOIteratorNext(iterator)
         }
-        bsdCache.removeAll()
     }
 
     private func releaseTopology() {

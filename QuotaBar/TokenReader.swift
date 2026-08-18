@@ -120,9 +120,13 @@ enum TokenReader {
     }
 
     private static var grokDiskCache: (at: Date, value: GrokAuth?)?
+    private static var codexCache: (at: Date, value: CodexAuth?)?
+    private static var claudeCache: (at: Date, value: ClaudeAuth?)?
 
     static func invalidateDiskCache() {
         grokDiskCache = nil
+        codexCache = nil
+        claudeCache = nil
     }
 
     static func loadGrokAuthFromDisk() -> GrokAuth? {
@@ -458,13 +462,36 @@ enum TokenReader {
     }
 
     static func loadCodexAuth() -> CodexAuth? {
-        for url in codexCandidateFiles() {
-            if let auth = extractCodex(from: url) { return auth }
+        if let cached = codexCache, Date().timeIntervalSince(cached.at) < 20 {
+            return cached.value
         }
-        return nil
+        var found: CodexAuth?
+        for url in codexCandidateFiles() {
+            if let auth = extractCodex(from: url) { found = auth; break }
+        }
+        codexCache = (Date(), found)
+        return found
+    }
+
+    static func hasCodexSession() -> Bool {
+        if let cached = codexCache { return cached.value != nil }
+        return codexCandidateFiles().contains { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    static func hasGrokSession() -> Bool {
+        if FileManager.default.fileExists(atPath: grokAuthURL().path) { return true }
+        if KeychainStore.loadAuth() != nil { return true }
+        return false
+    }
+
+    static func hasClaudeSession() -> Bool {
+        if let cached = claudeCache { return cached.value != nil }
+        if loadClaudeKeychainData() != nil { return true }
+        return claudeCandidateFiles().contains { FileManager.default.fileExists(atPath: $0.path) }
     }
 
     static func persistCodex(_ auth: CodexAuth) {
+        invalidateDiskCache()
         if let current = loadCodexAuth(), current.access == auth.access, current.refresh == auth.refresh {
             return
         }
@@ -488,6 +515,7 @@ enum TokenReader {
         if let data = try? JSONSerialization.data(withJSONObject: bag, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: url, options: .atomic)
         }
+        codexCache = (Date(), auth)
     }
 
     static func saveCodexPasted(_ raw: String) -> Bool {
@@ -564,15 +592,21 @@ enum TokenReader {
     }
 
     static func loadClaudeAuth() -> ClaudeAuth? {
+        if let cached = claudeCache, Date().timeIntervalSince(cached.at) < 20 {
+            return cached.value
+        }
         var found: [ClaudeAuth] = []
         if let key = loadClaudeFromKeychain() { found.append(key) }
         for url in claudeCandidateFiles() {
             if let auth = extractClaude(from: url) { found.append(auth) }
         }
-        return found.max(by: { $0.expiresAt < $1.expiresAt })
+        let value = found.max(by: { $0.expiresAt < $1.expiresAt })
+        claudeCache = (Date(), value)
+        return value
     }
 
     static func persistClaude(_ auth: ClaudeAuth) {
+        invalidateDiskCache()
         if let current = loadClaudeAuth(),
            current.access == auth.access,
            current.refresh == auth.refresh
@@ -589,10 +623,14 @@ enum TokenReader {
         bag["claudeAiOauth"] = oauth
         guard let data = try? JSONSerialization.data(withJSONObject: bag, options: [.prettyPrinted, .sortedKeys]) else { return }
 
+        // Never invent ~/.claude/.credentials.json — Claude Code on macOS
+        // treats the keychain as source of truth. Creating a stale file desyncs it.
         let url = claudeDir().appendingPathComponent(".credentials.json")
-        try? FileManager.default.createDirectory(at: claudeDir(), withIntermediateDirectories: true)
-        try? data.write(to: url, options: .atomic)
+        if FileManager.default.fileExists(atPath: url.path) {
+            try? data.write(to: url, options: .atomic)
+        }
         writeClaudeKeychain(data)
+        claudeCache = (Date(), auth)
     }
 
     static func saveClaudePasted(_ raw: String) -> Bool {

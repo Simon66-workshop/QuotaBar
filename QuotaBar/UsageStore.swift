@@ -54,7 +54,7 @@ final class UsageStore: ObservableObject {
             .sink { [weak self] _ in
                 Task { await self?.refresh() }
             }
-        diskTimer = Timer.publish(every: 3, on: .main, in: .common)
+        diskTimer = Timer.publish(every: 12, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
                 self?.tickDisks()
@@ -195,10 +195,21 @@ final class UsageStore: ObservableObject {
 
     func setLiveIO(_ on: Bool) {
         liveIO = on
+        rescheduleDiskTimer()
         if on {
             forceDiskTick = true
             tickDisks()
         }
+    }
+
+    private func rescheduleDiskTimer() {
+        diskTimer?.cancel()
+        let every: TimeInterval = liveIO ? 3 : 12
+        diskTimer = Timer.publish(every: every, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.tickDisks()
+            }
     }
 
     func refresh() async {
@@ -210,11 +221,20 @@ final class UsageStore: ObservableObject {
             refreshRunning = false
         }
         let cursorTok = TokenReader.cursorTokenFromLocalApp() ?? ""
-        async let grok = UsageClient.fetchGrok()
+        async let grok: Lane = {
+            if TokenReader.hasGrokSession() { return await UsageClient.fetchGrok() }
+            return .empty(.grok, sub: "Weekly SuperGrok Heavy  ·  not connected")
+        }()
         async let cursor = UsageClient.fetchCursor(token: cursorTok)
         async let bot = UsageClient.fetchSand(token: cursorTok)
-        async let gpt = UsageClient.fetchChatGPT()
-        async let claude = UsageClient.fetchClaude()
+        async let gpt: Lane = {
+            if TokenReader.hasCodexSession() { return await UsageClient.fetchChatGPT() }
+            return .empty(.gpt, sub: "ChatGPT / Codex  ·  not connected")
+        }()
+        async let claude: Lane = {
+            if TokenReader.hasClaudeSession() { return await UsageClient.fetchClaude() }
+            return .empty(.claude, sub: "Claude Code 5h + 7d  ·  not connected")
+        }()
         let grokLane = await grok
         let gptLane = await gpt
         let claudeLane = await claude
@@ -231,7 +251,7 @@ final class UsageStore: ObservableObject {
             claudeLinked: claudeLane.tone != .empty && claudeLane.tone != .error
         )
         snap = next
-        forceDiskTick = true
+        if liveIO { forceDiskTick = true }
         tickDisks()
         notifyIfNeeded(next)
     }
@@ -317,8 +337,8 @@ final class UsageStore: ObservableObject {
     private func notifyIfNeeded(_ snap: Snapshot) {
         guard notifyEnabled else { return }
         for lane in snap.lanes {
-            guard let used = lane.usedPct, used >= 80 else { continue }
-            let bucket = used >= 95 ? 95 : used >= 90 ? 90 : 80
+            guard let used = lane.usedPct, used >= 85 else { continue }
+            let bucket = used >= 95 ? 95 : 85
             if lastAlert[lane.key] == bucket { continue }
             lastAlert[lane.key] = bucket
             let content = UNMutableNotificationContent()
@@ -333,8 +353,8 @@ final class UsageStore: ObservableObject {
             UNUserNotificationCenter.current().add(req)
         }
         for disk in disks {
-            guard disk.usedPct >= 80 else { continue }
-            let bucket = disk.usedPct >= 95 ? 95 : disk.usedPct >= 90 ? 90 : 80
+            guard disk.usedPct >= 90 else { continue }
+            let bucket = disk.usedPct >= 96 ? 96 : 90
             if lastDiskAlert[disk.id] == bucket { continue }
             lastDiskAlert[disk.id] = bucket
             let content = UNMutableNotificationContent()
@@ -377,8 +397,12 @@ final class UsageStore: ObservableObject {
         if disksPrimed {
             let oldIds = Set(previousAll.map(\.id))
             let newIds = Set(next.map(\.id))
-            let added = next.filter { !oldIds.contains($0.id) }
-            let removed = previousAll.filter { !newIds.contains($0.id) }
+            let added = next.filter {
+                !oldIds.contains($0.id) && !ignoredIDs.contains($0.id) && !$0.suggestedIgnore
+            }
+            let removed = previousAll.filter {
+                !newIds.contains($0.id) && !ignoredIDs.contains($0.id) && !$0.suggestedIgnore
+            }
             if !added.isEmpty || !removed.isEmpty {
                 announceDisks(added: added, removed: removed)
             }
