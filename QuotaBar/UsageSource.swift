@@ -31,13 +31,12 @@ enum UsageSources {
         ClaudeUsageSource(),
     ]
 
-    static func source(for key: LaneKey) -> any UsageSource {
-        all.first(where: { $0.key == key }) ?? GrokUsageSource()
+    static func source(for key: LaneKey) -> (any UsageSource)? {
+        all.first(where: { $0.key == key })
     }
 
     static func emptyLane(_ key: LaneKey) -> Lane {
-        let src = source(for: key)
-        return .empty(key, sub: src.emptySub)
+        .empty(key, sub: source(for: key)?.emptySub ?? "not connected")
     }
 
     static func loadAll() async -> [Lane] {
@@ -121,9 +120,10 @@ enum ProcessProbe {
         return yes
     }
 
-    /// Claude Code CLI (`claude`) or the desktop app (`Claude`).
+    /// Claude Code CLI only. The desktop app is `Claude` and uses a different token store —
+    /// matching it would skip refresh forever while the chat app is just sitting in the dock.
     static func claudeLive() -> Bool {
-        named("claude") || named("Claude")
+        named("claude")
     }
 
     private static func pgrepExact(_ name: String) -> Bool {

@@ -47,7 +47,7 @@ enum TokenReader {
     }
 
     static func markRefreshDead(_ refresh: String) {
-        invalidateDiskCache()
+        invalidateGrokCache()
         guard !refresh.isEmpty else { return }
         UserDefaults.standard.set(fingerprint(refresh), forKey: deadKey)
     }
@@ -93,7 +93,7 @@ enum TokenReader {
     }
 
     static func persist(_ auth: GrokAuth) -> String? {
-        invalidateDiskCache()
+        invalidateGrokCache()
         KeychainStore.saveAuth(auth)
         do {
             try writeBackAuthFile(auth)
@@ -122,23 +122,40 @@ enum TokenReader {
     private static var grokDiskCache: (at: Date, value: GrokAuth?)?
     private static var codexCache: (at: Date, value: CodexAuth?)?
     private static var claudeCache: (at: Date, value: ClaudeAuth?)?
+    private static var cursorTokCache: (at: Date, value: String?)?
+    private static let cacheLock = NSLock()
 
     static func invalidateDiskCache() {
+        cacheLock.lock()
         grokDiskCache = nil
         codexCache = nil
         claudeCache = nil
+        cursorTokCache = nil
+        cacheLock.unlock()
+    }
+
+    private static func invalidateGrokCache() {
+        cacheLock.lock()
+        grokDiskCache = nil
+        cacheLock.unlock()
     }
 
     static func loadGrokAuthFromDisk() -> GrokAuth? {
+        cacheLock.lock()
         if let cached = grokDiskCache, Date().timeIntervalSince(cached.at) < 20 {
-            return cached.value
+            let value = cached.value
+            cacheLock.unlock()
+            return value
         }
+        cacheLock.unlock()
         var found: [GrokAuth] = []
         for url in grokCandidateFiles() + grokDeepFiles() {
             if let auth = extractRecord(from: url) { found.append(auth) }
         }
         let value = found.first(where: { $0.canRefresh && !isDeadRefresh($0.refresh) }) ?? found.first
+        cacheLock.lock()
         grokDiskCache = (Date(), value)
+        cacheLock.unlock()
         return value
     }
 
@@ -395,10 +412,20 @@ enum TokenReader {
     }
 
     static func cursorTokenFromLocalApp() -> String? {
+        cacheLock.lock()
+        if let cached = cursorTokCache, Date().timeIntervalSince(cached.at) < 20 {
+            let value = cached.value
+            cacheLock.unlock()
+            return value
+        }
+        cacheLock.unlock()
         let support = home().appendingPathComponent("Library/Application Support/Cursor/User/globalStorage")
-        if let fromDB = readCursorDB(support.appendingPathComponent("state.vscdb")) { return scrub(fromDB) }
-        if let fromJSON = readCursorJSON(support.appendingPathComponent("storage.json")) { return scrub(fromJSON) }
-        return nil
+        let value = readCursorDB(support.appendingPathComponent("state.vscdb")).map(scrub)
+            ?? readCursorJSON(support.appendingPathComponent("storage.json")).map(scrub)
+        cacheLock.lock()
+        cursorTokCache = (Date(), value)
+        cacheLock.unlock()
+        return value
     }
 
     static func cursorAppPresent() -> Bool {
@@ -462,19 +489,31 @@ enum TokenReader {
     }
 
     static func loadCodexAuth() -> CodexAuth? {
+        cacheLock.lock()
         if let cached = codexCache, Date().timeIntervalSince(cached.at) < 20 {
-            return cached.value
+            let value = cached.value
+            cacheLock.unlock()
+            return value
         }
+        cacheLock.unlock()
         var found: CodexAuth?
         for url in codexCandidateFiles() {
             if let auth = extractCodex(from: url) { found = auth; break }
         }
+        cacheLock.lock()
         codexCache = (Date(), found)
+        cacheLock.unlock()
         return found
     }
 
     static func hasCodexSession() -> Bool {
-        if let cached = codexCache { return cached.value != nil }
+        cacheLock.lock()
+        if let cached = codexCache {
+            let yes = cached.value != nil
+            cacheLock.unlock()
+            return yes
+        }
+        cacheLock.unlock()
         return codexCandidateFiles().contains { FileManager.default.fileExists(atPath: $0.path) }
     }
 
@@ -485,13 +524,24 @@ enum TokenReader {
     }
 
     static func hasClaudeSession() -> Bool {
-        if let cached = claudeCache { return cached.value != nil }
+        cacheLock.lock()
+        if let cached = claudeCache {
+            let yes = cached.value != nil
+            cacheLock.unlock()
+            return yes
+        }
+        cacheLock.unlock()
         if loadClaudeKeychainData() != nil { return true }
         return claudeCandidateFiles().contains { FileManager.default.fileExists(atPath: $0.path) }
     }
 
     static func persistCodex(_ auth: CodexAuth) {
-        invalidateDiskCache()
+        cacheLock.lock()
+        if let current = codexCache?.value, current.access == auth.access, current.refresh == auth.refresh {
+            cacheLock.unlock()
+            return
+        }
+        cacheLock.unlock()
         if let current = loadCodexAuth(), current.access == auth.access, current.refresh == auth.refresh {
             return
         }
@@ -515,7 +565,9 @@ enum TokenReader {
         if let data = try? JSONSerialization.data(withJSONObject: bag, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: url, options: .atomic)
         }
+        cacheLock.lock()
         codexCache = (Date(), auth)
+        cacheLock.unlock()
     }
 
     static func saveCodexPasted(_ raw: String) -> Bool {
@@ -592,21 +644,35 @@ enum TokenReader {
     }
 
     static func loadClaudeAuth() -> ClaudeAuth? {
+        cacheLock.lock()
         if let cached = claudeCache, Date().timeIntervalSince(cached.at) < 20 {
-            return cached.value
+            let value = cached.value
+            cacheLock.unlock()
+            return value
         }
+        cacheLock.unlock()
         var found: [ClaudeAuth] = []
         if let key = loadClaudeFromKeychain() { found.append(key) }
         for url in claudeCandidateFiles() {
             if let auth = extractClaude(from: url) { found.append(auth) }
         }
         let value = found.max(by: { $0.expiresAt < $1.expiresAt })
+        cacheLock.lock()
         claudeCache = (Date(), value)
+        cacheLock.unlock()
         return value
     }
 
     static func persistClaude(_ auth: ClaudeAuth) {
-        invalidateDiskCache()
+        cacheLock.lock()
+        if let current = claudeCache?.value,
+           current.access == auth.access,
+           current.refresh == auth.refresh
+        {
+            cacheLock.unlock()
+            return
+        }
+        cacheLock.unlock()
         if let current = loadClaudeAuth(),
            current.access == auth.access,
            current.refresh == auth.refresh
@@ -630,7 +696,9 @@ enum TokenReader {
             try? data.write(to: url, options: .atomic)
         }
         writeClaudeKeychain(data)
+        cacheLock.lock()
         claudeCache = (Date(), auth)
+        cacheLock.unlock()
     }
 
     static func saveClaudePasted(_ raw: String) -> Bool {

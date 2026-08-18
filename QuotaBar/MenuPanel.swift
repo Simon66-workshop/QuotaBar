@@ -35,7 +35,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.6")
+                Text("v1.6.1")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -130,7 +130,7 @@ private struct ConnectCell: View {
             if formKeys.count > 1 {
                 Picker("Service", selection: $pick) {
                     ForEach(formKeys, id: \.self) { key in
-                        Text(UsageSources.source(for: key).connectTitle ?? key.title).tag(key)
+                        Text(UsageSources.source(for: key)?.connectTitle ?? key.title).tag(key)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -155,7 +155,7 @@ private struct ConnectCell: View {
 
     private var formKeys: [LaneKey] {
         var keys = idle.compactMap { lane -> LaneKey? in
-            UsageSources.source(for: lane.key).connectTitle == nil ? nil : lane.key
+            UsageSources.source(for: lane.key)?.connectTitle == nil ? nil : lane.key
         }
         if store.loginInProgress, !keys.contains(.grok) {
             keys.insert(.grok, at: 0)

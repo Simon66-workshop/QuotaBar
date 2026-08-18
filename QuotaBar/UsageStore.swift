@@ -34,6 +34,7 @@ final class UsageStore: ObservableObject {
     private var lastCapacityTick = Date.distantPast
     private var forceDiskTick = false
     private var mountedAt: [String: Date] = [:]
+    private var lastRefreshAt = Date.distantPast
 
     init() {
         launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
@@ -216,9 +217,11 @@ final class UsageStore: ObservableObject {
         if refreshRunning { return }
         refreshRunning = true
         busy = true
+        lastRefreshAt = Date()
         defer {
             busy = false
             refreshRunning = false
+            lastRefreshAt = Date()
         }
         let loaded = await UsageSources.loadAll()
         let next = Snapshot.assemble(loaded, fetchedAt: Date())
@@ -286,6 +289,7 @@ final class UsageStore: ObservableObject {
                 self.watchDebounce?.cancel()
                 let work = DispatchWorkItem { [weak self] in
                     guard let self, !self.refreshRunning else { return }
+                    if Date().timeIntervalSince(self.lastRefreshAt) < 8 { return }
                     Task { await self.refresh() }
                 }
                 self.watchDebounce = work
