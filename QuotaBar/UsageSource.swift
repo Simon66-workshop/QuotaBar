@@ -156,10 +156,14 @@ enum ProcessProbe {
             let a = arg.lowercased()
             if a.contains("claude.app/") { return false }
             let base = (a as NSString).lastPathComponent
-            return base == "claude"
+            guard base == "claude" else {
+                return a.contains("@anthropic-ai/claude") || a.hasSuffix("/claude.js")
+            }
+            // Require a CLI-shaped path so `node ./claude` project folders do not match.
+            return !a.contains("/")
                 || a.hasSuffix("/.bin/claude")
-                || a.contains("@anthropic-ai/claude")
-                || a.hasSuffix("/claude.js")
+                || a.contains("node_modules")
+                || a.contains("@anthropic")
         }
     }
 
@@ -169,7 +173,13 @@ enum ProcessProbe {
         guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 8 else { return nil }
         var buf = [UInt8](repeating: 0, count: size)
         guard sysctl(&mib, 3, &buf, &size, nil, 0) == 0, size > 8 else { return nil }
-        let argc = buf.prefix(4).withUnsafeBytes { $0.load(as: Int32.self) }
+        var argc: Int32 = 0
+        _ = withUnsafeMutableBytes(of: &argc) { dest in
+            buf.withUnsafeBytes { src in
+                memcpy(dest.baseAddress, src.baseAddress, min(4, src.count))
+            }
+        }
+        argc = Int32(littleEndian: argc)
         guard argc > 0, argc < 64 else { return nil }
         var idx = 4
         while idx < size && buf[idx] != 0 { idx += 1 }

@@ -40,6 +40,7 @@ final class DiskMonitor {
     private var bsdCache: [String: (path: String, names: [String])] = [:]
     private var hintCache: [String: String] = [:]
     private var rebuildWork: DispatchWorkItem?
+    private var daSession: DASession?
 
     private init() {}
 
@@ -76,6 +77,7 @@ final class DiskMonitor {
         bsdCache.removeAll()
         hintCache.removeAll()
         lastBytes.removeAll()
+        daSession = nil
     }
 
     func topologyDidChange() {
@@ -278,10 +280,16 @@ final class DiskMonitor {
         return names
     }
 
+    private func diskSession() -> DASession? {
+        if let daSession { return daSession }
+        daSession = DASessionCreate(kCFAllocatorDefault)
+        return daSession
+    }
+
     /// DiskArbitration BSD + whole-disk name. More stable than peeling statfs
     /// (`/dev/disk3s5` vs APFS container paths).
     private func daNames(for path: String) -> [String] {
-        guard let session = DASessionCreate(kCFAllocatorDefault) else { return [] }
+        guard let session = diskSession() else { return [] }
         let url = URL(fileURLWithPath: path, isDirectory: true) as CFURL
         guard let disk = DADiskCreateFromVolumePath(kCFAllocatorDefault, session, url) else { return [] }
         var names: [String] = []

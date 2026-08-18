@@ -39,6 +39,7 @@ final class UsageStore: ObservableObject {
     private var forceDiskTick = false
     private var mountedAt: [String: Date] = [:]
     private var lastRefreshAt = Date.distantPast
+    private var relayoutWork: DispatchWorkItem?
 
     init() {
         launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
@@ -199,9 +200,12 @@ final class UsageStore: ObservableObject {
     }
 
     func requestPanelRelayout() {
-        DispatchQueue.main.async { [weak self] in
+        relayoutWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
             self?.onPanelRelayout?()
         }
+        relayoutWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
     }
 
     func toggleInspect(_ disk: DiskVolume) {
@@ -340,6 +344,7 @@ final class UsageStore: ObservableObject {
 
     private func stopWatch() {
         watchDebounce?.cancel()
+        relayoutWork?.cancel()
         for src in authWatchers { src.cancel() }
         authWatchers.removeAll()
         watchFds.removeAll()

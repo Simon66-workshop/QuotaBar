@@ -160,13 +160,11 @@ enum UsageClient {
         guard var auth = TokenReader.loadClaudeAuth() else {
             return .empty(.claude, sub: "Claude Code 5h + 7d  ·  run `claude` once")
         }
-        let cliLive = ProcessProbe.claudeLive()
         if auth.canRefresh, auth.isStale || auth.access.isEmpty {
-            if cliLive {
+            if ProcessProbe.claudeLive() {
                 if auth.access.isEmpty {
                     return .error(.claude, message: "Claude Code is running — waiting for its token")
                 }
-                // Leave refresh to the live CLI so we do not rotate the grant out from under it.
             } else {
                 switch await refreshClaude(auth) {
                 case .ok(let next):
@@ -184,7 +182,7 @@ enum UsageClient {
             if let lane = parseClaude(json, auth: auth) { return lane }
             return .error(.claude, message: "Claude usage 200 but no 5h / 7d window")
         } catch AuthError.http(let code) where code == 401 || code == 403 {
-            if cliLive {
+            if ProcessProbe.claudeLive() {
                 return .error(.claude, message: "Claude Code is running — token is stale, wait for it to refresh")
             }
             if auth.canRefresh {

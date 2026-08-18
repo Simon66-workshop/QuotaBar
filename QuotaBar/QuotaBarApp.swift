@@ -189,6 +189,9 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
     }
 
     private func applyFittedSize(_ host: ClearHosting<AnyView>, under button: NSView) {
+        // Unconstrain so sizeThatFits measures content, not the last frame.
+        host.view.setFrameSize(NSSize(width: 352, height: 1))
+        host.view.layoutSubtreeIfNeeded()
         var fitted = host.sizeThatFits(in: NSSize(width: 352, height: 900))
         if !fitted.height.isFinite || fitted.height < 160 {
             fitted = NSSize(width: 352, height: 360)
