@@ -35,7 +35,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.8.1")
+                Text("v1.8.2")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -435,7 +435,7 @@ private struct DiskSection: View {
     @EnvironmentObject private var store: UsageStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 5) {
             HStack {
                 Text("Disks")
                     .font(.system(size: 11, weight: .semibold))
@@ -448,12 +448,14 @@ private struct DiskSection: View {
                 Text("Waiting for mounted volumes…")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+            } else if !store.disks.isEmpty {
+                DiskTableHeader()
+                ForEach(Array(store.disks.prefix(8))) { disk in
+                    DiskRow(disk: disk)
+                }
             }
-            ForEach(Array(store.disks.prefix(6))) { disk in
-                DiskRow(disk: disk)
-            }
-            if store.disks.count > 6 {
-                Text("+\(store.disks.count - 6) more volumes")
+            if store.disks.count > 8 {
+                Text("+\(store.disks.count - 8) more volumes")
                     .font(.system(size: 10.5))
                     .foregroundStyle(.tertiary)
             }
@@ -468,7 +470,11 @@ private struct DiskSection: View {
                 }
                 .padding(.top, 4)
                 ForEach(store.hiddenDisks) { disk in
-                    HStack {
+                    HStack(spacing: 6) {
+                        Text(disk.barLetter)
+                            .font(.system(size: 10, weight: .bold).monospaced())
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 12)
                         Text(disk.name)
                             .font(.system(size: 11.5))
                             .foregroundStyle(.secondary)
@@ -490,8 +496,33 @@ private struct DiskSection: View {
 
     private var countLabel: String {
         let n = store.disks.count
+        let ext = store.disks.filter { $0.kind == .external }.count
         if n == 0 { return store.hiddenDisks.isEmpty ? "none" : "all hidden" }
-        return "\(n) volume\(n == 1 ? "" : "s")"
+        if ext == 0 { return "\(n)" }
+        return "\(n)  ·  \(ext) external"
+    }
+}
+
+private struct DiskTableHeader: View {
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("").frame(width: 12)
+            Text("Name")
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("Used")
+                .frame(width: 34, alignment: .trailing)
+            Text("")
+                .frame(width: 42)
+            Text("Free")
+                .frame(width: 50, alignment: .trailing)
+            Text("I/O")
+                .frame(width: 56, alignment: .trailing)
+            Text("")
+                .frame(width: 28)
+        }
+        .font(.system(size: 9.5, weight: .semibold))
+        .foregroundStyle(.tertiary)
+        .padding(.bottom, 1)
     }
 }
 
@@ -500,68 +531,84 @@ private struct DiskRow: View {
     let disk: DiskVolume
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(disk.name)
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                if disk.suggestedIgnore, let hint = disk.ignoreHint {
-                    Text(hint)
-                        .font(.system(size: 9.5, weight: .medium))
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Color.white.opacity(0.10), in: Capsule())
-                }
-                Spacer()
-                Text("\(Int(disk.usedPct.rounded()))%")
-                    .font(.system(size: 16, weight: .bold).monospacedDigit())
-                    .foregroundStyle(color)
-            }
-            ProgressView(value: min(max(disk.usedPct, 0), 100), total: 100)
-                .tint(color == .primary ? .accentColor : color)
-            HStack {
-                Text("\(disk.kindLabel) · \(disk.statusLabel)")
-                Spacer()
-                Text(disk.rateLabel)
-                    .monospacedDigit()
-            }
-            .font(.system(size: 10.5))
-            .foregroundStyle(.secondary)
-            HStack {
-                Text(disk.sizeLabel)
-                if let note = disk.justChanged {
-                    Text(note)
-                        .foregroundStyle(.orange)
-                }
-                Spacer()
-                Button(store.expandedDiskID == disk.id ? "Health ▾" : "Health") {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Button {
                     store.toggleInspect(disk)
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(disk.barLetter)
+                            .font(.system(size: 10, weight: .bold).monospaced())
+                            .foregroundStyle(disk.kind == .external ? Color.accentColor : Color.secondary)
+                            .frame(width: 12)
+                        HStack(spacing: 4) {
+                            Text(disk.name)
+                                .font(.system(size: 12, weight: .semibold))
+                                .lineLimit(1)
+                            if let note = disk.justChanged {
+                                Text("new")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(.orange)
+                            } else if disk.suggestedIgnore, let hint = disk.ignoreHint {
+                                Text(hint)
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        Text("\(Int(disk.usedPct.rounded()))%")
+                            .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(color)
+                            .frame(width: 34, alignment: .trailing)
+                        ProgressView(value: min(max(disk.usedPct, 0), 100), total: 100)
+                            .tint(color == .primary ? .accentColor : color)
+                            .frame(width: 42)
+                        Text(disk.freeLabel)
+                            .font(.system(size: 11).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 50, alignment: .trailing)
+                            .lineLimit(1)
+                        Text(disk.rateShort)
+                            .font(.system(size: 10).monospacedDigit())
+                            .foregroundStyle(disk.rateShort == "—" ? .tertiary : .secondary)
+                            .frame(width: 56, alignment: .trailing)
+                            .lineLimit(1)
+                    }
+                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.borderless)
-                .font(.system(size: 10.5, weight: .semibold))
-                Button(disk.suggestedIgnore ? "Hide \(disk.ignoreHint ?? "disk")" : "Hide") {
-                    store.ignoreDisk(disk.id)
-                }
-                .buttonStyle(.borderless)
-                .font(.system(size: 10.5, weight: .semibold))
+                .buttonStyle(.plain)
+                Button("Hide") { store.ignoreDisk(disk.id) }
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 10, weight: .semibold))
+                    .frame(width: 28, alignment: .trailing)
             }
-            .font(.system(size: 10.5))
-            .foregroundStyle(.secondary)
             if store.expandedDiskID == disk.id {
-                if store.healthBusyID == disk.id {
-                    Text("Reading SMART…")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.tertiary)
-                } else if let health = store.diskHealth[disk.id] {
-                    Text(health.line)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(health.smart.lowercased().contains("fail") ? .orange : .secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("")
+                        .frame(width: 12)
+                    if store.healthBusyID == disk.id {
+                        Text("Reading SMART…")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.tertiary)
+                    } else if let health = store.diskHealth[disk.id] {
+                        Text(healthLine(health))
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(health.smart.lowercased().contains("fail") ? .orange : .secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 3)
+    }
+
+    private func healthLine(_ health: DiskHealth) -> String {
+        var parts = [health.smart]
+        if !health.bus.isEmpty { parts.append(health.bus) }
+        parts.append(disk.sizeLabel)
+        parts.append(disk.statusLabel)
+        if !health.note.isEmpty { parts.append(health.note) }
+        return parts.joined(separator: "  ·  ")
     }
 
     private var color: Color {

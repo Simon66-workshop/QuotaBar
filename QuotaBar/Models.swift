@@ -137,6 +137,15 @@ struct DiskVolume: Identifiable, Equatable {
 
     var kindLabel: String { kind.rawValue }
 
+    var barLetter: String { kind == .external ? "E" : "D" }
+
+    var freeLabel: String { Self.bytes(freeBytes) }
+
+    var rateShort: String {
+        if readBps + writeBps < 50_000 { return "—" }
+        return "↓\(Self.compact(readBps)) ↑\(Self.compact(writeBps))"
+    }
+
     static func bytes(_ n: Int64) -> String {
         let f = ByteCountFormatter()
         f.allowedUnits = [.useMB, .useGB, .useTB]
@@ -151,6 +160,14 @@ struct DiskVolume: Identifiable, Equatable {
         f.countStyle = .binary
         f.includesUnit = true
         return f.string(fromByteCount: Int64(max(0, bps))) + "/s"
+    }
+
+    static func compact(_ bps: Double) -> String {
+        let n = max(0, bps)
+        if n < 1_024 { return "0" }
+        if n < 1_048_576 { return "\(Int((n / 1_024).rounded()))K" }
+        if n < 1_073_741_824 { return String(format: "%.1fM", n / 1_048_576) }
+        return String(format: "%.1fG", n / 1_073_741_824)
     }
 }
 
