@@ -4,22 +4,25 @@ import SwiftUI
 
 @main
 final class QuotaBarApp: NSObject, NSApplicationDelegate {
+    /// NSApplication.delegate is unowned — keep the instance alive for the process lifetime.
+    private static var retained: QuotaBarApp?
+
     private var statusItem: NSStatusItem?
     private var panel: GlassPanel?
-    /// CRITICAL: must retain the hosting controller. Retaining only the panel / contentView
-    /// lets ARC free NSHostingController → panel appears blank / non-interactive
-    /// ("bar click does nothing").
+    /// Must retain the hosting controller. Retaining only the panel/view lets ARC
+    /// free NSHostingController → blank, dead panel ("bar click does nothing").
     private var panelHost: NSViewController?
     private var store: UsageStore?
     private var titleWatch: AnyCancellable?
     private var clickMonitor: Any?
     private var monitorWorkItem: DispatchWorkItem?
-    /// Ignore outside-clicks briefly after open so the opening click cannot dismiss.
     private var openedAt: Date = .distantPast
+    private var fallbackMenu: NSMenu?
 
     static func main() {
         let app = NSApplication.shared
         let delegate = QuotaBarApp()
+        retained = delegate
         app.delegate = delegate
         app.setActivationPolicy(.accessory)
         app.run()
@@ -32,20 +35,26 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         guard let button = item.button else { return }
         button.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
-        button.title = store.snap.menuTitle
         button.target = self
-        button.action = #selector(togglePanel(_:))
+        // Do not mark this selector private — some macOS builds drop private @objc actions.
+        button.action = #selector(handleBarClick(_:))
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         statusItem = item
+        applyTitle(store.snap)
 
         titleWatch = store.$snap
             .receive(on: RunLoop.main)
             .sink { [weak self] snap in
-                self?.statusItem?.button?.title = snap.menuTitle
+                self?.applyTitle(snap)
             }
     }
 
-    @objc private func togglePanel(_ sender: Any?) {
+    @objc func handleBarClick(_ sender: Any?) {
+        let type = NSApp.currentEvent?.type
+        if type == .rightMouseUp {
+            showFallbackMenu()
+            return
+        }
         if let panel, panel.isVisible {
             hidePanel()
         } else {
@@ -57,18 +66,15 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         hidePanel()
         guard let store, let button = statusItem?.button else { return }
 
-        // Accessory apps need an explicit activate so the panel can become key
-        // and SwiftUI controls (buttons / SecureField) work.
         NSApp.activate(ignoringOtherApps: true)
 
         let host = ClearHosting(rootView: MenuPanel().environmentObject(store))
-        // Force view load before measuring.
         _ = host.view
         var fitted = host.sizeThatFits(in: NSSize(width: 352, height: 900))
         if !fitted.height.isFinite || fitted.height < 200 {
             fitted = NSSize(width: 352, height: 420)
         }
-        let height = Swift.min(Swift.max(fitted.height, 360), 640)
+        let height = Swift.min(Swift.max(fitted.height, 360), 660)
         let size = NSSize(width: 352, height: height)
         host.view.frame = NSRect(origin: .zero, size: size)
 
@@ -85,7 +91,6 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
-        // popUpMenu is above most UI and stays with the menu bar.
         panel.level = .popUpMenu
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
@@ -99,16 +104,14 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
 
         position(panel, size: size, under: button)
 
-        // Strong refs BEFORE orderFront — otherwise ARC frees host mid-show.
         self.panelHost = host
         self.panel = panel
         self.openedAt = Date()
 
         panel.orderFrontRegardless()
         panel.makeKeyAndOrderFront(nil)
+        button.highlight(true)
 
-        // Install outside-click monitor after a short delay so the opening
-        // mouse-up cannot immediately dismiss the panel.
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.panel === panel, panel.isVisible else { return }
             self.clickMonitor = NSEvent.addGlobalMonitorForEvents(
@@ -136,6 +139,7 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
             NSEvent.removeMonitor(clickMonitor)
             self.clickMonitor = nil
         }
+        statusItem?.button?.highlight(false)
         if let panel {
             panel.orderOut(nil)
             panel.contentView = nil
@@ -143,6 +147,100 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         }
         self.panel = nil
         self.panelHost = nil
+    }
+
+    private func showFallbackMenu() {
+        hidePanel()
+        guard let store, let button = statusItem?.button else { return }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        let header = NSMenuItem(title: store.snap.menuTitle, action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+        menu.addItem(.separator())
+
+        for lane in store.snap.lanes {
+            let line = "\(lane.key.title)  \(lane.label)  ·  \(lane.sub)"
+            let item = NSMenuItem(title: String(line.prefix(80)), action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        }
+
+        menu.addItem(.separator())
+        menu.addItem(makeItem("Refresh now", #selector(menuRefresh)))
+        menu.addItem(makeItem("Copy summary", #selector(menuCopy)))
+        if store.snap.grok.tone == .empty || store.snap.grok.tone == .error {
+            menu.addItem(makeItem("Sign in with Grok…", #selector(menuSignIn)))
+        } else {
+            menu.addItem(makeItem("Re-sign in with Grok…", #selector(menuSignIn)))
+            menu.addItem(makeItem("Disconnect Grok", #selector(menuDisconnect)))
+        }
+        menu.addItem(.separator())
+        let alerts = makeItem(store.notifyEnabled ? "Alerts ✓" : "Alerts", #selector(menuToggleAlerts))
+        menu.addItem(alerts)
+        let login = makeItem(store.launchAtLogin ? "Open at login ✓" : "Open at login", #selector(menuToggleLogin))
+        menu.addItem(login)
+        menu.addItem(.separator())
+        menu.addItem(makeItem("Quit QuotaBar", #selector(menuQuit)))
+
+        fallbackMenu = menu
+        if let event = NSApp.currentEvent {
+            NSMenu.popUpContextMenu(menu, with: event, for: button)
+        } else {
+            statusItem?.menu = menu
+            button.performClick(nil)
+            DispatchQueue.main.async { [weak self] in
+                self?.statusItem?.menu = nil
+            }
+        }
+    }
+
+    private func makeItem(_ title: String, _ sel: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: sel, keyEquivalent: "")
+        item.target = self
+        return item
+    }
+
+    @objc func menuRefresh() { Task { await store?.refresh() } }
+    @objc func menuCopy() { store?.copySummary() }
+    @objc func menuSignIn() { store?.startDeviceLogin(); showPanel() }
+    @objc func menuDisconnect() { Task { await store?.disconnectGrok() } }
+    @objc func menuToggleAlerts() { store?.toggleNotify() }
+    @objc func menuToggleLogin() { store?.toggleLaunchAtLogin() }
+    @objc func menuQuit() { store?.quit() }
+
+    private func applyTitle(_ snap: Snapshot) {
+        guard let button = statusItem?.button else { return }
+        let raw = snap.menuTitle
+        let attr = NSMutableAttributedString(string: raw)
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+        attr.addAttribute(.font, value: font, range: NSRange(location: 0, length: attr.length))
+        attr.addAttribute(.foregroundColor, value: NSColor.labelColor, range: NSRange(location: 0, length: attr.length))
+
+        func color(for lane: Lane) -> NSColor? {
+            switch lane.tone {
+            case .warn: return .systemOrange
+            case .crit, .error: return .systemRed
+            default: return nil
+            }
+        }
+
+        let parts: [(Lane, String)] = [
+            (snap.grok, snap.grok.key.letter),
+            (snap.cursor, snap.cursor.key.letter),
+            (snap.bot, snap.bot.key.letter),
+        ]
+        for (lane, letter) in parts {
+            guard let tint = color(for: lane) else { continue }
+            let needle = "\(letter) \(lane.label == "—" ? "—" : "\(Int(lane.usedPct ?? 0))")"
+            if let range = raw.range(of: needle) {
+                let ns = NSRange(range, in: raw)
+                attr.addAttribute(.foregroundColor, value: tint, range: ns)
+            }
+        }
+        button.attributedTitle = attr
+        button.toolTip = snap.lanes.map { "\($0.key.title) \($0.label) · \($0.sub)" }.joined(separator: "\n")
     }
 
     private func position(_ panel: NSPanel, size: NSSize, under button: NSView) {
@@ -180,8 +278,7 @@ final class ClearHosting<Content: View>: NSHostingController<Content> {
     }
 }
 
-/// Card-sized glass only. Never full-screen — a previous full-screen effect view
-/// ate all desktop clicks.
+/// Card-sized glass only. Never full-screen — a previous overlay ate desktop clicks.
 final class GlassBackdrop: NSView {
     private let effect: NSVisualEffectView
 
