@@ -23,6 +23,16 @@ enum LaneKey: String, CaseIterable, Identifiable {
         case .claude: "A"
         }
     }
+
+    var windowShort: String {
+        switch self {
+        case .grok: "week"
+        case .cursor: "month"
+        case .bot: "week"
+        case .gpt: "cap"
+        case .claude: "5h"
+        }
+    }
 }
 
 enum Tone: String {
