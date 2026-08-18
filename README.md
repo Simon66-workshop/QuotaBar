@@ -1,4 +1,4 @@
-# QuotaBar
+# QuotaBar 1.3
 
 Mac menu bar extra for live Grok / Cursor / Grok Bot usage.
 
@@ -15,15 +15,24 @@ Mac menu bar extra for live Grok / Cursor / Grok Bot usage.
 
 QuotaBar appears on the right of the menu bar as `G 5 · C 0 · B 4`. No Dock icon.
 
+- **Left-click** the bar → glass panel
+- **Right-click** the bar → native menu (always works even if the panel fails)
+
 Later launches: just double-click `Start QuotaBar.command` again.
 
 ## What it reads
 
-- **Grok**: `~/.grok/auth.json` (and Keychain). Grok CLI 0.2.111 often prints "Signed in" but does not write disk — use **Sign in with Grok** inside the panel; QuotaBar runs the same OIDC device flow and writes `auth.json` itself.
-- **Cursor + Grok Bot**: Cursor local session (`state.vscdb`)
+- Grok: `~/.grok/auth.json` + in-app device login (writes the file itself)
+- Cursor + Grok Bot: Cursor local session (`state.vscdb`)
 
 If Cursor shows `—`, open Cursor once, then start QuotaBar again.
 
-## Panel
+## 1.3
 
-Click the menu bar title to open the glass panel. Click outside (or the title again) to close. Alerts fire at ≥80% usage.
+- Panel host retain + no `.transient` (bar click was dead)
+- Right-click fallback menu
+- Colored bar numbers when usage is high
+- Remaining % + copy summary / copy device code
+- Account row (re-sign in / disconnect) when Grok is linked
+- Soft-fail token refresh; paste-only tokens work
+- Debounced `~/.grok` watcher

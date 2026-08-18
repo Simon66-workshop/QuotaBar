@@ -40,9 +40,9 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleVersion</key>
-  <string>1</string>
+  <string>3</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.2</string>
+  <string>1.3</string>
   <key>LSUIElement</key>
   <true/>
   <key>LSMinimumSystemVersion</key>
@@ -59,8 +59,7 @@ echo -n 'APPL????' > "$APP/Contents/PkgInfo"
 SHA="$(cat "$SRC"/*.swift | shasum -a 256 | awk '{print $1}')"
 OLD="$(cat "$STAMP" 2>/dev/null || true)"
 if [[ ! -x "$BIN" || "$SHA" != "$OLD" ]]; then
-  osascript -e 'display notification "正在编译 QuotaBar…" with title "QuotaBar"'
-  # Kill any running copy so the binary can be overwritten.
+  osascript -e 'display notification "正在编译 QuotaBar 1.3…" with title "QuotaBar"'
   pkill -x QuotaBar 2>/dev/null || true
   sleep 0.3
   swiftc -parse-as-library -O \
@@ -84,14 +83,12 @@ if [[ ! -x "$BIN" || "$SHA" != "$OLD" ]]; then
 fi
 
 xattr -dr com.apple.quarantine "$APP" "$HERE" 2>/dev/null || true
-# replace a running copy
 pkill -x QuotaBar 2>/dev/null || true
 sleep 0.2
 open "$APP"
 
-osascript -e 'display notification "已出现在屏幕右上角菜单栏" with title "QuotaBar"' || true
+osascript -e 'display notification "已出现在屏幕右上角菜单栏 · 左键面板 · 右键菜单" with title "QuotaBar 1.3"' || true
 
-# close this Terminal window if we were launched by double-click
 tty -s && osascript <<'EOF' || true
 tell application "Terminal"
   if (count of windows) > 0 then close front window
