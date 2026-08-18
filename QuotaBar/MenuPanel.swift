@@ -35,7 +35,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.6.1")
+                Text("v1.7")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -150,6 +150,15 @@ private struct ConnectCell: View {
         .onChange(of: idle.map(\.id)) { _, _ in syncPick() }
         .onChange(of: store.loginInProgress) { _, live in
             if live { pick = .grok }
+            store.requestPanelRelayout()
+        }
+        .onChange(of: pick) { _, _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                store.requestPanelRelayout()
+            }
+        }
+        .onChange(of: store.deviceUserCode) { _, _ in
+            store.requestPanelRelayout()
         }
     }
 
@@ -526,6 +535,11 @@ private struct DiskRow: View {
                         .foregroundStyle(.orange)
                 }
                 Spacer()
+                Button(store.expandedDiskID == disk.id ? "Health ▾" : "Health") {
+                    store.toggleInspect(disk)
+                }
+                .buttonStyle(.borderless)
+                .font(.system(size: 10.5, weight: .semibold))
                 Button(disk.suggestedIgnore ? "Hide \(disk.ignoreHint ?? "disk")" : "Hide") {
                     store.ignoreDisk(disk.id)
                 }
@@ -534,6 +548,18 @@ private struct DiskRow: View {
             }
             .font(.system(size: 10.5))
             .foregroundStyle(.secondary)
+            if store.expandedDiskID == disk.id {
+                if store.healthBusyID == disk.id {
+                    Text("Reading SMART…")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.tertiary)
+                } else if let health = store.diskHealth[disk.id] {
+                    Text(health.line)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(health.smart.lowercased().contains("fail") ? .orange : .secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
         .padding(.vertical, 6)
     }

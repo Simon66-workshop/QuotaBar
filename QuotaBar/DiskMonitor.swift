@@ -1,5 +1,6 @@
 import AppKit
 import Darwin
+import DiskArbitration
 import Foundation
 import IOKit
 
@@ -19,6 +20,10 @@ final class DiskMonitor {
 
     static func snapshot(includeIO: Bool) -> [DiskVolume] {
         shared.snapshot(includeIO: includeIO)
+    }
+
+    static func health(uuid: String, path: String) -> DiskHealth {
+        shared.health(uuid: uuid, path: path)
     }
 
     private var lastBytes: [String: (r: UInt64, w: UInt64, t: Date)] = [:]
@@ -248,11 +253,6 @@ final class DiskMonitor {
         for name in names {
             if let c = io[name] { return c }
         }
-        for name in names {
-            if let key = io.keys.first(where: { name.hasPrefix($0) || $0.hasPrefix(name) }) {
-                return io[key]
-            }
-        }
         return nil
     }
 
@@ -260,20 +260,40 @@ final class DiskMonitor {
         if let cached = bsdCache[uuid], cached.path == path {
             return cached.names
         }
-        var s = statfs()
-        guard statfs(path, &s) == 0 else { return [] }
-        let raw = mntfrom(&s)
-        var slice = raw.split(separator: "/").last.map(String.init) ?? raw
-        if slice.hasPrefix("/dev/") {
-            slice = String(slice.dropFirst(5))
-        }
         var names: [String] = []
-        if !slice.isEmpty { names.append(slice) }
-        if let parent = wholeDisk(slice) { names.append(parent) }
-        names.append(contentsOf: physicalNames(from: slice))
+        names.append(contentsOf: daNames(for: path))
+        var s = statfs()
+        if statfs(path, &s) == 0 {
+            let raw = mntfrom(&s)
+            var slice = raw.split(separator: "/").last.map(String.init) ?? raw
+            if slice.hasPrefix("/dev/") { slice = String(slice.dropFirst(5)) }
+            if slice.hasPrefix("disk") { names.append(slice) }
+            if let parent = wholeDisk(slice) { names.append(parent) }
+            names.append(contentsOf: physicalNames(from: slice))
+        }
+        if !uuid.isEmpty { names.append(uuid) }
         var seen = Set<String>()
         names = names.filter { seen.insert($0).inserted && !$0.isEmpty }
         bsdCache[uuid] = (path, names)
+        return names
+    }
+
+    /// DiskArbitration BSD + whole-disk name. More stable than peeling statfs
+    /// (`/dev/disk3s5` vs APFS container paths).
+    private func daNames(for path: String) -> [String] {
+        guard let session = DASessionCreate(kCFAllocatorDefault) else { return [] }
+        let url = URL(fileURLWithPath: path, isDirectory: true) as CFURL
+        guard let disk = DADiskCreateFromVolumePath(kCFAllocatorDefault, session, url) else { return [] }
+        var names: [String] = []
+        if let cstr = DADiskGetBSDName(disk) {
+            let bsd = String(cString: cstr)
+            if bsd.hasPrefix("disk") { names.append(bsd) }
+            if let parent = wholeDisk(bsd) { names.append(parent) }
+        }
+        if let whole = DADiskCopyWholeDisk(disk), let cstr = DADiskGetBSDName(whole) {
+            let bsd = String(cString: cstr)
+            if bsd.hasPrefix("disk") { names.append(bsd) }
+        }
         return names
     }
 
@@ -443,6 +463,9 @@ final class DiskMonitor {
                 names.append(bsd)
                 if let parentDisk = wholeDisk(bsd) { names.append(parentDisk) }
             }
+            if let uuid = cfString(child, "UUID"), !uuid.isEmpty {
+                names.append(uuid)
+            }
             names.append(contentsOf: mediaNames(parent: child, depth: depth + 1))
         }
         var seen = Set<String>()
@@ -464,5 +487,72 @@ final class DiskMonitor {
         if let n = value as? NSNumber { return n.uint64Value }
         if let n = value as? UInt64 { return n }
         return nil
+    }
+
+    /// One-shot SMART / bus / temperature. Never call from the 3s I/O timer.
+    func health(uuid: String, path: String) -> DiskHealth {
+        var smart = "SMART unavailable"
+        var bus = ""
+        var notes: [String] = []
+
+        if let session = DASessionCreate(kCFAllocatorDefault) {
+            let url = URL(fileURLWithPath: path, isDirectory: true) as CFURL
+            if let disk = DADiskCreateFromVolumePath(kCFAllocatorDefault, session, url),
+               let raw = DADiskCopyDescription(disk)
+            {
+                let desc = raw as NSDictionary
+                if let proto = desc["DADeviceProtocol"] as? String, !proto.isEmpty {
+                    bus = proto
+                }
+                if let model = desc["DADeviceModel"] as? String, !model.isEmpty {
+                    notes.append(model.trimmingCharacters(in: .whitespaces))
+                }
+                if desc["DADeviceInternal"] as? Bool == true { notes.append("internal") }
+                if desc["DAMediaEjectable"] as? Bool == true { notes.append("ejectable") }
+            }
+        }
+
+        if let info = diskutilInfo(path) {
+            if let status = info["SMARTStatus"] as? String, !status.isEmpty {
+                switch status.lowercased() {
+                case "verified": smart = "SMART verified"
+                case "failing", "failing now": smart = "SMART failing"
+                case "not supported": smart = "SMART not supported"
+                default: smart = "SMART \(status)"
+                }
+            }
+            if let proto = info["BusProtocol"] as? String, !proto.isEmpty { bus = proto }
+            if let solid = info["SolidState"] as? Bool {
+                notes.append(solid ? "SSD" : "HDD")
+            }
+        }
+
+        var seen = Set<String>()
+        notes = notes.filter { seen.insert($0.lowercased()).inserted }
+        return DiskHealth(
+            smart: smart,
+            bus: bus,
+            temperature: nil,
+            note: notes.joined(separator: " · ")
+        )
+    }
+
+    private func diskutilInfo(_ path: String) -> [String: Any]? {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/sbin/diskutil")
+        task.arguments = ["info", "-plist", path]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = FileHandle.nullDevice
+        do {
+            try task.run()
+            task.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            guard task.terminationStatus == 0, !data.isEmpty else { return nil }
+            var fmt = PropertyListSerialization.PropertyListFormat.xml
+            return try PropertyListSerialization.propertyList(from: data, options: [], format: &fmt) as? [String: Any]
+        } catch {
+            return nil
+        }
     }
 }

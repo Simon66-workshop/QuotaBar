@@ -77,6 +77,21 @@ enum DiskKind: String {
     case image = "Image"
 }
 
+struct DiskHealth: Equatable {
+    var smart: String
+    var bus: String
+    var temperature: String?
+    var note: String
+
+    var line: String {
+        var parts = [smart]
+        if !bus.isEmpty { parts.append(bus) }
+        if let temperature { parts.append(temperature) }
+        if !note.isEmpty { parts.append(note) }
+        return parts.joined(separator: "  ·  ")
+    }
+}
+
 struct DiskVolume: Identifiable, Equatable {
     var id: String
     var name: String

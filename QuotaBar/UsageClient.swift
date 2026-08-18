@@ -231,7 +231,7 @@ enum UsageClient {
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("1", forHTTPHeaderField: "Connect-Protocol-Version")
-        req.setValue("QuotaBar/1.6", forHTTPHeaderField: "User-Agent")
+        req.setValue("QuotaBar/1.7", forHTTPHeaderField: "User-Agent")
         req.httpBody = Data("{}".utf8)
         let (data, res) = try await URLSession.shared.data(for: req)
         return try decode(data, res)
@@ -243,7 +243,7 @@ enum UsageClient {
         req.timeoutInterval = timeout
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
-        req.setValue("QuotaBar/1.6", forHTTPHeaderField: "User-Agent")
+        req.setValue("QuotaBar/1.7", forHTTPHeaderField: "User-Agent")
         let (data, res) = try await URLSession.shared.data(for: req)
         return try decode(data, res)
     }
@@ -254,7 +254,7 @@ enum UsageClient {
         req.timeoutInterval = timeout
         req.setValue("Bearer \(auth.access)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
-        req.setValue("QuotaBar/1.6", forHTTPHeaderField: "User-Agent")
+        req.setValue("QuotaBar/1.7", forHTTPHeaderField: "User-Agent")
         if !auth.accountId.isEmpty {
             req.setValue(auth.accountId, forHTTPHeaderField: "ChatGPT-Account-ID")
         }
@@ -267,7 +267,7 @@ enum UsageClient {
             alt.timeoutInterval = timeout
             alt.setValue("Bearer \(auth.access)", forHTTPHeaderField: "Authorization")
             alt.setValue("application/json", forHTTPHeaderField: "Accept")
-            alt.setValue("QuotaBar/1.6", forHTTPHeaderField: "User-Agent")
+            alt.setValue("QuotaBar/1.7", forHTTPHeaderField: "User-Agent")
             if !auth.accountId.isEmpty {
                 alt.setValue(auth.accountId, forHTTPHeaderField: "ChatGPT-Account-ID")
             }
@@ -317,7 +317,7 @@ enum UsageClient {
         req.setValue("Bearer \(auth.access)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-        req.setValue("QuotaBar/1.6", forHTTPHeaderField: "User-Agent")
+        req.setValue("QuotaBar/1.7", forHTTPHeaderField: "User-Agent")
         let (data, res) = try await URLSession.shared.data(for: req)
         return try decode(data, res)
     }

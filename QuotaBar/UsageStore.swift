@@ -16,9 +16,13 @@ final class UsageStore: ObservableObject {
     @Published var disks: [DiskVolume] = []
     @Published var hiddenDisks: [DiskVolume] = []
     @Published var ignoredIDs: Set<String>
+    @Published var expandedDiskID: String?
+    @Published var diskHealth: [String: DiskHealth] = [:]
+    @Published var healthBusyID: String?
 
     var onWillOpenBrowser: (() -> Void)?
     var onLoginFinished: (() -> Void)?
+    var onPanelRelayout: (() -> Void)?
 
     private var timer: AnyCancellable?
     private var diskTimer: AnyCancellable?
@@ -191,6 +195,37 @@ final class UsageStore: ObservableObject {
         copiedNote = note
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
             if self?.copiedNote == note { self?.copiedNote = "" }
+        }
+    }
+
+    func requestPanelRelayout() {
+        DispatchQueue.main.async { [weak self] in
+            self?.onPanelRelayout?()
+        }
+    }
+
+    func toggleInspect(_ disk: DiskVolume) {
+        if expandedDiskID == disk.id {
+            expandedDiskID = nil
+            requestPanelRelayout()
+            return
+        }
+        expandedDiskID = disk.id
+        if diskHealth[disk.id] != nil {
+            requestPanelRelayout()
+            return
+        }
+        healthBusyID = disk.id
+        let id = disk.id
+        let path = disk.path
+        Task.detached {
+            let health = DiskMonitor.health(uuid: id, path: path)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.diskHealth[id] = health
+                if self.healthBusyID == id { self.healthBusyID = nil }
+                self.requestPanelRelayout()
+            }
         }
     }
 
@@ -395,6 +430,10 @@ final class UsageStore: ObservableObject {
             return copy
         }
         lastDiskAlert = lastDiskAlert.filter { key, _ in next.contains(where: { $0.id == key }) }
+        diskHealth = diskHealth.filter { key, _ in next.contains(where: { $0.id == key }) }
+        if let expandedDiskID, !next.contains(where: { $0.id == expandedDiskID }) {
+            self.expandedDiskID = nil
+        }
 
         next.sort { a, b in
             let aNew = a.justChanged != nil

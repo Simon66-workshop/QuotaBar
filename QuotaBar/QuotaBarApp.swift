@@ -8,7 +8,7 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem?
     private var panel: GlassPanel?
-    private var panelHost: NSViewController?
+    private var panelHost: ClearHosting<AnyView>?
     private var store: UsageStore?
     private var titleWatch: AnyCancellable?
     private var localMonitor: Any?
@@ -37,6 +37,9 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         store.onLoginFinished = { [weak self] in
             self?.hidePanel()
             self?.rebuildStatusItem()
+        }
+        store.onPanelRelayout = { [weak self] in
+            self?.relayoutPanel()
         }
         self.store = store
 
@@ -170,15 +173,38 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         guard let store, let button = statusItem?.button else { return }
         rebindBar()
 
-        let host = ClearHosting(rootView: MenuPanel().environmentObject(store))
+        let host = ClearHosting(rootView: AnyView(MenuPanel().environmentObject(store)))
         _ = host.view
+        applyFittedSize(host, under: button)
+        self.panelHost = host
+        // Never NSApp.activate — that is what dies the bar action after Safari.
+        panel?.orderFrontRegardless()
+        button.highlight(true)
+        store.setLiveIO(true)
+    }
+
+    private func relayoutPanel() {
+        guard let host = panelHost, let button = statusItem?.button, panelOnScreen else { return }
+        applyFittedSize(host, under: button)
+    }
+
+    private func applyFittedSize(_ host: ClearHosting<AnyView>, under button: NSView) {
         var fitted = host.sizeThatFits(in: NSSize(width: 352, height: 900))
-        if !fitted.height.isFinite || fitted.height < 200 {
-            fitted = NSSize(width: 352, height: 420)
+        if !fitted.height.isFinite || fitted.height < 160 {
+            fitted = NSSize(width: 352, height: 360)
         }
-        let height = Swift.min(Swift.max(fitted.height, 280), 720)
+        let height = Swift.min(Swift.max(fitted.height, 200), 720)
         let size = NSSize(width: 352, height: height)
         host.view.frame = NSRect(origin: .zero, size: size)
+
+        if let panel, panelOnScreen {
+            if let glass = panel.contentView {
+                glass.setFrameSize(size)
+            }
+            panel.setContentSize(size)
+            position(panel, size: size, under: button)
+            return
+        }
 
         let glass = GlassBackdrop(frame: NSRect(origin: .zero, size: size))
         host.view.autoresizingMask = [.width, .height]
@@ -204,12 +230,7 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         panel.appearance = NSApp.effectiveAppearance
 
         position(panel, size: size, under: button)
-        self.panelHost = host
         self.panel = panel
-        // Never NSApp.activate — that is what dies the bar action after Safari.
-        panel.orderFrontRegardless()
-        button.highlight(true)
-        store.setLiveIO(true)
     }
 
     private func hidePanel() {
