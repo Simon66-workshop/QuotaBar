@@ -160,15 +160,23 @@ enum UsageClient {
         guard var auth = TokenReader.loadClaudeAuth() else {
             return .empty(.claude, sub: "Claude Code 5h + 7d  ·  run `claude` once")
         }
+        let cliLive = ProcessProbe.claudeLive()
         if auth.canRefresh, auth.isStale || auth.access.isEmpty {
-            switch await refreshClaude(auth) {
-            case .ok(let next):
-                TokenReader.persistClaude(next)
-                auth = next
-            case .failed(let detail) where detail.localizedCaseInsensitiveContains("invalid"):
-                return .error(.claude, message: "Claude session expired — run `claude` once")
-            case .failed:
-                break
+            if cliLive {
+                if auth.access.isEmpty {
+                    return .error(.claude, message: "Claude Code is running — waiting for its token")
+                }
+                // Leave refresh to the live CLI so we do not rotate the grant out from under it.
+            } else {
+                switch await refreshClaude(auth) {
+                case .ok(let next):
+                    TokenReader.persistClaude(next)
+                    auth = next
+                case .failed(let detail) where detail.localizedCaseInsensitiveContains("invalid"):
+                    return .error(.claude, message: "Claude session expired — run `claude` once")
+                case .failed:
+                    break
+                }
             }
         }
         do {
@@ -176,6 +184,9 @@ enum UsageClient {
             if let lane = parseClaude(json, auth: auth) { return lane }
             return .error(.claude, message: "Claude usage 200 but no 5h / 7d window")
         } catch AuthError.http(let code) where code == 401 || code == 403 {
+            if cliLive {
+                return .error(.claude, message: "Claude Code is running — token is stale, wait for it to refresh")
+            }
             if auth.canRefresh {
                 switch await refreshClaude(auth) {
                 case .ok(let next):
@@ -220,7 +231,7 @@ enum UsageClient {
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("1", forHTTPHeaderField: "Connect-Protocol-Version")
-        req.setValue("QuotaBar/1.5", forHTTPHeaderField: "User-Agent")
+        req.setValue("QuotaBar/1.6", forHTTPHeaderField: "User-Agent")
         req.httpBody = Data("{}".utf8)
         let (data, res) = try await URLSession.shared.data(for: req)
         return try decode(data, res)
@@ -232,7 +243,7 @@ enum UsageClient {
         req.timeoutInterval = timeout
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
-        req.setValue("QuotaBar/1.5", forHTTPHeaderField: "User-Agent")
+        req.setValue("QuotaBar/1.6", forHTTPHeaderField: "User-Agent")
         let (data, res) = try await URLSession.shared.data(for: req)
         return try decode(data, res)
     }
@@ -243,7 +254,7 @@ enum UsageClient {
         req.timeoutInterval = timeout
         req.setValue("Bearer \(auth.access)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
-        req.setValue("QuotaBar/1.5", forHTTPHeaderField: "User-Agent")
+        req.setValue("QuotaBar/1.6", forHTTPHeaderField: "User-Agent")
         if !auth.accountId.isEmpty {
             req.setValue(auth.accountId, forHTTPHeaderField: "ChatGPT-Account-ID")
         }
@@ -256,7 +267,7 @@ enum UsageClient {
             alt.timeoutInterval = timeout
             alt.setValue("Bearer \(auth.access)", forHTTPHeaderField: "Authorization")
             alt.setValue("application/json", forHTTPHeaderField: "Accept")
-            alt.setValue("QuotaBar/1.5", forHTTPHeaderField: "User-Agent")
+            alt.setValue("QuotaBar/1.6", forHTTPHeaderField: "User-Agent")
             if !auth.accountId.isEmpty {
                 alt.setValue(auth.accountId, forHTTPHeaderField: "ChatGPT-Account-ID")
             }
@@ -306,7 +317,7 @@ enum UsageClient {
         req.setValue("Bearer \(auth.access)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-        req.setValue("QuotaBar/1.5", forHTTPHeaderField: "User-Agent")
+        req.setValue("QuotaBar/1.6", forHTTPHeaderField: "User-Agent")
         let (data, res) = try await URLSession.shared.data(for: req)
         return try decode(data, res)
     }

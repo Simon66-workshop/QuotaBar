@@ -220,36 +220,8 @@ final class UsageStore: ObservableObject {
             busy = false
             refreshRunning = false
         }
-        let cursorTok = TokenReader.cursorTokenFromLocalApp() ?? ""
-        async let grok: Lane = {
-            if TokenReader.hasGrokSession() { return await UsageClient.fetchGrok() }
-            return .empty(.grok, sub: "Weekly SuperGrok Heavy  ·  not connected")
-        }()
-        async let cursor = UsageClient.fetchCursor(token: cursorTok)
-        async let bot = UsageClient.fetchSand(token: cursorTok)
-        async let gpt: Lane = {
-            if TokenReader.hasCodexSession() { return await UsageClient.fetchChatGPT() }
-            return .empty(.gpt, sub: "ChatGPT / Codex  ·  not connected")
-        }()
-        async let claude: Lane = {
-            if TokenReader.hasClaudeSession() { return await UsageClient.fetchClaude() }
-            return .empty(.claude, sub: "Claude Code 5h + 7d  ·  not connected")
-        }()
-        let grokLane = await grok
-        let gptLane = await gpt
-        let claudeLane = await claude
-        let next = Snapshot(
-            grok: grokLane,
-            cursor: await cursor,
-            bot: await bot,
-            gpt: gptLane,
-            claude: claudeLane,
-            fetchedAt: Date(),
-            grokLinked: grokLane.tone != .empty && grokLane.tone != .error,
-            cursorLinked: !cursorTok.isEmpty,
-            gptLinked: gptLane.tone != .empty && gptLane.tone != .error,
-            claudeLinked: claudeLane.tone != .empty && claudeLane.tone != .error
-        )
+        let loaded = await UsageSources.loadAll()
+        let next = Snapshot.assemble(loaded, fetchedAt: Date())
         snap = next
         if liveIO { forceDiskTick = true }
         tickDisks()

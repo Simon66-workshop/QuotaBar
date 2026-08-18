@@ -176,7 +176,7 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         if !fitted.height.isFinite || fitted.height < 200 {
             fitted = NSSize(width: 352, height: 420)
         }
-        let height = Swift.min(Swift.max(fitted.height, 360), 780)
+        let height = Swift.min(Swift.max(fitted.height, 280), 720)
         let size = NSSize(width: 352, height: height)
         host.view.frame = NSRect(origin: .zero, size: size)
 

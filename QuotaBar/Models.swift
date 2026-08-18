@@ -140,33 +140,29 @@ struct DiskVolume: Identifiable, Equatable {
 }
 
 struct Snapshot {
-    var grok: Lane
-    var cursor: Lane
-    var bot: Lane
-    var gpt: Lane
-    var claude: Lane
+    private var byKey: [LaneKey: Lane]
     var fetchedAt: Date
-    var grokLinked: Bool
-    var cursorLinked: Bool
-    var gptLinked: Bool
-    var claudeLinked: Bool
 
-    var lanes: [Lane] { [grok, cursor, bot, gpt, claude] }
+    subscript(_ key: LaneKey) -> Lane {
+        byKey[key] ?? UsageSources.emptyLane(key)
+    }
+
+    var lanes: [Lane] { LaneKey.allCases.map { self[$0] } }
     var barLanes: [Lane] { lanes.filter(\.showsOnBar) }
 
+    func isLinked(_ key: LaneKey) -> Bool {
+        let tone = self[key].tone
+        return tone != .empty && tone != .error
+    }
+
+    static func assemble(_ lanes: [Lane], fetchedAt: Date = Date()) -> Snapshot {
+        var dict: [LaneKey: Lane] = [:]
+        for lane in lanes { dict[lane.key] = lane }
+        return Snapshot(byKey: dict, fetchedAt: fetchedAt)
+    }
+
     static var vacant: Snapshot {
-        Snapshot(
-            grok: .empty(.grok, sub: "Weekly SuperGrok Heavy  ·  not connected"),
-            cursor: .empty(.cursor, sub: "Ultra monthly  ·  not connected"),
-            bot: .empty(.bot, sub: "Sand weekly  ·  not connected"),
-            gpt: .empty(.gpt, sub: "ChatGPT / Codex  ·  not connected"),
-            claude: .empty(.claude, sub: "Claude Code 5h + 7d  ·  not connected"),
-            fetchedAt: .distantPast,
-            grokLinked: false,
-            cursorLinked: false,
-            gptLinked: false,
-            claudeLinked: false
-        )
+        assemble([], fetchedAt: .distantPast)
     }
 
     var menuTitle: String {

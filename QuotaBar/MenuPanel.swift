@@ -6,27 +6,19 @@ struct MenuPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            ForEach(Array(store.snap.lanes.enumerated()), id: \.element.id) { index, lane in
+            ForEach(Array(listedLanes.enumerated()), id: \.element.id) { index, lane in
                 if index > 0 {
                     Divider().opacity(0.18)
                 }
                 LaneRow(lane: lane)
             }
-            if store.snap.grokLinked {
+            if store.snap.isLinked(.grok) {
                 AccountRow()
                     .padding(.top, 8)
             }
-            if store.snap.grok.tone == .empty || store.snap.grok.tone == .error || store.loginInProgress {
-                GrokConnectForm()
-                    .padding(.top, 8)
-            }
-            if store.snap.gpt.tone == .empty || store.snap.gpt.tone == .error {
-                ChatGPTConnectForm()
-                    .padding(.top, 8)
-            }
-            if store.snap.claude.tone == .empty || store.snap.claude.tone == .error {
-                ClaudeConnectForm()
-                    .padding(.top, 8)
+            if showConnect {
+                ConnectCell(idle: connectLanes)
+                    .padding(.top, listedLanes.isEmpty ? 0 : 8)
             }
             DiskSection()
                 .padding(.top, 10)
@@ -43,7 +35,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.5.1")
+                Text("v1.6")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -92,6 +84,106 @@ struct MenuPanel: View {
         }
         .padding(.top, 12)
         .font(.system(size: 12, weight: .semibold))
+    }
+
+    /// Connected or broken — those stay as rows. Empty ones fold into Connect.
+    private var listedLanes: [Lane] {
+        store.snap.lanes.filter { $0.tone != .empty }
+    }
+
+    private var connectLanes: [Lane] {
+        store.snap.lanes.filter { $0.tone == .empty || $0.tone == .error }
+    }
+
+    private var showConnect: Bool {
+        store.loginInProgress || !connectLanes.isEmpty
+    }
+}
+
+private struct ConnectCell: View {
+    @EnvironmentObject private var store: UsageStore
+    let idle: [Lane]
+    @State private var pick: LaneKey = .grok
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("Connect")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(idle.map(\.key.title).joined(separator: " · "))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer()
+            }
+
+            if !hintLines.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(hintLines, id: \.self) { line in
+                        Text(line)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if formKeys.count > 1 {
+                Picker("Service", selection: $pick) {
+                    ForEach(formKeys, id: \.self) { key in
+                        Text(UsageSources.source(for: key).connectTitle ?? key.title).tag(key)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+
+            if formKeys.contains(pick) {
+                switch pick {
+                case .grok: GrokConnectForm()
+                case .gpt: ChatGPTConnectForm()
+                case .claude: ClaudeConnectForm()
+                default: EmptyView()
+                }
+            }
+        }
+        .onAppear { syncPick() }
+        .onChange(of: idle.map(\.id)) { _, _ in syncPick() }
+        .onChange(of: store.loginInProgress) { _, live in
+            if live { pick = .grok }
+        }
+    }
+
+    private var formKeys: [LaneKey] {
+        var keys = idle.compactMap { lane -> LaneKey? in
+            UsageSources.source(for: lane.key).connectTitle == nil ? nil : lane.key
+        }
+        if store.loginInProgress, !keys.contains(.grok) {
+            keys.insert(.grok, at: 0)
+        }
+        return keys
+    }
+
+    private var hintLines: [String] {
+        idle.compactMap { lane in
+            switch lane.key {
+            case .cursor: return "Cursor — open the Cursor app once. QuotaBar reads the local session."
+            case .bot: return "Grok Bot — same Cursor session."
+            default: return nil
+            }
+        }
+    }
+
+    private func syncPick() {
+        if store.loginInProgress {
+            pick = .grok
+            return
+        }
+        if formKeys.contains(pick) { return }
+        if let broken = idle.first(where: { $0.tone == .error && formKeys.contains($0.key) }) {
+            pick = broken.key
+            return
+        }
+        pick = formKeys.first ?? .grok
     }
 }
 
