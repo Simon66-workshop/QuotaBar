@@ -6,9 +6,13 @@ import IOKit
 enum DiskMonitor {
     private static var lastBytes: [String: (r: UInt64, w: UInt64, t: Date)] = [:]
     private static var observers: [NSObjectProtocol] = []
+    private static var drivers: [io_object_t] = []
+    private static var driverNames: [[String]] = []
+    private static var topologyAt = Date.distantPast
 
     static func start(onChange: @escaping () -> Void) {
         stop()
+        rebuildTopology()
         let nc = NSWorkspace.shared.notificationCenter
         let names = [
             NSWorkspace.didMountNotification,
@@ -17,6 +21,7 @@ enum DiskMonitor {
         ]
         for name in names {
             let token = nc.addObserver(forName: name, object: nil, queue: .main) { _ in
+                rebuildTopology()
                 onChange()
             }
             observers.append(token)
@@ -27,9 +32,10 @@ enum DiskMonitor {
         let nc = NSWorkspace.shared.notificationCenter
         for token in observers { nc.removeObserver(token) }
         observers.removeAll()
+        releaseTopology()
     }
 
-    static func snapshot() -> [DiskVolume] {
+    static func snapshot(includeIO: Bool) -> [DiskVolume] {
         let keys: [URLResourceKey] = [
             .volumeNameKey,
             .volumeLocalizedNameKey,
@@ -43,14 +49,16 @@ enum DiskMonitor {
             .volumeIsReadOnlyKey,
             .volumeIsRootFileSystemKey,
             .volumeUUIDStringKey,
-            .volumeIsAutomountedKey,
         ]
         let urls = FileManager.default.mountedVolumeURLs(
             includingResourceValuesForKeys: keys,
             options: [.skipHiddenVolumes]
         ) ?? []
 
-        let io = blockIO()
+        if includeIO, drivers.isEmpty || Date().timeIntervalSince(topologyAt) > 90 {
+            rebuildTopology()
+        }
+        let io = includeIO ? readIO() : [:]
         let now = Date()
         var seen = Set<String>()
         var out: [DiskVolume] = []
@@ -61,14 +69,14 @@ enum DiskMonitor {
             let name = (values.volumeLocalizedName ?? values.volumeName ?? url.lastPathComponent)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !name.isEmpty, !shouldSkip(name: name, path: url.path) else { continue }
+            if isDiskImage(url) { continue }
 
             let total = Int64(values.volumeTotalCapacity ?? 0)
             guard total >= 1_000_000_000 else { continue }
 
-            let free = Int64(
-                values.volumeAvailableCapacityForImportantUsage
-                    ?? Int64(values.volumeAvailableCapacity ?? 0)
-            )
+            // Finder-like free space. ImportantUsage is too pessimistic and false-alarms "full".
+            let freeAvail = Int64(values.volumeAvailableCapacity ?? 0)
+            let free = freeAvail > 0 ? freeAvail : Int64(values.volumeAvailableCapacityForImportantUsage ?? 0)
             let usedPct = total > 0 ? min(100, max(0, Double(total - max(0, free)) / Double(total) * 100)) : 0
 
             let uuid = values.volumeUUIDString ?? url.path
@@ -77,24 +85,11 @@ enum DiskMonitor {
 
             let internalDrive = values.volumeIsInternal == true
             let ejectable = values.volumeIsEjectable == true || values.volumeIsRemovable == true
-            let kind: DiskKind
-            if isDiskImage(url) {
-                kind = .image
-            } else if ejectable && !internalDrive {
-                kind = .external
-            } else if internalDrive {
-                kind = .internalDrive
-            } else if ejectable {
-                kind = .external
-            } else {
-                kind = .internalDrive
-            }
+            let kind: DiskKind = (!internalDrive && ejectable) ? .external : .internalDrive
 
-            let bsd = bsdParent(for: url.path)
-            let counters = bsd.flatMap { io[$0] }
             var readBps = 0.0
             var writeBps = 0.0
-            if let counters {
+            if includeIO, let bsd = bsdParent(for: url.path), let counters = io[bsd] {
                 if let prev = lastBytes[uuid] {
                     let dt = now.timeIntervalSince(prev.t)
                     if dt > 0.2 {
@@ -178,20 +173,30 @@ enum DiskMonitor {
         return name.isEmpty ? nil : name
     }
 
-    private static func blockIO() -> [String: (r: UInt64, w: UInt64)] {
+    private static func rebuildTopology() {
+        releaseTopology()
         var iterator: io_iterator_t = 0
-        guard let matching = IOServiceMatching("IOBlockStorageDriver") else { return [:] }
-        let kr = IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iterator)
-        guard kr == KERN_SUCCESS else { return [:] }
+        guard let matching = IOServiceMatching("IOBlockStorageDriver") else { return }
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iterator) == KERN_SUCCESS else { return }
         defer { IOObjectRelease(iterator) }
-
-        var out: [String: (r: UInt64, w: UInt64)] = [:]
         var service = IOIteratorNext(iterator)
         while service != 0 {
-            defer {
-                IOObjectRelease(service)
-                service = IOIteratorNext(iterator)
-            }
+            drivers.append(service)
+            driverNames.append(mediaNames(parent: service, depth: 0))
+            service = IOIteratorNext(iterator)
+        }
+        topologyAt = Date()
+    }
+
+    private static func releaseTopology() {
+        for service in drivers { IOObjectRelease(service) }
+        drivers.removeAll()
+        driverNames.removeAll()
+    }
+
+    private static func readIO() -> [String: (r: UInt64, w: UInt64)] {
+        var out: [String: (r: UInt64, w: UInt64)] = [:]
+        for (index, service) in drivers.enumerated() {
             var propsRef: Unmanaged<CFMutableDictionary>?
             guard IORegistryEntryCreateCFProperties(service, &propsRef, kCFAllocatorDefault, 0) == KERN_SUCCESS,
                   let props = propsRef?.takeRetainedValue() as? [String: Any]
@@ -199,7 +204,8 @@ enum DiskMonitor {
             let stats = props["Statistics"] as? [String: Any] ?? [:]
             let read = uint64(stats["Bytes (Read)"]) ?? uint64(stats["BytesRead"]) ?? 0
             let write = uint64(stats["Bytes (Written)"]) ?? uint64(stats["BytesWritten"]) ?? 0
-            for bsd in mediaNames(parent: service, depth: 0) {
+            let names = index < driverNames.count ? driverNames[index] : []
+            for bsd in names {
                 out[bsd] = (read, write)
             }
         }
@@ -223,15 +229,11 @@ enum DiskMonitor {
                   let props = propsRef?.takeRetainedValue() as? [String: Any]
             else { continue }
             if let bsd = props["BSD Name"] as? String, bsd.hasPrefix("disk") {
-                let parentDisk: String
                 if let slice = bsd.range(of: "s", options: .backwards),
                    bsd[slice.upperBound...].allSatisfy(\.isNumber)
                 {
-                    parentDisk = String(bsd[..<slice.lowerBound])
-                } else {
-                    parentDisk = bsd
+                    names.append(String(bsd[..<slice.lowerBound]))
                 }
-                names.append(parentDisk)
                 names.append(bsd)
             }
             names.append(contentsOf: mediaNames(parent: child, depth: depth + 1))

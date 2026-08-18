@@ -22,11 +22,16 @@ final class UsageStore: ObservableObject {
     private var diskTimer: AnyCancellable?
     private var lastAlert: [LaneKey: Int] = [:]
     private var lastDiskAlert: [String: Int] = [:]
-    private var authWatcher: DispatchSourceFileSystemObject?
-    private var watchFd: Int32 = -1
+    private var authWatchers: [DispatchSourceFileSystemObject] = []
+    private var watchFds: [Int32] = []
     private var deviceTask: Task<Void, Never>?
     private var watchDebounce: DispatchWorkItem?
     private var disksPrimed = false
+    private var refreshRunning = false
+    private var liveIO = false
+    private var lastCapacityTick = Date.distantPast
+    private var forceDiskTick = false
+    private var mountedAt: [String: Date] = [:]
 
     init() {
         launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
@@ -34,8 +39,9 @@ final class UsageStore: ObservableObject {
         if notifyEnabled {
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         }
-        watchGrokAuthFile()
+        watchAuthDirs()
         DiskMonitor.start { [weak self] in
+            self?.forceDiskTick = true
             self?.tickDisks()
         }
         tickDisks()
@@ -45,7 +51,7 @@ final class UsageStore: ObservableObject {
             .sink { [weak self] _ in
                 Task { await self?.refresh() }
             }
-        diskTimer = Timer.publish(every: 2, on: .main, in: .common)
+        diskTimer = Timer.publish(every: 3, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
                 self?.tickDisks()
@@ -161,9 +167,22 @@ final class UsageStore: ObservableObject {
         }
     }
 
+    func setLiveIO(_ on: Bool) {
+        liveIO = on
+        if on {
+            forceDiskTick = true
+            tickDisks()
+        }
+    }
+
     func refresh() async {
+        if refreshRunning { return }
+        refreshRunning = true
         busy = true
-        defer { busy = false }
+        defer {
+            busy = false
+            refreshRunning = false
+        }
         let cursorTok = TokenReader.cursorTokenFromLocalApp() ?? ""
         async let grok = UsageClient.fetchGrok()
         async let cursor = UsageClient.fetchCursor(token: cursorTok)
@@ -182,6 +201,7 @@ final class UsageStore: ObservableObject {
             gptLinked: gptLane.tone != .empty && gptLane.tone != .error
         )
         snap = next
+        forceDiskTick = true
         tickDisks()
         notifyIfNeeded(next)
     }
@@ -211,43 +231,55 @@ final class UsageStore: ObservableObject {
 
     func quit() {
         stopWatch()
+        timer?.cancel()
         diskTimer?.cancel()
         DiskMonitor.stop()
         deviceTask?.cancel()
         NSApplication.shared.terminate(nil)
     }
 
-    private func watchGrokAuthFile() {
-        let dir = TokenReader.grokDir().path
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        watchFd = open(dir, O_EVTONLY)
-        guard watchFd >= 0 else { return }
-        let src = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: watchFd,
-            eventMask: [.write, .rename, .extend, .delete],
-            queue: .main
-        )
-        src.setEventHandler { [weak self] in
-            guard let self else { return }
-            self.watchDebounce?.cancel()
-            let work = DispatchWorkItem { [weak self] in
-                Task { await self?.refresh() }
+    private func watchAuthDirs() {
+        let dirs = [
+            TokenReader.grokDir().path,
+            TokenReader.home().appendingPathComponent(".codex").path,
+        ]
+        for dir in dirs {
+            if dir.hasSuffix(".codex") {
+                if !FileManager.default.fileExists(atPath: dir) { continue }
+            } else {
+                try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
             }
-            self.watchDebounce = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: work)
+            let fd = open(dir, O_EVTONLY)
+            guard fd >= 0 else { continue }
+            watchFds.append(fd)
+            let src = DispatchSource.makeFileSystemObjectSource(
+                fileDescriptor: fd,
+                eventMask: [.write, .rename, .extend, .delete],
+                queue: .main
+            )
+            src.setEventHandler { [weak self] in
+                guard let self else { return }
+                self.watchDebounce?.cancel()
+                let work = DispatchWorkItem { [weak self] in
+                    guard let self, !self.refreshRunning else { return }
+                    Task { await self.refresh() }
+                }
+                self.watchDebounce = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: work)
+            }
+            src.setCancelHandler { [fd] in
+                close(fd)
+            }
+            authWatchers.append(src)
+            src.resume()
         }
-        src.setCancelHandler { [weak self] in
-            if let fd = self?.watchFd, fd >= 0 { close(fd) }
-            self?.watchFd = -1
-        }
-        authWatcher = src
-        src.resume()
     }
 
     private func stopWatch() {
         watchDebounce?.cancel()
-        authWatcher?.cancel()
-        authWatcher = nil
+        for src in authWatchers { src.cancel() }
+        authWatchers.removeAll()
+        watchFds.removeAll()
     }
 
     private func notifyIfNeeded(_ snap: Snapshot) {
@@ -287,8 +319,28 @@ final class UsageStore: ObservableObject {
     }
 
     private func tickDisks() {
+        let wantIO = liveIO
+        if !forceDiskTick, !wantIO, Date().timeIntervalSince(lastCapacityTick) < 12 {
+            return
+        }
+        forceDiskTick = false
+        lastCapacityTick = Date()
+
         let previous = disks
-        var next = DiskMonitor.snapshot()
+        var next = DiskMonitor.snapshot(includeIO: wantIO)
+        if !wantIO {
+            let rates = Dictionary(uniqueKeysWithValues: previous.map { ($0.id, ($0.readBps, $0.writeBps)) })
+            next = next.map { disk in
+                var copy = disk
+                if let rate = rates[disk.id] {
+                    copy.readBps = rate.0
+                    copy.writeBps = rate.1
+                }
+                return copy
+            }
+        }
+
+        let now = Date()
         if disksPrimed {
             let oldIds = Set(previous.map(\.id))
             let newIds = Set(next.map(\.id))
@@ -297,18 +349,36 @@ final class UsageStore: ObservableObject {
             if !added.isEmpty || !removed.isEmpty {
                 announceDisks(added: added, removed: removed)
             }
-            next = next.map { disk in
-                var copy = disk
-                if added.contains(where: { $0.id == disk.id }) {
-                    copy.justChanged = "just mounted"
-                }
-                return copy
-            }
+            for disk in added { mountedAt[disk.id] = now }
+            for disk in removed { mountedAt[disk.id] = nil }
         }
         disksPrimed = true
+        mountedAt = mountedAt.filter { key, _ in next.contains(where: { $0.id == key }) }
+        next = next.map { disk in
+            var copy = disk
+            if let at = mountedAt[disk.id], now.timeIntervalSince(at) < 8 {
+                copy.justChanged = "just mounted"
+            }
+            return copy
+        }
         lastDiskAlert = lastDiskAlert.filter { key, _ in next.contains(where: { $0.id == key }) }
+
+        if sameDisks(previous, next) { return }
         disks = next
-        if disksPrimed { notifyIfNeeded(snap) }
+        notifyIfNeeded(snap)
+    }
+
+    private func sameDisks(_ a: [DiskVolume], _ b: [DiskVolume]) -> Bool {
+        guard a.count == b.count else { return false }
+        for (x, y) in zip(a, b) {
+            if x.id != y.id { return false }
+            if Int(x.usedPct.rounded()) != Int(y.usedPct.rounded()) { return false }
+            if x.statusLabel != y.statusLabel { return false }
+            if x.justChanged != y.justChanged { return false }
+            if Int(x.readBps / 200_000) != Int(y.readBps / 200_000) { return false }
+            if Int(x.writeBps / 200_000) != Int(y.writeBps / 200_000) { return false }
+        }
+        return true
     }
 
     private func announceDisks(added: [DiskVolume], removed: [DiskVolume]) {

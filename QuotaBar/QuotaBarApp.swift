@@ -209,9 +209,11 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         // Never NSApp.activate — that is what dies the bar action after Safari.
         panel.orderFrontRegardless()
         button.highlight(true)
+        store.setLiveIO(true)
     }
 
     private func hidePanel() {
+        store?.setLiveIO(false)
         statusItem?.button?.highlight(false)
         if let panel {
             panel.orderOut(nil)

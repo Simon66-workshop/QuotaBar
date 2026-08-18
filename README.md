@@ -24,7 +24,7 @@ QuotaBar appears on the right of the menu bar as `G 5 · C 0 · B 4 · O 12 · D
 - **Left-click** the bar → glass panel
 - **Right-click** the bar → native menu (always works even if the panel fails)
 
-The panel header should say **v1.4**. If it still says v1.3.x, quit QuotaBar and run `Start QuotaBar.command` again.
+The panel header should say **v1.4.1**. If it still says v1.3.x or v1.4, quit QuotaBar and run `Start QuotaBar.command` again.
 
 Later launches: just double-click `Start QuotaBar.command` again.
 
@@ -40,6 +40,10 @@ If Cursor shows `—`, open Cursor once, then start QuotaBar again.
 If ChatGPT shows `—`, run `codex login` once in Terminal, then click Refresh.
 
 Plug in a USB / Thunderbolt disk and it appears in the panel; eject it and it disappears. Alerts fire on mount, eject, and when a disk crosses 80 / 90 / 95% full.
+
+## 1.4.1
+
+Resource audit: disk I/O only while the panel is open, skip no-op UI publishes, single-flight usage refresh, cache IOKit topology and auth-file walks.
 
 ## 1.4
 

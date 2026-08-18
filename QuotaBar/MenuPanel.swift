@@ -39,7 +39,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.4")
+                Text("v1.4.1")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -315,8 +315,13 @@ private struct DiskSection: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
-            ForEach(disks) { disk in
+            ForEach(Array(disks.prefix(6))) { disk in
                 DiskRow(disk: disk)
+            }
+            if disks.count > 6 {
+                Text("+\(disks.count - 6) more volumes")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.tertiary)
             }
         }
     }

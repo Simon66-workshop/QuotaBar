@@ -47,6 +47,7 @@ enum TokenReader {
     }
 
     static func markRefreshDead(_ refresh: String) {
+        invalidateDiskCache()
         guard !refresh.isEmpty else { return }
         UserDefaults.standard.set(fingerprint(refresh), forKey: deadKey)
     }
@@ -92,6 +93,7 @@ enum TokenReader {
     }
 
     static func persist(_ auth: GrokAuth) -> String? {
+        invalidateDiskCache()
         KeychainStore.saveAuth(auth)
         do {
             try writeBackAuthFile(auth)
@@ -117,12 +119,23 @@ enum TokenReader {
         return true
     }
 
+    private static var grokDiskCache: (at: Date, value: GrokAuth?)?
+
+    static func invalidateDiskCache() {
+        grokDiskCache = nil
+    }
+
     static func loadGrokAuthFromDisk() -> GrokAuth? {
+        if let cached = grokDiskCache, Date().timeIntervalSince(cached.at) < 20 {
+            return cached.value
+        }
         var found: [GrokAuth] = []
         for url in grokCandidateFiles() + grokDeepFiles() {
             if let auth = extractRecord(from: url) { found.append(auth) }
         }
-        return found.first(where: { $0.canRefresh && !isDeadRefresh($0.refresh) }) ?? found.first
+        let value = found.first(where: { $0.canRefresh && !isDeadRefresh($0.refresh) }) ?? found.first
+        grokDiskCache = (Date(), value)
+        return value
     }
 
     private static let deadKey = "qb.deadGrokRefresh.sha"
@@ -452,6 +465,9 @@ enum TokenReader {
     }
 
     static func persistCodex(_ auth: CodexAuth) {
+        if let current = loadCodexAuth(), current.access == auth.access, current.refresh == auth.refresh {
+            return
+        }
         let url = home().appendingPathComponent(".codex/auth.json")
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         var bag: [String: Any] = [:]
