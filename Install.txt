@@ -5,4 +5,4 @@ First run may ask to install Command Line Tools (not Xcode).
 Then the menu bar shows only connected services, e.g. G 5 · A 40 · D 42
 
 G Grok  ·  C Cursor  ·  B Grok Bot  ·  O ChatGPT  ·  A Claude  ·  D fullest disk
-Panel header must say v1.8. Bar is D (system) plus E for each external. Click Health on a disk for SMART.
+Panel header must say v1.8.1. Bar is D (system) plus E for each external. Click Health on a disk for SMART.

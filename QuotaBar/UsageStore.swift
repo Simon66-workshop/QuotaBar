@@ -235,6 +235,7 @@ final class UsageStore: ObservableObject {
 
     func setLiveIO(_ on: Bool) {
         liveIO = on
+        DiskMonitor.setLiveIO(on)
         rescheduleDiskTimer()
         if on {
             forceDiskTick = true

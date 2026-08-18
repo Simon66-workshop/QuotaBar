@@ -26,6 +26,13 @@ final class DiskMonitor {
         shared.health(uuid: uuid, path: path)
     }
 
+    static func setLiveIO(_ on: Bool) {
+        shared.liveIO = on
+        if !on {
+            shared.releaseTopology()
+        }
+    }
+
     private var lastBytes: [String: (r: UInt64, w: UInt64, t: Date)] = [:]
     private var observers: [NSObjectProtocol] = []
     private var drivers: [io_object_t] = []
@@ -42,13 +49,14 @@ final class DiskMonitor {
     private var rebuildWork: DispatchWorkItem?
     private var daSession: DASession?
     private var daReady = false
+    private var liveIO = false
+    private var kindCache: [String: DiskKind] = [:]
 
     private init() {}
 
     func start(onChange: @escaping () -> Void) {
         stop()
         self.onChange = onChange
-        rebuildTopology()
         armIOKitNotifications()
         armDiskArbitration()
 
@@ -78,7 +86,9 @@ final class DiskMonitor {
         onChange = nil
         bsdCache.removeAll()
         hintCache.removeAll()
+        kindCache.removeAll()
         lastBytes.removeAll()
+        liveIO = false
         if let session = daSession {
             DASessionSetDispatchQueue(session, nil)
         }
@@ -99,7 +109,12 @@ final class DiskMonitor {
         rebuildWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            self.rebuildTopology()
+            if self.liveIO {
+                self.rebuildTopology()
+            } else {
+                self.releaseTopology()
+            }
+            self.kindCache.removeAll()
             self.onChange?()
         }
         rebuildWork = work
@@ -154,7 +169,13 @@ final class DiskMonitor {
             if seen.contains(uuid) { continue }
             seen.insert(uuid)
 
-            let kind = classify(url: url, values: values)
+            let kind: DiskKind
+            if let cached = kindCache[uuid] {
+                kind = cached
+            } else {
+                kind = classify(url: url, values: values)
+                kindCache[uuid] = kind
+            }
             let hint = ignoreHint(name: name, url: url, uuid: uuid)
 
             var readBps = 0.0
@@ -193,6 +214,7 @@ final class DiskMonitor {
         lastBytes = lastBytes.filter { key, _ in seen.contains(key) }
         bsdCache = bsdCache.filter { key, _ in seen.contains(key) }
         hintCache = hintCache.filter { key, _ in seen.contains(key) }
+        kindCache = kindCache.filter { key, _ in seen.contains(key) }
         return out
     }
 
@@ -295,24 +317,40 @@ final class DiskMonitor {
         return daSession
     }
 
-    /// Appear / disappear / volume-path change — not a 12s poll.
-    /// Initial `appeared` flood is ignored until daReady.
+    /// Volume appear / disappear / path change. Whole-disk noise is ignored.
     private func armDiskArbitration() {
         guard let session = diskSession() else { return }
         DASessionSetDispatchQueue(session, DispatchQueue.main)
-        DARegisterDiskAppearedCallback(session, nil, { _, _ in
+        DARegisterDiskAppearedCallback(session, nil, { disk, _ in
+            guard DiskMonitor.hasVolume(disk) else { return }
             DiskMonitor.shared.noteHotPlug()
         }, nil)
-        DARegisterDiskDisappearedCallback(session, nil, { _, _ in
+        DARegisterDiskDisappearedCallback(session, nil, { disk, _ in
+            guard DiskMonitor.hasVolume(disk) || DiskMonitor.isWholeDisk(disk) else { return }
             DiskMonitor.shared.noteHotPlug()
         }, nil)
         let watch = [kDADiskDescriptionVolumePathKey] as CFArray
-        DARegisterDiskDescriptionChangedCallback(session, nil, watch, { _, _, _ in
+        DARegisterDiskDescriptionChangedCallback(session, nil, watch, { disk, _, _ in
+            guard DiskMonitor.hasVolume(disk) else { return }
             DiskMonitor.shared.noteHotPlug()
         }, nil)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+        // Existing disks are delivered as appeared on register — skip that flood.
+        DispatchQueue.main.async { [weak self] in
             self?.daReady = true
         }
+    }
+
+    private static func description(_ disk: DADisk?) -> NSDictionary? {
+        guard let disk, let raw = DADiskCopyDescription(disk) else { return nil }
+        return raw as NSDictionary
+    }
+
+    private static func hasVolume(_ disk: DADisk?) -> Bool {
+        description(disk)?[kDADiskDescriptionVolumePathKey] != nil
+    }
+
+    private static func isWholeDisk(_ disk: DADisk?) -> Bool {
+        description(disk)?[kDADiskDescriptionMediaWholeKey] as? Bool == true
     }
 
     /// Fixed + External PCI-E / USB SSDs are external. Do not require ejectable.
