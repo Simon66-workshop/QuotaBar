@@ -1,4 +1,4 @@
-# QuotaBar 1.3
+# QuotaBar 1.3.2
 
 Mac menu bar extra for live Grok / Cursor / Grok Bot usage.
 
@@ -18,6 +18,8 @@ QuotaBar appears on the right of the menu bar as `G 5 · C 0 · B 4`. No Dock ic
 - **Left-click** the bar → glass panel
 - **Right-click** the bar → native menu (always works even if the panel fails)
 
+The panel header should say **v1.3.2**. If it still says v1.3, the old build is running — quit QuotaBar and run `Start QuotaBar.command` again.
+
 Later launches: just double-click `Start QuotaBar.command` again.
 
 ## What it reads
@@ -27,12 +29,21 @@ Later launches: just double-click `Start QuotaBar.command` again.
 
 If Cursor shows `—`, open Cursor once, then start QuotaBar again.
 
+## 1.3.2
+
+Safari OAuth used to kill the menu-bar click: `button.action` died, and the only click monitor ignored the bar itself. After Grok setup + browser authorize, left-click did nothing even though usage numbers updated.
+
+- Local + global click monitors (not only `button.action`)
+- Rebuild the status item after the browser opens and when login ends
+- Hide the panel when another app (Safari) becomes front — no zombie panel
+- Never `NSApp.activate` from the bar (that was the trigger)
+- Right-click fallback never assigns `statusItem.menu` (that also ate left-clicks)
+
 ## 1.3
 
-- Panel host retain + no `.transient` (bar click was dead)
+- Panel host retain + no `.transient`
 - Right-click fallback menu
 - Colored bar numbers when usage is high
 - Remaining % + copy summary / copy device code
 - Account row (re-sign in / disconnect) when Grok is linked
 - Soft-fail token refresh; paste-only tokens work
-- Debounced `~/.grok` watcher

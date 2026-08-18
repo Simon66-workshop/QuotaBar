@@ -12,6 +12,10 @@ struct MenuPanel: View {
                 }
                 LaneRow(lane: lane)
             }
+            if store.snap.grokLinked {
+                AccountRow()
+                    .padding(.top, 8)
+            }
             if store.snap.grok.tone == .empty || store.snap.grok.tone == .error || store.loginInProgress {
                 GrokConnectForm()
                     .padding(.top, 8)
@@ -25,11 +29,22 @@ struct MenuPanel: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("QuotaBar")
-                .font(.system(size: 15, weight: .semibold))
+            HStack {
+                Text("QuotaBar")
+                    .font(.system(size: 15, weight: .semibold))
+                Spacer()
+                Text("v1.3.2")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
             Text(statusLine)
                 .font(.system(size: 11.5))
                 .foregroundStyle(.secondary)
+            if !store.copiedNote.isEmpty {
+                Text(store.copiedNote)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.bottom, 10)
     }
@@ -47,6 +62,8 @@ struct MenuPanel: View {
         HStack(spacing: 8) {
             Button("Refresh") { Task { await store.refresh() } }
                 .buttonStyle(.bordered)
+            Button("Copy") { store.copySummary() }
+                .buttonStyle(.borderless)
             Spacer()
             Toggle("Alerts", isOn: Binding(
                 get: { store.notifyEnabled },
@@ -68,6 +85,28 @@ struct MenuPanel: View {
     }
 }
 
+private struct AccountRow: View {
+    @EnvironmentObject private var store: UsageStore
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("Grok account")
+                .font(.system(size: 11, weight: .semibold))
+            Spacer()
+            Button("Re-sign in") { store.startDeviceLogin() }
+                .buttonStyle(.borderless)
+            Button("Disconnect") {
+                Task { await store.disconnectGrok() }
+            }
+            .buttonStyle(.borderless)
+        }
+        .font(.system(size: 11, weight: .semibold))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
 private struct LaneRow: View {
     let lane: Lane
 
@@ -82,10 +121,11 @@ private struct LaneRow: View {
                         .font(.system(size: 16, weight: .bold).monospacedDigit())
                         .foregroundStyle(color)
                 }
-                Text(lane.sub)
+                Text(subLine)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .lineLimit(lane.tone == .error || lane.tone == .empty ? 3 : 2)
+                    .fixedSize(horizontal: false, vertical: true)
                 if lane.key == .cursor, !lane.details.isEmpty {
                     ForEach(lane.details) { d in
                         HStack(spacing: 6) {
@@ -118,6 +158,13 @@ private struct LaneRow: View {
             }
         }
         .padding(.vertical, 8)
+    }
+
+    private var subLine: String {
+        if let left = lane.remainingPct, lane.tone == .ok || lane.tone == .warn || lane.tone == .crit {
+            return "\(Int(left))% left  ·  \(lane.sub)"
+        }
+        return lane.sub
     }
 
     private var color: Color {
@@ -161,13 +208,19 @@ private struct GrokConnectForm: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Connect Grok")
                 .font(.system(size: 11, weight: .semibold))
-            Text("0.2.111 prints Signed in but often does not write auth.json or Keychain. Sign in here so QuotaBar writes key + expires_at itself.")
+            Text("0.2.111 prints Signed in but often does not write auth.json. Sign in here so QuotaBar writes key + expires_at itself.")
                 .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if !store.deviceUserCode.isEmpty {
-                Text(store.deviceUserCode)
-                    .font(.system(size: 18, weight: .bold).monospaced())
+                HStack {
+                    Text(store.deviceUserCode)
+                        .font(.system(size: 18, weight: .bold).monospaced())
+                    Spacer()
+                    Button("Copy code") { store.copyUserCode() }
+                        .buttonStyle(.borderless)
+                        .font(.system(size: 11, weight: .semibold))
+                }
             }
             if !store.deviceNote.isEmpty {
                 Text(store.deviceNote)
@@ -175,10 +228,17 @@ private struct GrokConnectForm: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Button("Sign in with Grok") {
-                store.startDeviceLogin()
+            HStack {
+                Button(store.loginInProgress ? "Waiting…" : "Sign in with Grok") {
+                    store.startDeviceLogin()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(store.loginInProgress)
+                if store.loginInProgress {
+                    Button("Cancel") { store.cancelDeviceLogin() }
+                        .buttonStyle(.borderless)
+                }
             }
-            .buttonStyle(.borderedProminent)
             SecureField("or paste token / auth.json", text: $draft)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 11))
