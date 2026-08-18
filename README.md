@@ -25,7 +25,7 @@ QuotaBar appears on the right of the menu bar. Unconnected services stay off the
 - **Left-click** the bar → glass panel (details, connect, hide disks)
 - **Right-click** the bar → short native menu (refresh / copy / alerts / quit)
 
-The panel header should say **v1.8.4**. If it still says v1.8.2, quit QuotaBar and run `Start QuotaBar.command` again.
+The panel header should say **v1.8.5**. If it still says v1.8.4, quit QuotaBar and run `Start QuotaBar.command` again.
 
 Later launches: just double-click `Start QuotaBar.command` again.
 
