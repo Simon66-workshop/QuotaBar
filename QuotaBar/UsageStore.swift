@@ -444,6 +444,9 @@ final class UsageStore: ObservableObject {
             let aNew = a.justChanged != nil
             let bNew = b.justChanged != nil
             if aNew != bNew { return aNew }
+            let aExt = a.kind == .external
+            let bExt = b.kind == .external
+            if aExt != bExt { return aExt }
             if abs(a.usedPct - b.usedPct) >= 0.5 { return a.usedPct > b.usedPct }
             if a.isRoot != b.isRoot { return a.isRoot }
             return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
@@ -462,6 +465,7 @@ final class UsageStore: ObservableObject {
         guard a.count == b.count else { return false }
         for (x, y) in zip(a, b) {
             if x.id != y.id { return false }
+            if x.kind != y.kind { return false }
             if Int(x.usedPct.rounded()) != Int(y.usedPct.rounded()) { return false }
             if x.statusLabel != y.statusLabel { return false }
             if x.justChanged != y.justChanged { return false }

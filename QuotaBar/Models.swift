@@ -193,10 +193,24 @@ struct Snapshot {
             if let n = lane.usedPct { return "\(lane.key.letter) \(Int(n))" }
             return "\(lane.key.letter) —"
         }
-        if let hot = disks.max(by: { $0.usedPct < $1.usedPct }) {
-            parts.append("D \(Int(hot.usedPct.rounded()))")
+        for bit in Self.barDiskBits(disks) {
+            parts.append("\(bit.letter) \(bit.pct)")
         }
         return parts.isEmpty ? "QuotaBar" : parts.joined(separator: " · ")
+    }
+
+    /// D = hottest internal / system volume. Each external is its own E.
+    /// Fixed PCI-E / USB SSDs must not be folded into D.
+    static func barDiskBits(_ disks: [DiskVolume]) -> [(letter: String, pct: Int, tone: Tone)] {
+        var bits: [(letter: String, pct: Int, tone: Tone)] = []
+        if let sys = disks.filter({ $0.kind != .external }).max(by: { $0.usedPct < $1.usedPct }) {
+            bits.append(("D", Int(sys.usedPct.rounded()), sys.tone))
+        }
+        let ext = disks.filter { $0.kind == .external }.sorted { $0.usedPct > $1.usedPct }
+        for disk in ext.prefix(4) {
+            bits.append(("E", Int(disk.usedPct.rounded()), disk.tone))
+        }
+        return bits
     }
 }
 

@@ -41,6 +41,7 @@ final class DiskMonitor {
     private var hintCache: [String: String] = [:]
     private var rebuildWork: DispatchWorkItem?
     private var daSession: DASession?
+    private var daReady = false
 
     private init() {}
 
@@ -49,6 +50,7 @@ final class DiskMonitor {
         self.onChange = onChange
         rebuildTopology()
         armIOKitNotifications()
+        armDiskArbitration()
 
         let nc = NSWorkspace.shared.notificationCenter
         let names: [NSNotification.Name] = [
@@ -77,7 +79,16 @@ final class DiskMonitor {
         bsdCache.removeAll()
         hintCache.removeAll()
         lastBytes.removeAll()
+        if let session = daSession {
+            DASessionSetDispatchQueue(session, nil)
+        }
         daSession = nil
+        daReady = false
+    }
+
+    func noteHotPlug() {
+        guard daReady else { return }
+        scheduleRebuild()
     }
 
     func topologyDidChange() {
@@ -143,9 +154,7 @@ final class DiskMonitor {
             if seen.contains(uuid) { continue }
             seen.insert(uuid)
 
-            let internalDrive = values.volumeIsInternal == true
-            let ejectable = values.volumeIsEjectable == true || values.volumeIsRemovable == true
-            let kind: DiskKind = (!internalDrive && ejectable) ? .external : .internalDrive
+            let kind = classify(url: url, values: values)
             let hint = ignoreHint(name: name, url: url, uuid: uuid)
 
             var readBps = 0.0
@@ -240,7 +249,7 @@ final class DiskMonitor {
 
     private func mntfrom(_ s: inout statfs) -> String {
         withUnsafePointer(to: &s.f_mntfromname) {
-            $0.withMemoryRebound(to: CChar.self, capacity: Int(_DARWIN_MAXPATHLEN)) {
+            $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) {
                 String(cString: $0)
             }
         }
@@ -284,6 +293,58 @@ final class DiskMonitor {
         if let daSession { return daSession }
         daSession = DASessionCreate(kCFAllocatorDefault)
         return daSession
+    }
+
+    /// Appear / disappear / volume-path change — not a 12s poll.
+    /// Initial `appeared` flood is ignored until daReady.
+    private func armDiskArbitration() {
+        guard let session = diskSession() else { return }
+        DASessionSetDispatchQueue(session, DispatchQueue.main)
+        DARegisterDiskAppearedCallback(session, nil, { _, _ in
+            DiskMonitor.shared.noteHotPlug()
+        }, nil)
+        DARegisterDiskDisappearedCallback(session, nil, { _, _ in
+            DiskMonitor.shared.noteHotPlug()
+        }, nil)
+        let watch = [kDADiskDescriptionVolumePathKey] as CFArray
+        DARegisterDiskDescriptionChangedCallback(session, nil, watch, { _, _, _ in
+            DiskMonitor.shared.noteHotPlug()
+        }, nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            self?.daReady = true
+        }
+    }
+
+    /// Fixed + External PCI-E / USB SSDs are external. Do not require ejectable.
+    private func classify(url: URL, values: URLResourceValues) -> DiskKind {
+        if let kind = daKind(url) { return kind }
+        if values.volumeIsInternal == false { return .external }
+        if values.volumeIsEjectable == true || values.volumeIsRemovable == true { return .external }
+        return .internalDrive
+    }
+
+    private func daKind(_ url: URL) -> DiskKind? {
+        guard let session = diskSession() else { return nil }
+        let cfURL = url as CFURL
+        guard let disk = DADiskCreateFromVolumePath(kCFAllocatorDefault, session, cfURL),
+              let raw = DADiskCopyDescription(disk)
+        else { return nil }
+        let desc = raw as NSDictionary
+        if desc[kDADiskDescriptionVolumeNetworkKey] as? Bool == true { return nil }
+
+        let proto = ((desc[kDADiskDescriptionDeviceProtocolKey] as? String) ?? "").lowercased()
+        if proto.contains("usb")
+            || proto.contains("thunderbolt")
+            || proto.contains("firewire")
+            || proto.contains("secure digital")
+        {
+            return .external
+        }
+
+        if let deviceInternal = desc[kDADiskDescriptionDeviceInternalKey] as? Bool {
+            return deviceInternal ? .internalDrive : .external
+        }
+        return nil
     }
 
     /// DiskArbitration BSD + whole-disk name. More stable than peeling statfs

@@ -3,6 +3,7 @@ import Combine
 import SwiftUI
 
 @main
+@MainActor
 final class QuotaBarApp: NSObject, NSApplicationDelegate {
     private static var retained: QuotaBarApp?
 
@@ -309,17 +310,23 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
             }
         }
 
+        var searchFrom = raw.startIndex
         for (lane, letter) in snap.barLanes.map({ ($0, $0.key.letter) }) {
             guard let tint = color(for: lane.tone) else { continue }
             let needle = "\(letter) \(lane.label == "—" ? "—" : "\(Int(lane.usedPct ?? 0))")"
-            if let range = raw.range(of: needle) {
+            if let range = raw.range(of: needle, range: searchFrom..<raw.endIndex) {
                 attr.addAttribute(.foregroundColor, value: tint, range: NSRange(range, in: raw))
+                searchFrom = range.upperBound
             }
         }
-        if let hot = disks.max(by: { $0.usedPct < $1.usedPct }), let tint = color(for: hot.tone) {
-            let needle = "D \(Int(hot.usedPct.rounded()))"
-            if let range = raw.range(of: needle) {
-                attr.addAttribute(.foregroundColor, value: tint, range: NSRange(range, in: raw))
+        searchFrom = raw.startIndex
+        for bit in Snapshot.barDiskBits(disks) {
+            let needle = "\(bit.letter) \(bit.pct)"
+            if let range = raw.range(of: needle, range: searchFrom..<raw.endIndex) {
+                if let tint = color(for: bit.tone) {
+                    attr.addAttribute(.foregroundColor, value: tint, range: NSRange(range, in: raw))
+                }
+                searchFrom = range.upperBound
             }
         }
         button.attributedTitle = attr
@@ -350,8 +357,8 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
 final class GlassPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
-    override var contentRect(forFrameRect frameRect: NSRect) -> NSRect { frameRect }
-    override var frameRect(forContentRect contentRect: NSRect) -> NSRect { contentRect }
+    override func contentRect(forFrameRect frameRect: NSRect) -> NSRect { frameRect }
+    override func frameRect(forContentRect contentRect: NSRect) -> NSRect { contentRect }
 }
 
 final class ClearHosting<Content: View>: NSHostingController<Content> {

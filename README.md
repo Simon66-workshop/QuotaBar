@@ -1,4 +1,4 @@
-# QuotaBar 1.7.1
+# QuotaBar 1.8
 
 Mac menu bar extra for live Grok / Cursor / Grok Bot / ChatGPT / Claude Code usage, plus local and external disks.
 
@@ -25,7 +25,7 @@ QuotaBar appears on the right of the menu bar. Unconnected services stay off the
 - **Left-click** the bar → glass panel (details, connect, hide disks)
 - **Right-click** the bar → short native menu (refresh / copy / alerts / quit)
 
-The panel header should say **v1.7.1**. If it still says v1.7, quit QuotaBar and run `Start QuotaBar.command` again.
+The panel header should say **v1.8**. If it still says v1.7.x, quit QuotaBar and run `Start QuotaBar.command` again.
 
 Later launches: just double-click `Start QuotaBar.command` again.
 
@@ -46,6 +46,10 @@ If Claude shows `—`, run `claude` once in Terminal, then click Refresh.
 Plug in a USB / Thunderbolt disk and it appears in the panel; eject it and it disappears. Hide Time Machine or VM disks from the panel — they stay off the bar until you Show them again.
 
 The bar only turns orange / red on a token that is actually high (85%+ services, 90%+ disks). A normal 60–80% day stays neutral.
+
+## 1.8
+
+External Fixed PCI-E / USB volumes are classified via DiskArbitration `DeviceInternal` + protocol (USB / Thunderbolt), not “ejectable”. The menu bar shows `D` for the hottest internal volume and a separate `E` for each external disk. Appear / disappear / volume-path callbacks update the bar immediately. Swift 6.3.3 compile: `contentRect`/`frameRect` are methods, `@MainActor` on the app, `PROC_ALL_PIDS` as `UInt32`, `MAXPATHLEN`.
 
 ## 1.7.1
 

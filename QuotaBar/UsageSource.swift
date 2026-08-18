@@ -122,11 +122,11 @@ enum ProcessProbe {
     }
 
     private static func scanClaude() -> Bool {
-        let raw = proc_listpids(PROC_ALL_PIDS, 0, nil, 0)
+        let raw = proc_listpids(UInt32(PROC_ALL_PIDS), 0, nil, 0)
         guard raw > 0 else { return false }
         let count = Int(raw) / MemoryLayout<pid_t>.stride
         var pids = [pid_t](repeating: 0, count: count)
-        let filled = proc_listpids(PROC_ALL_PIDS, 0, &pids, raw)
+        let filled = proc_listpids(UInt32(PROC_ALL_PIDS), 0, &pids, raw)
         guard filled > 0 else { return false }
         let n = Int(filled) / MemoryLayout<pid_t>.stride
         for pid in pids.prefix(n) where pid > 0 {
