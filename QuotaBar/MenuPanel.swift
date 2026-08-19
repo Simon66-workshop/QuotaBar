@@ -23,7 +23,7 @@ struct MenuPanel: View {
             footer
         }
         .padding(16)
-        .frame(width: 420)
+        .frame(width: 448)
         .background(Color.clear)
     }
 
@@ -41,7 +41,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.8.9")
+                Text("v1.8.10")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -271,7 +271,7 @@ private struct UsageTable: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                    .frame(minWidth: 120, maxWidth: .infinity, alignment: .leading)
+                    .frame(minWidth: 148, maxWidth: .infinity, alignment: .leading)
                     Text(usedText(lane))
                         .font(.system(size: 12, weight: .semibold).monospacedDigit())
                         .foregroundStyle(lane.tone == .ok ? Color.primary : toneColor(lane.tone))
@@ -542,14 +542,16 @@ private struct DiskSection: View {
                                 HStack(spacing: 4) {
                                     Text(disk.name)
                                         .font(.system(size: 12, weight: .medium))
-                                        .lineLimit(1)
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.leading)
+                                        .fixedSize(horizontal: false, vertical: true)
                                     if disk.justChanged != nil {
                                         Text("new")
                                             .font(.system(size: 9, weight: .semibold))
                                             .foregroundStyle(.orange)
                                     }
                                 }
-                                .frame(minWidth: 120, maxWidth: .infinity, alignment: .leading)
+                                .frame(minWidth: 148, maxWidth: .infinity, alignment: .leading)
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
@@ -620,7 +622,8 @@ private struct DiskSection: View {
                         Text(disk.name)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         if let hint = disk.ignoreHint {
                             Text(hint)

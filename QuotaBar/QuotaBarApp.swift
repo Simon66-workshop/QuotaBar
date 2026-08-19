@@ -18,7 +18,7 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
     private var lastTitle = ""
     private var barActionAt = Date.distantPast
 
-    private static let panelWidth: CGFloat = 420
+    private static let panelWidth: CGFloat = 448
 
     static func main() {
         let app = NSApplication.shared

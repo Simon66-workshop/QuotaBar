@@ -233,19 +233,17 @@ enum UsageClient {
 
     private static func pullGrokBilling(token: String) async throws -> [String: Any] {
         var last: Error = AuthError.bad
-        let tries: [(credits: Bool, header: Bool, direct: Bool)] = [
-            (true, true, true),
-            (true, false, true),
-            (false, true, true),
-            (true, true, false),
+        let tries: [(credits: Bool, header: Bool)] = [
+            (true, true),
+            (true, false),
+            (false, true),
         ]
         for tryCfg in tries {
             do {
                 let json = try await getGrokBilling(
                     token: token,
                     credits: tryCfg.credits,
-                    authHeader: tryCfg.header,
-                    direct: tryCfg.direct
+                    authHeader: tryCfg.header
                 )
                 if parseGrok(json) != nil { return json }
                 last = AuthError.bad
@@ -259,8 +257,7 @@ enum UsageClient {
     private static func getGrokBilling(
         token: String,
         credits: Bool = true,
-        authHeader: Bool = true,
-        direct: Bool = true
+        authHeader: Bool = true
     ) async throws -> [String: Any] {
         let url = credits
             ? "https://cli-chat-proxy.grok.com/v1/billing?format=credits"
@@ -273,9 +270,8 @@ enum UsageClient {
             req.setValue("xai-grok-cli", forHTTPHeaderField: "x-xai-token-auth")
         }
         req.setValue("application/json", forHTTPHeaderField: "Accept")
-        req.setValue("QuotaBar/1.8.9", forHTTPHeaderField: "User-Agent")
-        let session = direct ? GrokNet.direct : URLSession.shared
-        let (data, res) = try await session.data(for: req)
+        req.setValue("QuotaBar/1.8.10", forHTTPHeaderField: "User-Agent")
+        let (data, res) = try await GrokNet.data(for: req)
         return try decode(data, res)
     }
 
@@ -475,7 +471,7 @@ enum UsageClient {
             "client_id": rec.clientId,
         ])
         do {
-            let (data, res) = try await GrokNet.direct.data(for: req)
+            let (data, res) = try await GrokNet.data(for: req)
             let code = (res as? HTTPURLResponse)?.statusCode ?? 0
             let text = String(data: data, encoding: .utf8) ?? ""
             if code != 200 {

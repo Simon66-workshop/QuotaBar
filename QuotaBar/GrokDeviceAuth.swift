@@ -1,27 +1,109 @@
 import Foundation
 
+/// Clash on 127.0.0.1:7897 is the *system* proxy. URLSession
+/// connectionProxyDictionary still inherited it (v1.8.9: CFNetwork
+/// HTTP 500 via 7897). Grok uses /usr/bin/curl --noproxy '*' so
+/// CFNetwork never sees the request. Token goes on curl stdin, not argv.
+enum GrokNet {
+    enum TransportError: Error { case curl(String) }
+
+    static func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        try await Task.detached(priority: .userInitiated) {
+            try runCurl(request)
+        }.value
+    }
+
+    private static func runCurl(_ request: URLRequest) throws -> (Data, URLResponse) {
+        guard let url = request.url else { throw TransportError.curl("missing url") }
+        let curlPath = "/usr/bin/curl"
+        guard FileManager.default.isExecutableFile(atPath: curlPath) else {
+            throw TransportError.curl("curl missing")
+        }
+
+        var bodyFile: URL?
+        defer {
+            if let bodyFile { try? FileManager.default.removeItem(at: bodyFile) }
+        }
+
+        var cfg = """
+        silent
+        show-error
+        compressed
+        location
+        http1.1
+        noproxy = "*"
+        max-time = "15"
+        connect-timeout = "8"
+        url = "\(escape(url.absoluteString))"
+
+        """
+        if let method = request.httpMethod, method.uppercased() != "GET" {
+            cfg += "request = \"\(escape(method))\"\n"
+        }
+        for (key, value) in request.allHTTPHeaderFields ?? [:] {
+            cfg += "header = \"\(escape("\(key): \(value)"))\"\n"
+        }
+        if let body = request.httpBody, !body.isEmpty {
+            let tmp = FileManager.default.temporaryDirectory
+                .appendingPathComponent("qb-grok-\(UUID().uuidString)")
+            try body.write(to: tmp, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tmp.path)
+            bodyFile = tmp
+            cfg += "data-binary = \"@\(escape(tmp.path))\"\n"
+        }
+        cfg += "write-out = \"\\n__QBHTTP__%{http_code}\"\n"
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: curlPath)
+        proc.arguments = ["--config", "-"]
+        let stdin = Pipe()
+        let stdout = Pipe()
+        let stderr = Pipe()
+        proc.standardInput = stdin
+        proc.standardOutput = stdout
+        proc.standardError = stderr
+        try proc.run()
+        stdin.fileHandleForWriting.write(Data(cfg.utf8))
+        try stdin.fileHandleForWriting.close()
+        proc.waitUntilExit()
+
+        let raw = stdout.fileHandleForReading.readDataToEndOfFile()
+        let err = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let blob = String(data: raw, encoding: .utf8) ?? ""
+        guard let sep = blob.range(of: "\n__QBHTTP__", options: .backwards)
+                ?? blob.range(of: "__QBHTTP__", options: .backwards)
+        else {
+            throw TransportError.curl(err.isEmpty ? "no status from curl" : err)
+        }
+        let bodyText = String(blob[..<sep.lowerBound])
+        let code = Int(blob[sep.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        if proc.terminationStatus != 0, code == 0 {
+            throw TransportError.curl(err.isEmpty ? "curl exit \(proc.terminationStatus)" : err)
+        }
+        let response = HTTPURLResponse(
+            url: url,
+            statusCode: code,
+            httpVersion: "HTTP/1.1",
+            headerFields: nil
+        ) ?? URLResponse(
+            url: url,
+            mimeType: "application/json",
+            expectedContentLength: bodyText.utf8.count,
+            textEncodingName: "utf-8"
+        )
+        return (Data(bodyText.utf8), response)
+    }
+
+    private static func escape(_ value: String) -> String {
+        value.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+}
+
 /// 0.2.111 device-auth prints "Signed in" but often never writes disk
 /// (`loginmint persist failed; using unpersisted token`). There is no
 /// macOS Keychain write in that binary. QuotaBar runs the same OIDC
 /// device grant and writes ~/.grok/auth.json itself.
-enum GrokNet {
-    /// Clash / system HTTP proxy on 127.0.0.1 often 502s cli-chat-proxy.
-    /// Cursor still uses URLSession.shared; only xAI/Grok goes direct.
-    static let direct: URLSession = {
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 15
-        config.timeoutIntervalForResource = 18
-        config.waitsForConnectivity = false
-        config.requestCachePolicy = .reloadIgnoringLocalCacheData
-        config.connectionProxyDictionary = [
-            kCFNetworkProxiesHTTPEnable: false,
-            kCFNetworkProxiesHTTPSEnable: false,
-            kCFNetworkProxiesSOCKSEnable: false,
-        ]
-        return URLSession(configuration: config)
-    }()
-}
-
 enum GrokDeviceAuth {
     static let clientId = "b1a00492-073a-47ea-816f-4c329264a828"
     static let issuer = "https://auth.x.ai"
@@ -60,7 +142,7 @@ enum GrokDeviceAuth {
             "client_id": clientId,
             "scope": scope,
         ])
-        let (data, res) = try await GrokNet.direct.data(for: req)
+        let (data, res) = try await GrokNet.data(for: req)
         let code = (res as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200,
               let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -99,7 +181,7 @@ enum GrokDeviceAuth {
                 "device_code": pending.deviceCode,
                 "client_id": clientId,
             ])
-            let (data, res) = try await GrokNet.direct.data(for: req)
+            let (data, res) = try await GrokNet.data(for: req)
             let status = (res as? HTTPURLResponse)?.statusCode ?? 0
             let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
             if status == 200, let access = obj["access_token"] as? String, !access.isEmpty {
