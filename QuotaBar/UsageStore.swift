@@ -55,7 +55,12 @@ final class UsageStore: ObservableObject {
             self?.tickDisks()
         }
         tickDisks()
-        Task { await refresh() }
+        Task {
+            await refresh()
+            if TokenReader.loadGrokAuth() == nil, TokenReader.grokAuthIsGhost(), !loginInProgress {
+                startDeviceLogin()
+            }
+        }
         timer = Timer.publish(every: 90, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in

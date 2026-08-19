@@ -28,7 +28,6 @@ enum TokenReader {
     }
 
     static func loadGrokAuth() -> GrokAuth? {
-        if UserDefaults.standard.bool(forKey: disconnectedKey) { return nil }
         clearStaleAuthLock()
         let disk = loadGrokAuthFromDisk()
         let saved = KeychainStore.loadAuth()
@@ -37,7 +36,6 @@ enum TokenReader {
         if let s = saved, s.canRefresh, !isDeadRefresh(s.refresh) { return s }
         if let alt = discoverAlternateAuth() { return alt }
 
-        // Fall back to any still-usable access token (paste-only / no refresh).
         if let d = disk, !d.access.isEmpty, (d.refresh.isEmpty || !isDeadRefresh(d.refresh)) {
             return d
         }
@@ -193,6 +191,10 @@ enum TokenReader {
         }
         if drop.isEmpty { return }
         for key in drop { bag.removeValue(forKey: key) }
+        if bag.isEmpty {
+            try? FileManager.default.removeItem(at: url)
+            return
+        }
         guard let out = try? JSONSerialization.data(withJSONObject: bag, options: [.prettyPrinted, .sortedKeys])
         else { return }
         try? out.write(to: url, options: .atomic)
@@ -555,9 +557,15 @@ enum TokenReader {
     }
 
     static func hasGrokSession() -> Bool {
-        if FileManager.default.fileExists(atPath: grokAuthURL().path) { return true }
-        if KeychainStore.loadAuth() != nil { return true }
-        return false
+        loadGrokAuth() != nil
+    }
+
+    /// Empty `{}` leftover after a wipe. Not a session — do not put G on the bar.
+    static func grokAuthIsGhost() -> Bool {
+        let url = grokAuthURL()
+        guard let data = try? Data(contentsOf: url) else { return false }
+        if data.count < 32 { return true }
+        return extractRecord(from: url) == nil
     }
 
     static func hasClaudeSession() -> Bool {
