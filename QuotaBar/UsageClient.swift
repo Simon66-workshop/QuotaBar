@@ -35,7 +35,105 @@ enum UsageClient {
         }
     }
 
+    private static func grokStatus(_ line: String) {
+        let url = TokenReader.home().appendingPathComponent(".grok/quotabar-status.txt")
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        try? "\(stamp)  \(line)\n".write(to: url, atomically: true, encoding: .utf8)
+    }
+
     static func fetchGrok(token ignored: String = "") async -> Lane {
+        guard var auth = TokenReader.loadGrokAuth() else {
+            grokStatus("no-token")
+            return .empty(.grok, sub: "Weekly SuperGrok Heavy  ·  not connected")
+        }
+
+        var persistNote: String?
+        // Refresh only when near expiry. Always-refresh burned tokens.
+        if auth.canRefresh, auth.isStale || auth.access.isEmpty {
+            switch await refreshGrokOIDC(auth) {
+            case .ok(let next):
+                persistNote = TokenReader.persist(next)
+                auth = next
+            case .failed(let detail) where detail.localizedCaseInsensitiveContains("invalid_grant"):
+                TokenReader.markRefreshDead(auth.refresh)
+                if let live = TokenReader.discoverAlternateAuth(), !TokenReader.isDeadRefresh(live.refresh) {
+                    if live.canRefresh, live.isStale || live.access.isEmpty {
+                        switch await refreshGrokOIDC(live) {
+                        case .ok(let next):
+                            persistNote = TokenReader.persist(next)
+                            auth = next
+                        case .failed(let second):
+                            grokStatus("refresh invalid_grant alt \(second)")
+                            return .error(.grok, message: "Grok refresh invalid_grant; alternate also failed: \(second)")
+                        }
+                    } else {
+                        persistNote = TokenReader.persist(live)
+                        auth = live
+                    }
+                } else {
+                    TokenReader.clearStaleAuthLock()
+                    grokStatus("refresh invalid_grant no-alt")
+                    return .error(
+                        .grok,
+                        message: "CLI 没落盘。点 Sign in with Grok，由 QuotaBar 写回 key + expires_at。"
+                    )
+                }
+            case .failed(let detail):
+                persistNote = "refresh soft-fail: \(detail)"
+            }
+        } else if auth.access.isEmpty {
+            grokStatus("access empty")
+            return .empty(.grok, sub: "auth.json has no access or refresh_token")
+        }
+
+        do {
+            let json = try await pullGrokBilling(token: auth.access)
+            if var lane = parseGrok(json) {
+                if let persistNote, persistNote.contains("write failed") {
+                    lane.sub += "  ·  auth.json write failed"
+                }
+                grokStatus("ok used=\(Int(lane.usedPct ?? 0)) keys=\(json.keys.sorted().joined(separator: ","))")
+                return lane
+            }
+            let keys = json.keys.sorted().joined(separator: ",")
+            grokStatus("parse-nil keys=\(keys)")
+            return .error(.grok, message: "billing keys \(keys)")
+        } catch AuthError.http(let code) where code == 401 || code == 403 {
+            if auth.canRefresh, !TokenReader.isDeadRefresh(auth.refresh) {
+                switch await refreshGrokOIDC(auth) {
+                case .ok(let next):
+                    _ = TokenReader.persist(next)
+                    if let json = try? await pullGrokBilling(token: next.access),
+                       let lane = parseGrok(json)
+                    {
+                        grokStatus("ok after-401 used=\(Int(lane.usedPct ?? 0))")
+                        return lane
+                    }
+                case .failed(let detail) where detail.localizedCaseInsensitiveContains("invalid_grant"):
+                    TokenReader.markRefreshDead(auth.refresh)
+                    grokStatus("billing \(code) invalid_grant")
+                    return .error(.grok, message: "billing \(code) · sign in again")
+                case .failed(let detail):
+                    grokStatus("billing \(code) refresh \(detail)")
+                }
+            }
+            grokStatus("billing \(code)")
+            return .error(.grok, message: "billing \(code)")
+        } catch AuthError.http(let code) {
+            grokStatus("billing HTTP \(code)")
+            return .error(.grok, message: "billing HTTP \(code)")
+        } catch let err as GrokNet.TransportError {
+            grokStatus("curl \(err.localizedDescription)")
+            return .error(.grok, message: "curl \(err.localizedDescription)")
+        } catch AuthError.bad {
+            grokStatus("billing JSON")
+            return .error(.grok, message: "billing JSON")
+        } catch {
+            grokStatus("billing \(error.localizedDescription)")
+            return .error(.grok, message: "billing \(error.localizedDescription)")
+        }
+    }
         guard var auth = TokenReader.loadGrokAuth() else {
             return .empty(.grok, sub: "Weekly SuperGrok Heavy  ·  not connected")
         }
@@ -234,6 +332,7 @@ enum UsageClient {
 
     private static func pullGrokBilling(token: String) async throws -> [String: Any] {
         var last: Error = AuthError.bad
+        var lastJSON: [String: Any]?
         let tries: [(credits: Bool, header: Bool)] = [
             (true, true),
             (true, false),
@@ -246,12 +345,13 @@ enum UsageClient {
                     credits: tryCfg.credits,
                     authHeader: tryCfg.header
                 )
+                lastJSON = json
                 if parseGrok(json) != nil { return json }
-                last = AuthError.bad
             } catch {
                 last = error
             }
         }
+        if let lastJSON { return lastJSON }
         throw last
     }
 
@@ -439,11 +539,17 @@ enum UsageClient {
     private static func decode(_ data: Data, _ res: URLResponse) throws -> [String: Any] {
         let code = (res as? HTTPURLResponse)?.statusCode ?? 0
         if !(200 ..< 300).contains(code) { throw AuthError.http(code) }
-        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { throw AuthError.bad }
-        if let inner = obj["data"] as? [String: Any] { return inner }
-        if let inner = obj["result"] as? [String: Any] { return inner }
-        return obj
+        let obj = try JSONSerialization.jsonObject(with: data)
+        if let dict = obj as? [String: Any] {
+            if dict["config"] != nil || dict["creditUsagePercent"] != nil || dict["currentPeriod"] != nil {
+                return dict
+            }
+            if let inner = dict["data"] as? [String: Any] { return inner }
+            if let inner = dict["result"] as? [String: Any] { return inner }
+            return dict
+        }
+        if let list = obj as? [Any], let first = list.first as? [String: Any] { return first }
+        throw AuthError.bad
     }
 
     private static func formBody(_ pairs: [String: String]) -> Data {
@@ -566,8 +672,15 @@ enum UsageClient {
             }
         }
         guard let used = pickGrokUsed(config: root, period: period, root: json, details: details) else {
+            if period != nil || root["config"] != nil || json["config"] != nil {
+                return .used(.grok, percent: 0, sub: bitsJoined(json, period, root, extra: details), details: details)
+            }
             return nil
         }
+        return .used(.grok, percent: used, sub: bitsJoined(json, period, root, extra: details), details: details)
+    }
+
+    private static func bitsJoined(_ json: [String: Any], _ period: [String: Any]?, _ root: [String: Any], extra: [LaneDetail]) -> String {
         var bits = ["Weekly SuperGrok Heavy Limit"]
         if let r = resetLabel(
             period?["end"]
@@ -576,7 +689,7 @@ enum UsageClient {
                 ?? root["billingPeriodEnd"]
                 ?? json["billingPeriodEnd"]
         ) { bits.append(r) }
-        return .used(.grok, percent: used, sub: bits.joined(separator: "  ·  "), details: details)
+        return bits.joined(separator: "  ·  ")
     }
 
     /// config.creditUsagePercent == 0 must not hide currentPeriod / productUsage.
@@ -595,16 +708,15 @@ enum UsageClient {
         let moneyPct = moneyPercent(config) ?? moneyPercent(root) ?? moneyPercent(period ?? [:])
         let onDemandPct = onDemandPercent(config) ?? onDemandPercent(root)
 
-        if let periodUsed, periodUsed > 0 { return periodUsed }
-        if let configUsed, configUsed > 0 { return configUsed }
-        if let rootUsed, rootUsed > 0 { return rootUsed }
-        if let moneyPct, moneyPct > 0 { return moneyPct }
-        if let onDemandPct, onDemandPct > 0 { return onDemandPct }
+        if let periodUsed { return periodUsed }
+        if let configUsed { return configUsed }
+        if let rootUsed { return rootUsed }
+        if let moneyPct { return moneyPct }
+        if let onDemandPct { return onDemandPct }
         if productSum > 0, productSum <= 100 { return productSum }
         if productMax > 0 { return productMax }
-        if period != nil, let periodUsed { return periodUsed }
-        if period != nil || !details.isEmpty || moneyPct != nil || onDemandPct != nil {
-            return periodUsed ?? configUsed ?? rootUsed ?? moneyPct ?? onDemandPct ?? 0
+        if period != nil || !details.isEmpty {
+            return 0
         }
         return nil
     }
