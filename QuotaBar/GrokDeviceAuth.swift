@@ -1,9 +1,9 @@
 import Foundation
 
-/// Clash on 127.0.0.1:7897 is the *system* proxy. URLSession
-/// connectionProxyDictionary still inherited it (v1.8.9: CFNetwork
-/// HTTP 500 via 7897). Grok uses /usr/bin/curl --noproxy '*' so
-/// CFNetwork never sees the request. Token goes on curl stdin, not argv.
+/// This Mini cannot reach grok.com direct (`--noproxy` timed out).
+/// Clash on the system proxy (HTTP/SOCKS 127.0.0.1:7897) can — 401
+/// without a token, 200 with one. Grok therefore uses curl *with*
+/// the system proxy. Token stays in a 0600 config file, not argv.
 enum GrokNet {
     enum TransportError: LocalizedError {
         case curl(String)
@@ -14,19 +14,36 @@ enum GrokNet {
         }
     }
 
-    private static let lock = NSLock()
-    private static var ipCache: [String: (ip: String, at: Date)] = [:]
-
     static func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         try await Task.detached(priority: .userInitiated) {
             try runCurl(request)
         }.value
     }
 
-    private static func runCurl(_ request: URLRequest) throws -> (Data, URLResponse) {
-        guard let url = request.url, let host = url.host else {
-            throw TransportError.curl("missing url")
+    private static func systemProxyURL() -> String? {
+        guard let raw = CFNetworkCopySystemProxySettings()?.takeRetainedValue() as NSDictionary? else {
+            return nil
         }
+        func on(_ enableKey: String, _ hostKey: String, _ portKey: String, scheme: String) -> String? {
+            let enabled: Bool
+            if let b = raw[enableKey] as? Bool { enabled = b }
+            else if let n = raw[enableKey] as? NSNumber { enabled = n.boolValue }
+            else { enabled = false }
+            guard enabled, let host = raw[hostKey] as? String, !host.isEmpty else { return nil }
+            let port: Int
+            if let n = raw[portKey] as? NSNumber { port = n.intValue }
+            else if let i = raw[portKey] as? Int { port = i }
+            else { return nil }
+            guard port > 0 else { return nil }
+            return "\(scheme)://\(host):\(port)"
+        }
+        return on("HTTPSEnable", "HTTPSProxy", "HTTPSPort", scheme: "http")
+            ?? on("HTTPEnable", "HTTPProxy", "HTTPPort", scheme: "http")
+            ?? on("SOCKSEnable", "SOCKSProxy", "SOCKSPort", scheme: "socks5h")
+    }
+
+    private static func runCurl(_ request: URLRequest) throws -> (Data, URLResponse) {
+        guard let url = request.url else { throw TransportError.curl("missing url") }
         let curlPath = "/usr/bin/curl"
         guard FileManager.default.isExecutableFile(atPath: curlPath) else {
             throw TransportError.curl("curl missing")
@@ -44,16 +61,13 @@ enum GrokNet {
         compressed
         location
         http1.1
-        ipv4
-        noproxy = "*"
         max-time = "15"
         connect-timeout = "8"
         url = "\(escape(url.absoluteString))"
 
         """
-        if let ip = pinnedIPv4(host) {
-            let port = url.port ?? 443
-            cfg += "resolve = \"\(host):\(port):\(ip)\"\n"
+        if let proxy = systemProxyURL() {
+            cfg += "proxy = \"\(escape(proxy))\"\n"
         }
         if let method = request.httpMethod, method.uppercased() != "GET" {
             cfg += "request = \"\(escape(method))\"\n"
@@ -111,73 +125,6 @@ enum GrokNet {
             textEncodingName: "utf-8"
         )
         return (Data(bodyText.utf8), response)
-    }
-
-    /// Clash fake-ip makes --noproxy still hit 198.18.x. Pin a public A record
-    /// via DoH to 1.1.1.1 (literal IP, no system DNS).
-    private static func pinnedIPv4(_ host: String) -> String? {
-        lock.lock()
-        if let hit = ipCache[host], Date().timeIntervalSince(hit.at) < 300 {
-            let ip = hit.ip
-            lock.unlock()
-            return ip
-        }
-        lock.unlock()
-        let ip = dohA(host) ?? dohAGoogle(host)
-        guard let ip else { return nil }
-        lock.lock()
-        ipCache[host] = (ip, Date())
-        lock.unlock()
-        return ip
-    }
-
-    private static func dohA(_ host: String) -> String? {
-        rawCurlJSON(
-            url: "https://1.1.1.1/dns-query?name=\(host)&type=A",
-            extra: ["header = \"accept: application/dns-json\""]
-        ).flatMap(firstA)
-    }
-
-    private static func dohAGoogle(_ host: String) -> String? {
-        rawCurlJSON(url: "https://8.8.8.8/resolve?name=\(host)&type=A", extra: []).flatMap(firstA)
-    }
-
-    private static func firstA(_ obj: [String: Any]) -> String? {
-        guard let answers = obj["Answer"] as? [[String: Any]] else { return nil }
-        for item in answers {
-            let type = (item["type"] as? NSNumber)?.intValue ?? 0
-            guard type == 1, let data = item["data"] as? String else { continue }
-            if data.split(separator: ".").count == 4, !data.hasPrefix("198.18.") { return data }
-        }
-        return nil
-    }
-
-    private static func rawCurlJSON(url: String, extra: [String]) -> [String: Any]? {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("qb-doh-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: tmp) }
-        var cfg = """
-        silent
-        show-error
-        ipv4
-        noproxy = "*"
-        max-time = "5"
-        connect-timeout = "4"
-        url = "\(escape(url))"
-
-        """
-        for line in extra { cfg += line + "\n" }
-        guard (try? cfg.write(to: tmp, atomically: true, encoding: .utf8)) != nil else { return nil }
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
-        proc.arguments = ["--config", tmp.path]
-        let stdout = Pipe()
-        proc.standardOutput = stdout
-        proc.standardError = Pipe()
-        do { try proc.run() } catch { return nil }
-        proc.waitUntilExit()
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
 
     private static func escape(_ value: String) -> String {

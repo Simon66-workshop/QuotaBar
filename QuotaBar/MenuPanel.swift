@@ -41,7 +41,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.8.11")
+                Text("v1.8.12")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
