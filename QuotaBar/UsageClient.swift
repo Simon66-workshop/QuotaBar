@@ -108,8 +108,12 @@ enum UsageClient {
             return .error(.grok, message: "billing \(code)")
         } catch AuthError.http(let code) {
             return .error(.grok, message: "billing HTTP \(code)")
+        } catch let err as GrokNet.TransportError {
+            return .error(.grok, message: "curl \(err.localizedDescription)")
+        } catch AuthError.bad {
+            return .error(.grok, message: "billing JSON")
         } catch {
-            return .error(.grok, message: "billing request failed")
+            return .error(.grok, message: "billing \(error.localizedDescription)")
         }
     }
 

@@ -5,7 +5,17 @@ import Foundation
 /// HTTP 500 via 7897). Grok uses /usr/bin/curl --noproxy '*' so
 /// CFNetwork never sees the request. Token goes on curl stdin, not argv.
 enum GrokNet {
-    enum TransportError: Error { case curl(String) }
+    enum TransportError: LocalizedError {
+        case curl(String)
+        var errorDescription: String? {
+            switch self {
+            case .curl(let s): s
+            }
+        }
+    }
+
+    private static let lock = NSLock()
+    private static var ipCache: [String: (ip: String, at: Date)] = [:]
 
     static func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         try await Task.detached(priority: .userInitiated) {
@@ -14,29 +24,37 @@ enum GrokNet {
     }
 
     private static func runCurl(_ request: URLRequest) throws -> (Data, URLResponse) {
-        guard let url = request.url else { throw TransportError.curl("missing url") }
+        guard let url = request.url, let host = url.host else {
+            throw TransportError.curl("missing url")
+        }
         let curlPath = "/usr/bin/curl"
         guard FileManager.default.isExecutableFile(atPath: curlPath) else {
             throw TransportError.curl("curl missing")
         }
 
-        var bodyFile: URL?
+        var trash: [URL] = []
         defer {
-            if let bodyFile { try? FileManager.default.removeItem(at: bodyFile) }
+            for item in trash { try? FileManager.default.removeItem(at: item) }
         }
 
+        let tmp = FileManager.default.temporaryDirectory
         var cfg = """
         silent
         show-error
         compressed
         location
         http1.1
+        ipv4
         noproxy = "*"
         max-time = "15"
         connect-timeout = "8"
         url = "\(escape(url.absoluteString))"
 
         """
+        if let ip = pinnedIPv4(host) {
+            let port = url.port ?? 443
+            cfg += "resolve = \"\(host):\(port):\(ip)\"\n"
+        }
         if let method = request.httpMethod, method.uppercased() != "GET" {
             cfg += "request = \"\(escape(method))\"\n"
         }
@@ -44,41 +62,42 @@ enum GrokNet {
             cfg += "header = \"\(escape("\(key): \(value)"))\"\n"
         }
         if let body = request.httpBody, !body.isEmpty {
-            let tmp = FileManager.default.temporaryDirectory
-                .appendingPathComponent("qb-grok-\(UUID().uuidString)")
-            try body.write(to: tmp, options: .atomic)
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tmp.path)
-            bodyFile = tmp
-            cfg += "data-binary = \"@\(escape(tmp.path))\"\n"
+            let bodyURL = tmp.appendingPathComponent("qb-grok-body-\(UUID().uuidString)")
+            try body.write(to: bodyURL, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: bodyURL.path)
+            trash.append(bodyURL)
+            cfg += "data-binary = \"@\(escape(bodyURL.path))\"\n"
         }
         cfg += "write-out = \"\\n__QBHTTP__%{http_code}\"\n"
 
+        let cfgURL = tmp.appendingPathComponent("qb-grok-cfg-\(UUID().uuidString)")
+        try cfg.write(to: cfgURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: cfgURL.path)
+        trash.append(cfgURL)
+
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: curlPath)
-        proc.arguments = ["--config", "-"]
-        let stdin = Pipe()
+        proc.arguments = ["--config", cfgURL.path]
         let stdout = Pipe()
         let stderr = Pipe()
-        proc.standardInput = stdin
         proc.standardOutput = stdout
         proc.standardError = stderr
         try proc.run()
-        stdin.fileHandleForWriting.write(Data(cfg.utf8))
-        try stdin.fileHandleForWriting.close()
         proc.waitUntilExit()
 
         let raw = stdout.fileHandleForReading.readDataToEndOfFile()
-        let err = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let err = (String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         let blob = String(data: raw, encoding: .utf8) ?? ""
         guard let sep = blob.range(of: "\n__QBHTTP__", options: .backwards)
                 ?? blob.range(of: "__QBHTTP__", options: .backwards)
         else {
-            throw TransportError.curl(err.isEmpty ? "no status from curl" : err)
+            throw TransportError.curl(short(err.isEmpty ? "no status" : err))
         }
         let bodyText = String(blob[..<sep.lowerBound])
         let code = Int(blob[sep.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
         if proc.terminationStatus != 0, code == 0 {
-            throw TransportError.curl(err.isEmpty ? "curl exit \(proc.terminationStatus)" : err)
+            throw TransportError.curl(short(err.isEmpty ? "exit \(proc.terminationStatus)" : err))
         }
         let response = HTTPURLResponse(
             url: url,
@@ -94,9 +113,81 @@ enum GrokNet {
         return (Data(bodyText.utf8), response)
     }
 
+    /// Clash fake-ip makes --noproxy still hit 198.18.x. Pin a public A record
+    /// via DoH to 1.1.1.1 (literal IP, no system DNS).
+    private static func pinnedIPv4(_ host: String) -> String? {
+        lock.lock()
+        if let hit = ipCache[host], Date().timeIntervalSince(hit.at) < 300 {
+            let ip = hit.ip
+            lock.unlock()
+            return ip
+        }
+        lock.unlock()
+        let ip = dohA(host) ?? dohAGoogle(host)
+        guard let ip else { return nil }
+        lock.lock()
+        ipCache[host] = (ip, Date())
+        lock.unlock()
+        return ip
+    }
+
+    private static func dohA(_ host: String) -> String? {
+        rawCurlJSON(
+            url: "https://1.1.1.1/dns-query?name=\(host)&type=A",
+            extra: ["header = \"accept: application/dns-json\""]
+        ).flatMap(firstA)
+    }
+
+    private static func dohAGoogle(_ host: String) -> String? {
+        rawCurlJSON(url: "https://8.8.8.8/resolve?name=\(host)&type=A", extra: []).flatMap(firstA)
+    }
+
+    private static func firstA(_ obj: [String: Any]) -> String? {
+        guard let answers = obj["Answer"] as? [[String: Any]] else { return nil }
+        for item in answers {
+            let type = (item["type"] as? NSNumber)?.intValue ?? 0
+            guard type == 1, let data = item["data"] as? String else { continue }
+            if data.split(separator: ".").count == 4, !data.hasPrefix("198.18.") { return data }
+        }
+        return nil
+    }
+
+    private static func rawCurlJSON(url: String, extra: [String]) -> [String: Any]? {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("qb-doh-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        var cfg = """
+        silent
+        show-error
+        ipv4
+        noproxy = "*"
+        max-time = "5"
+        connect-timeout = "4"
+        url = "\(escape(url))"
+
+        """
+        for line in extra { cfg += line + "\n" }
+        guard (try? cfg.write(to: tmp, atomically: true, encoding: .utf8)) != nil else { return nil }
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+        proc.arguments = ["--config", tmp.path]
+        let stdout = Pipe()
+        proc.standardOutput = stdout
+        proc.standardError = Pipe()
+        do { try proc.run() } catch { return nil }
+        proc.waitUntilExit()
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
     private static func escape(_ value: String) -> String {
         value.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    private static func short(_ value: String) -> String {
+        let one = value.replacingOccurrences(of: "\n", with: " ")
+        return one.count > 72 ? String(one.prefix(72)) : one
     }
 }
 
