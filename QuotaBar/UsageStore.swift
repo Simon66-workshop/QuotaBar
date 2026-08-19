@@ -40,6 +40,7 @@ final class UsageStore: ObservableObject {
     private var mountedAt: [String: Date] = [:]
     private var lastRefreshAt = Date.distantPast
     private var relayoutWork: DispatchWorkItem?
+    private var refreshQueued = false
 
     init() {
         launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
@@ -260,7 +261,10 @@ final class UsageStore: ObservableObject {
     }
 
     func refresh() async {
-        if refreshRunning { return }
+        if refreshRunning {
+            refreshQueued = true
+            return
+        }
         refreshRunning = true
         busy = true
         lastRefreshAt = Date()
@@ -275,6 +279,10 @@ final class UsageStore: ObservableObject {
         if liveIO { forceDiskTick = true }
         tickDisks()
         notifyIfNeeded(next)
+        if refreshQueued {
+            refreshQueued = false
+            Task { await self.refresh() }
+        }
     }
 
     func toggleNotify() {
@@ -360,7 +368,12 @@ final class UsageStore: ObservableObject {
     private func notifyIfNeeded(_ snap: Snapshot) {
         guard notifyEnabled else { return }
         for lane in snap.lanes {
-            guard let used = lane.usedPct, used >= 85 else { continue }
+            guard let used = lane.usedPct else {
+                lastAlert[lane.key] = nil
+                continue
+            }
+            if used < 80 { lastAlert[lane.key] = nil }
+            guard used >= 85 else { continue }
             let bucket = used >= 95 ? 95 : 85
             if lastAlert[lane.key] == bucket { continue }
             lastAlert[lane.key] = bucket
@@ -376,6 +389,7 @@ final class UsageStore: ObservableObject {
             UNUserNotificationCenter.current().add(req)
         }
         for disk in disks {
+            if disk.usedPct < 85 { lastDiskAlert[disk.id] = nil }
             guard disk.usedPct >= 90 else { continue }
             let bucket = disk.usedPct >= 96 ? 96 : 90
             if lastDiskAlert[disk.id] == bucket { continue }

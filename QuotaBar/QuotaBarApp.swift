@@ -17,6 +17,8 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
     private var lastBarToggle = Date.distantPast
     private var lastTitle = ""
 
+    private static let panelWidth: CGFloat = 360
+
     static func main() {
         let app = NSApplication.shared
         let delegate = QuotaBarApp()
@@ -102,7 +104,7 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         statusItem?.menu = nil
         button.target = self
         button.action = #selector(handleBarClick(_:))
-        button.sendAction(on: [.leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp])
+        button.sendAction(on: [.leftMouseDown, .rightMouseDown])
         button.isEnabled = true
         button.appearsDisabled = false
     }
@@ -117,8 +119,11 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
     }
 
     private func handleClick(_ event: NSEvent) {
+        // Mouse-up is ignored. Down+up both toggling is why a slightly-long
+        // click opened then immediately closed the panel.
+        if event.type == .leftMouseUp || event.type == .rightMouseUp { return }
         if isBarEvent(event) {
-            if event.type == .rightMouseDown || event.type == .rightMouseUp {
+            if event.type == .rightMouseDown {
                 DispatchQueue.main.async { [weak self] in self?.showFallbackMenu() }
             } else {
                 DispatchQueue.main.async { [weak self] in self?.togglePanel() }
@@ -191,14 +196,14 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
 
     private func applyFittedSize(_ host: ClearHosting<AnyView>, under button: NSView) {
         // Unconstrain so sizeThatFits measures content, not the last frame.
-        host.view.setFrameSize(NSSize(width: 352, height: 1))
+        host.view.setFrameSize(NSSize(width: Self.panelWidth, height: 1))
         host.view.layoutSubtreeIfNeeded()
-        var fitted = host.sizeThatFits(in: NSSize(width: 352, height: 900))
+        var fitted = host.sizeThatFits(in: NSSize(width: Self.panelWidth, height: 900))
         if !fitted.height.isFinite || fitted.height < 160 {
-            fitted = NSSize(width: 352, height: 360)
+            fitted = NSSize(width: Self.panelWidth, height: 360)
         }
         let height = Swift.min(Swift.max(fitted.height, 200), 720)
-        let size = NSSize(width: 352, height: height)
+        let size = NSSize(width: Self.panelWidth, height: height)
         host.view.frame = NSRect(origin: .zero, size: size)
 
         if let panel, panelOnScreen {
