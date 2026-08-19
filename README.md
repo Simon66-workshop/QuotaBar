@@ -1,4 +1,4 @@
-# QuotaBar 1.8.14
+# QuotaBar 1.8.15
 
 Mac menu bar extra for live Grok / Cursor / Grok Bot / ChatGPT / Claude Code usage, plus local and external disks.
 
@@ -25,7 +25,7 @@ QuotaBar appears on the right of the menu bar. Unconnected services stay off the
 - **Left-click** the bar → glass panel (details, connect, hide disks)
 - **Right-click** the bar → short native menu (refresh / copy / alerts / quit)
 
-The panel header should say **v1.8.14**. If it still says v1.8.13, quit QuotaBar and run `Start QuotaBar.command` again.
+The panel header should say **v1.8.15**. If it still says v1.8.14, quit QuotaBar and run `Start QuotaBar.command` again.
 
 Later launches: just double-click `Start QuotaBar.command` again.
 
@@ -46,6 +46,10 @@ If Claude shows `—`, run `claude` once in Terminal, then click Refresh.
 Plug in a USB / Thunderbolt disk and it appears in the panel; eject it and it disappears. Hide Time Machine or VM disks from the panel — they stay off the bar until you Show them again.
 
 The bar only turns orange / red on a token that is actually high (85%+ services, 90%+ disks). A normal 60–80% day stays neutral.
+
+## 1.8.15
+
+Settings → Usage weekly pool (21% = Chat + Builder + Imagine) is not `config.creditUsagePercent` (API credits, often 0). Fetch full billing + grok.com GetGrokCreditsConfig, pick the payload with currentPeriod / product mix.
 
 ## 1.8.14
 

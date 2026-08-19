@@ -82,7 +82,11 @@ enum GrokNet {
             trash.append(bodyURL)
             cfg += "data-binary = \"@\(escape(bodyURL.path))\"\n"
         }
-        cfg += "write-out = \"\\n__QBHTTP__%{http_code}\"\n"
+        cfg += "write-out = \"%{http_code}\"\n"
+
+        let outURL = tmp.appendingPathComponent("qb-grok-out-\(UUID().uuidString)")
+        cfg += "output = \"\(escape(outURL.path))\"\n"
+        trash.append(outURL)
 
         let cfgURL = tmp.appendingPathComponent("qb-grok-cfg-\(UUID().uuidString)")
         try cfg.write(to: cfgURL, atomically: true, encoding: .utf8)
@@ -102,29 +106,23 @@ enum GrokNet {
         let raw = stdout.fileHandleForReading.readDataToEndOfFile()
         let err = (String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let blob = String(data: raw, encoding: .utf8) ?? ""
-        guard let sep = blob.range(of: "\n__QBHTTP__", options: .backwards)
-                ?? blob.range(of: "__QBHTTP__", options: .backwards)
-        else {
-            throw TransportError.curl(short(err.isEmpty ? "no status" : err))
-        }
-        let bodyText = String(blob[..<sep.lowerBound])
-        let code = Int(blob[sep.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        let code = Int(String(data: raw, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") ?? 0
         if proc.terminationStatus != 0, code == 0 {
             throw TransportError.curl(short(err.isEmpty ? "exit \(proc.terminationStatus)" : err))
         }
+        let body = (try? Data(contentsOf: outURL)) ?? Data()
         let response = HTTPURLResponse(
             url: url,
-            statusCode: code,
+            statusCode: code == 0 && proc.terminationStatus == 0 ? 200 : code,
             httpVersion: "HTTP/1.1",
             headerFields: nil
         ) ?? URLResponse(
             url: url,
             mimeType: "application/json",
-            expectedContentLength: bodyText.utf8.count,
+            expectedContentLength: body.count,
             textEncodingName: "utf-8"
         )
-        return (Data(bodyText.utf8), response)
+        return (body, response)
     }
 
     private static func escape(_ value: String) -> String {

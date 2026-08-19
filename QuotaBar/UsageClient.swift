@@ -39,7 +39,11 @@ enum UsageClient {
         let url = TokenReader.home().appendingPathComponent(".grok/quotabar-status.txt")
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let stamp = ISO8601DateFormatter().string(from: Date())
-        try? "\(stamp)  \(line)\n".write(to: url, atomically: true, encoding: .utf8)
+        let next = "\(stamp)  \(line)\n"
+        let prev = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        let keep = prev.split(whereSeparator: \.isNewline).suffix(18).joined(separator: "\n")
+        let out = keep.isEmpty ? next : keep + "\n" + next
+        try? out.write(to: url, atomically: true, encoding: .utf8)
     }
 
     static func fetchGrok(token ignored: String = "") async -> Lane {
@@ -255,48 +259,215 @@ enum UsageClient {
 
     private static func pullGrokBilling(token: String) async throws -> [String: Any] {
         var last: Error = AuthError.bad
-        var lastJSON: [String: Any]?
-        let tries: [(credits: Bool, header: Bool)] = [
-            (true, true),
-            (true, false),
-            (false, true),
+        var best: (json: [String: Any], score: Int)?
+        let urls = [
+            "https://cli-chat-proxy.grok.com/v1/billing?format=credits",
+            "https://cli-chat-proxy.grok.com/v1/billing",
+            "https://grok.com/rest/subscriptions",
+            "https://grok.com/rest/billing/usage",
+            "https://grok.com/rest/usage",
         ]
-        for tryCfg in tries {
+        for url in urls {
             do {
-                let json = try await getGrokBilling(
-                    token: token,
-                    credits: tryCfg.credits,
-                    authHeader: tryCfg.header
-                )
-                lastJSON = json
-                if parseGrok(json) != nil { return json }
+                let json = try await getGrokJSON(url: url, token: token)
+                let score = grokScore(json)
+                grokStatus("try \(url.replacingOccurrences(of: "https://", with: "")) score=\(score) \(grokShape(json))")
+                if best == nil || score > best!.score {
+                    best = (json, score)
+                }
             } catch {
                 last = error
+                grokStatus("fail \(url.replacingOccurrences(of: "https://", with: "")) \(error.localizedDescription)")
             }
         }
-        if let lastJSON { return lastJSON }
+        do {
+            if let json = try await getGrokCreditsGRPC(token: token) {
+                let score = grokScore(json) + 3
+                grokStatus("try grpc GetGrokCreditsConfig score=\(score) \(grokShape(json))")
+                if best == nil || score > best!.score {
+                    best = (json, score)
+                }
+            }
+        } catch {
+            last = error
+            grokStatus("fail grpc \(error.localizedDescription)")
+        }
+        if let best { return best.json }
         throw last
     }
 
-    private static func getGrokBilling(
-        token: String,
-        credits: Bool = true,
-        authHeader: Bool = true
-    ) async throws -> [String: Any] {
-        let url = credits
-            ? "https://cli-chat-proxy.grok.com/v1/billing?format=credits"
-            : "https://cli-chat-proxy.grok.com/v1/billing"
+    /// Website weekly pool (Chat / Builder / Imagine) lives on grok.com, not
+    /// the credits-only `config.creditUsagePercent` which is often 0.
+    private static func grokScore(_ json: [String: Any]) -> Int {
+        let root = json["config"] as? [String: Any] ?? json
+        let period = (root["currentPeriod"] as? [String: Any])
+            ?? (json["currentPeriod"] as? [String: Any])
+        let products = (period?["productUsage"] ?? root["productUsage"] ?? json["productUsage"]) as? [[String: Any]]
+        let n = products?.count ?? 0
+        let periodPct = num(period?["creditUsagePercent"]) ?? num(period?["usagePercent"])
+        let configPct = num(root["creditUsagePercent"])
+        var score = 0
+        if n > 0 { score += 8 + min(n, 4) }
+        if let periodPct, periodPct > 0 { score += 12 }
+        else if period != nil { score += 4 }
+        if let configPct, configPct > 0 { score += 3 }
+        if period?["end"] != nil || root["billingPeriodEnd"] != nil { score += 1 }
+        return score
+    }
+
+    private static func grokShape(_ json: [String: Any]) -> String {
+        let root = json["config"] as? [String: Any] ?? json
+        let period = (root["currentPeriod"] as? [String: Any]) ?? (json["currentPeriod"] as? [String: Any])
+        let ck = root.keys.sorted().joined(separator: ",")
+        let pk = period?.keys.sorted().joined(separator: ",") ?? "-"
+        let pct = num(period?["creditUsagePercent"]) ?? num(root["creditUsagePercent"])
+        return "cfg=\(ck) period=\(pk) pct=\(pct.map { String(Int($0)) } ?? "-")"
+    }
+
+    private static func getGrokJSON(url: String, token: String) async throws -> [String: Any] {
         var req = URLRequest(url: URL(string: url)!)
         req.httpMethod = "GET"
         req.timeoutInterval = timeout
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        if authHeader {
-            req.setValue("xai-grok-cli", forHTTPHeaderField: "x-xai-token-auth")
-        }
-        req.setValue("application/json", forHTTPHeaderField: "Accept")
-        req.setValue("QuotaBar/1.8.10", forHTTPHeaderField: "User-Agent")
+        applyGrokHeaders(&req, token: token)
         let (data, res) = try await GrokNet.data(for: req)
         return try decode(data, res)
+    }
+
+    private static func applyGrokHeaders(_ req: inout URLRequest, token: String) {
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("xai-grok-cli", forHTTPHeaderField: "x-xai-token-auth")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue("xai-grok-cli", forHTTPHeaderField: "User-Agent")
+        req.setValue("grok-shell", forHTTPHeaderField: "x-grok-client-identifier")
+        req.setValue("0.2.120", forHTTPHeaderField: "x-grok-client-version")
+    }
+
+    private static func getGrokCreditsGRPC(token: String) async throws -> [String: Any]? {
+        var req = URLRequest(url: URL(string: "https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig")!)
+        req.httpMethod = "POST"
+        req.timeoutInterval = timeout
+        applyGrokHeaders(&req, token: token)
+        req.setValue("application/grpc-web+proto", forHTTPHeaderField: "Content-Type")
+        req.setValue("1", forHTTPHeaderField: "x-grpc-web")
+        req.setValue("https://grok.com", forHTTPHeaderField: "Origin")
+        req.setValue("https://grok.com/?_s=usage", forHTTPHeaderField: "Referer")
+        req.httpBody = Data([0, 0, 0, 0, 0])
+        let (data, res) = try await GrokNet.data(for: req)
+        let code = (res as? HTTPURLResponse)?.statusCode ?? 0
+        if !(200 ..< 300).contains(code) { throw AuthError.http(code) }
+        return parseGrokCreditsProto(data)
+    }
+
+    /// grpc-web frame + proto. Field 1 = used%, 5 = reset, 7 = products (enum + %).
+    private static func parseGrokCreditsProto(_ raw: Data) -> [String: Any]? {
+        let proto: Data
+        if raw.count >= 5, raw[0] == 0 {
+            let len = Int(raw[1]) << 24 | Int(raw[2]) << 16 | Int(raw[3]) << 8 | Int(raw[4])
+            if 5 + len <= raw.count {
+                proto = raw.subdata(in: 5 ..< (5 + len))
+            } else {
+                proto = raw
+            }
+        } else if let obj = try? JSONSerialization.jsonObject(with: raw) as? [String: Any] {
+            return obj
+        } else {
+            proto = raw
+        }
+        let root = protoFields(proto)
+        let innerData = root[1].compactMap { $0 as? Data }.first ?? proto
+        let inner = protoFields(innerData)
+        var used = protoFloat(inner[1]) ?? protoFloat(root[1])
+        var products: [[String: Any]] = []
+        let names = [1: "GrokAPI", 2: "GrokBuild", 4: "GrokChat", 5: "GrokImagine", 6: "GrokVoice"]
+        for blob in inner[7] {
+            guard let data = blob as? Data else { continue }
+            let item = protoFields(data)
+            let kind = protoInt(item[1]) ?? 0
+            let pct = protoFloat(item[2]) ?? 0
+            products.append(["product": names[kind] ?? "P\(kind)", "usagePercent": pct])
+        }
+        if used == nil, !products.isEmpty {
+            used = products.reduce(0) { $0 + (( $1["usagePercent"] as? Double) ?? 0) }
+        }
+        guard used != nil || !products.isEmpty else { return nil }
+        var period: [String: Any] = [:]
+        if let used { period["creditUsagePercent"] = used }
+        if let end = protoInt(inner[5]) ?? protoInt(root[5]), end > 1_000_000 {
+            period["end"] = end
+        }
+        if !products.isEmpty { period["productUsage"] = products }
+        period["type"] = "WEEKLY"
+        return ["config": ["currentPeriod": period, "creditUsagePercent": used ?? 0]]
+    }
+
+    private static func protoFields(_ data: Data) -> [Int: [Any]] {
+        var out: [Int: [Any]] = [:]
+        var i = data.startIndex
+        while i < data.endIndex {
+            let (key, n1) = protoVarint(data, i)
+            guard let key, n1 > 0 else { break }
+            i += n1
+            let field = Int(key >> 3)
+            let wire = Int(key & 7)
+            switch wire {
+            case 0:
+                let (v, n) = protoVarint(data, i)
+                guard let v, n > 0 else { return out }
+                out[field, default: []].append(v)
+                i += n
+            case 1:
+                guard i + 8 <= data.endIndex else { return out }
+                var bits: UInt64 = 0
+                for b in 0 ..< 8 { bits |= UInt64(data[i + b]) << (8 * b) }
+                out[field, default: []].append(Double(bitPattern: bits))
+                i += 8
+            case 2:
+                let (len64, n) = protoVarint(data, i)
+                guard let len64, n > 0 else { return out }
+                i += n
+                let len = Int(len64)
+                guard i + len <= data.endIndex else { return out }
+                out[field, default: []].append(data.subdata(in: i ..< (i + len)))
+                i += len
+            case 5:
+                guard i + 4 <= data.endIndex else { return out }
+                var bits: UInt32 = 0
+                for b in 0 ..< 4 { bits |= UInt32(data[i + b]) << (8 * b) }
+                out[field, default: []].append(Double(Float(bitPattern: bits)))
+                i += 4
+            default:
+                return out
+            }
+        }
+        return out
+    }
+
+    private static func protoVarint(_ data: Data, _ start: Data.Index) -> (UInt64?, Int) {
+        var value: UInt64 = 0
+        var shift = 0
+        var i = start
+        while i < data.endIndex, shift < 64 {
+            let byte = data[i]
+            value |= UInt64(byte & 0x7F) << shift
+            i += 1
+            if byte & 0x80 == 0 { return (value, i - start) }
+            shift += 7
+        }
+        return (nil, 0)
+    }
+
+    private static func protoFloat(_ values: [Any]?) -> Double? {
+        guard let first = values?.first else { return nil }
+        if let d = first as? Double { return d }
+        if let u = first as? UInt64 { return Double(u) }
+        return nil
+    }
+
+    private static func protoInt(_ values: [Any]?) -> Int? {
+        guard let first = values?.first else { return nil }
+        if let u = first as? UInt64 { return Int(u) }
+        if let d = first as? Double { return Int(d) }
+        return nil
     }
 
     private static func get(_ url: String, token: String) async throws -> [String: Any] {
@@ -584,8 +755,10 @@ enum UsageClient {
         let names: [String: String] = [
             "GrokChat": "Chat",
             "GrokAppBuilder": "Builder",
+            "GrokBuild": "Builder",
             "GrokImagine": "Imagine",
             "GrokVoice": "Voice",
+            "GrokAPI": "API",
         ]
         var details: [LaneDetail] = []
         if let products = (period?["productUsage"] ?? root["productUsage"] ?? json["productUsage"]) as? [[String: Any]] {
@@ -623,7 +796,7 @@ enum UsageClient {
         root: [String: Any],
         details: [LaneDetail]
     ) -> Double? {
-        let periodUsed = num(period?["creditUsagePercent"])
+        let periodUsed = num(period?["creditUsagePercent"]) ?? num(period?["usagePercent"])
         let configUsed = num(config["creditUsagePercent"])
         let rootUsed = num(root["creditUsagePercent"])
         let productSum = details.map(\.usedPct).reduce(0, +)
@@ -631,15 +804,17 @@ enum UsageClient {
         let moneyPct = moneyPercent(config) ?? moneyPercent(root) ?? moneyPercent(period ?? [:])
         let onDemandPct = onDemandPercent(config) ?? onDemandPercent(root)
 
+        // Weekly pool (Settings → Usage) lives on currentPeriod / product mix.
+        // Bare config.creditUsagePercent is often the API-credit meter (0).
         if let periodUsed { return periodUsed }
-        if let configUsed { return configUsed }
-        if let rootUsed { return rootUsed }
-        if let moneyPct { return moneyPct }
-        if let onDemandPct { return onDemandPct }
         if productSum > 0, productSum <= 100 { return productSum }
         if productMax > 0 { return productMax }
+        if let configUsed, configUsed > 0 { return configUsed }
+        if let rootUsed, rootUsed > 0 { return rootUsed }
+        if let moneyPct, moneyPct > 0 { return moneyPct }
+        if let onDemandPct, onDemandPct > 0 { return onDemandPct }
         if period != nil || !details.isEmpty {
-            return 0
+            return periodUsed ?? 0
         }
         return nil
     }
