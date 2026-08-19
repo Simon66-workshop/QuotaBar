@@ -75,14 +75,7 @@ final class UsageStore: ObservableObject {
     }
 
     func disconnectGrok() async {
-        // Mark disk/keychain refresh dead so loadGrokAuth will not revive it.
-        if let disk = TokenReader.loadGrokAuthFromDisk(), !disk.refresh.isEmpty {
-            TokenReader.markRefreshDead(disk.refresh)
-        }
-        if let saved = KeychainStore.loadAuth(), !saved.refresh.isEmpty {
-            TokenReader.markRefreshDead(saved.refresh)
-        }
-        KeychainStore.clearGrok()
+        TokenReader.disconnectGrokSession()
         await refresh()
     }
 

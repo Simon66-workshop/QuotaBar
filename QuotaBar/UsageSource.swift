@@ -1,13 +1,15 @@
 import Darwin
 import Foundation
 
-/// One usage provider. To add the next service:
-/// 1. Add a `LaneKey` case (letter + title).
-/// 2. Add a `UsageSource` struct below and append it to `UsageSources.all`.
-/// 3. If it has a paste / local-login form, set `connectTitle` and add a form
-///    in `ConnectCell`. Cursor-style sources leave `connectTitle` nil.
+/// One usage provider. Next service only if a real local login + quota
+/// fetch already exists — no empty shells.
 ///
-/// `UsageStore.refresh()` walks `all` — do not add another ad-hoc fetch there.
+/// 1. Add a `LaneKey` case (unique letter + title).
+/// 2. Add a `UsageSource` struct and append it to `UsageSources.all`.
+/// 3. Paste / device-login form: set `connectTitle` and add a branch in
+///    `ConnectCell`. Local-file sources (Cursor, Codex) leave `connectTitle` nil.
+///
+/// `UsageStore.refresh()` walks `all`. Do not add another ad-hoc fetch.
 protocol UsageSource: Sendable {
     var key: LaneKey { get }
     var emptySub: String { get }

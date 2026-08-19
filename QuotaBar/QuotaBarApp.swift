@@ -16,6 +16,7 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
     private var globalMonitor: Any?
     private var lastBarToggle = Date.distantPast
     private var lastTitle = ""
+    private var barActionAt = Date.distantPast
 
     private static let panelWidth: CGFloat = 360
 
@@ -110,6 +111,7 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
     }
 
     @objc func handleBarClick(_ sender: Any?) {
+        barActionAt = Date()
         let type = NSApp.currentEvent?.type
         if type == .rightMouseDown || type == .rightMouseUp {
             showFallbackMenu()
@@ -119,9 +121,10 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
     }
 
     private func handleClick(_ event: NSEvent) {
-        // Mouse-up is ignored. Down+up both toggling is why a slightly-long
-        // click opened then immediately closed the panel.
         if event.type == .leftMouseUp || event.type == .rightMouseUp { return }
+        if isBarEvent(event), Date().timeIntervalSince(barActionAt) < 0.28 {
+            return
+        }
         if isBarEvent(event) {
             if event.type == .rightMouseDown {
                 DispatchQueue.main.async { [weak self] in self?.showFallbackMenu() }

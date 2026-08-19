@@ -28,6 +28,7 @@ enum TokenReader {
     }
 
     static func loadGrokAuth() -> GrokAuth? {
+        if UserDefaults.standard.bool(forKey: disconnectedKey) { return nil }
         clearStaleAuthLock()
         let disk = loadGrokAuthFromDisk()
         let saved = KeychainStore.loadAuth()
@@ -94,6 +95,7 @@ enum TokenReader {
 
     static func persist(_ auth: GrokAuth) -> String? {
         invalidateGrokCache()
+        UserDefaults.standard.set(false, forKey: disconnectedKey)
         KeychainStore.saveAuth(auth)
         do {
             try writeBackAuthFile(auth)
@@ -160,6 +162,41 @@ enum TokenReader {
     }
 
     private static let deadKey = "qb.deadGrokRefresh.sha"
+    private static let disconnectedKey = "qb.grokDisconnected"
+
+    /// Explicit disconnect: drop our slot + keychain, ignore logs/alternates
+    /// until the next persist / Sign in. Does not delete the rest of auth.json.
+    static func disconnectGrokSession() {
+        invalidateGrokCache()
+        if let disk = loadGrokAuthFromDisk(), !disk.refresh.isEmpty {
+            markRefreshDead(disk.refresh)
+        }
+        if let saved = KeychainStore.loadAuth(), !saved.refresh.isEmpty {
+            markRefreshDead(saved.refresh)
+        }
+        removeWrittenSlot()
+        KeychainStore.clearGrok()
+        UserDefaults.standard.set(true, forKey: disconnectedKey)
+        invalidateGrokCache()
+    }
+
+    private static func removeWrittenSlot() {
+        let url = grokAuthURL()
+        guard let data = try? Data(contentsOf: url),
+              var bag = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return }
+        let client = GrokDeviceAuth.clientId
+        let drop = bag.keys.filter { key in
+            if key.hasSuffix("::\(client)") { return true }
+            guard let rec = bag[key] as? [String: Any] else { return false }
+            return (rec["oidc_client_id"] as? String) == client
+        }
+        if drop.isEmpty { return }
+        for key in drop { bag.removeValue(forKey: key) }
+        guard let out = try? JSONSerialization.data(withJSONObject: bag, options: [.prettyPrinted, .sortedKeys])
+        else { return }
+        try? out.write(to: url, options: .atomic)
+    }
 
     private static func fingerprint(_ value: String) -> String {
         SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
