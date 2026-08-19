@@ -80,40 +80,41 @@ enum UsageClient {
         }
 
         do {
-            let json = try await get(
-                "https://cli-chat-proxy.grok.com/v1/billing?format=credits",
-                token: auth.access
-            )
-            guard var lane = parseGrok(json) else {
-                return .error(.grok, message: "Grok billing 200 but no weekly usage in currentPeriod/productUsage")
+            let json = try await getGrokBilling(token: auth.access)
+            if var lane = parseGrok(json) {
+                if let persistNote, persistNote.contains("write failed") {
+                    lane.sub += "  ·  auth.json write failed"
+                }
+                return lane
             }
-            if let persistNote, persistNote.contains("write failed") {
-                lane.sub += "  ·  auth.json write failed"
+            if let alt = try? await getGrokBilling(token: auth.access, credits: false),
+               let lane = parseGrok(alt)
+            {
+                return lane
             }
-            return lane
+            return .error(.grok, message: "billing 200 empty")
         } catch AuthError.http(let code) where code == 401 || code == 403 {
             if auth.canRefresh, !TokenReader.isDeadRefresh(auth.refresh) {
                 switch await refreshGrokOIDC(auth) {
                 case .ok(let next):
                     _ = TokenReader.persist(next)
-                    if let json = try? await get(
-                        "https://cli-chat-proxy.grok.com/v1/billing?format=credits",
-                        token: next.access
-                    ), let lane = parseGrok(json) {
+                    if let json = try? await getGrokBilling(token: next.access),
+                       let lane = parseGrok(json)
+                    {
                         return lane
                     }
                 case .failed(let detail) where detail.localizedCaseInsensitiveContains("invalid_grant"):
                     TokenReader.markRefreshDead(auth.refresh)
-                    return .error(.grok, message: "Grok billing \(code) + invalid_grant. 点 Sign in with Grok。")
+                    return .error(.grok, message: "billing \(code) · sign in again")
                 case .failed:
                     break
                 }
             }
-            return .error(.grok, message: "Grok billing \(code) after \(auth.canRefresh ? "refresh path" : "no refresh")")
+            return .error(.grok, message: "billing \(code)")
         } catch AuthError.http(let code) {
-            return .error(.grok, message: "Grok billing HTTP \(code)")
+            return .error(.grok, message: "billing HTTP \(code)")
         } catch {
-            return .error(.grok, message: "Grok billing request failed")
+            return .error(.grok, message: "billing request failed")
         }
     }
 
@@ -231,6 +232,21 @@ enum UsageClient {
         req.setValue("1", forHTTPHeaderField: "Connect-Protocol-Version")
         req.setValue("QuotaBar/1.8", forHTTPHeaderField: "User-Agent")
         req.httpBody = Data("{}".utf8)
+        let (data, res) = try await URLSession.shared.data(for: req)
+        return try decode(data, res)
+    }
+
+    private static func getGrokBilling(token: String, credits: Bool = true) async throws -> [String: Any] {
+        let url = credits
+            ? "https://cli-chat-proxy.grok.com/v1/billing?format=credits"
+            : "https://cli-chat-proxy.grok.com/v1/billing"
+        var req = URLRequest(url: URL(string: url)!)
+        req.httpMethod = "GET"
+        req.timeoutInterval = timeout
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("xai-grok-cli", forHTTPHeaderField: "x-xai-token-auth")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue("QuotaBar/1.8.6", forHTTPHeaderField: "User-Agent")
         let (data, res) = try await URLSession.shared.data(for: req)
         return try decode(data, res)
     }
@@ -400,6 +416,8 @@ enum UsageClient {
         if !(200 ..< 300).contains(code) { throw AuthError.http(code) }
         guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { throw AuthError.bad }
+        if let inner = obj["data"] as? [String: Any] { return inner }
+        if let inner = obj["result"] as? [String: Any] { return inner }
         return obj
     }
 
@@ -507,8 +525,8 @@ enum UsageClient {
     }
 
     private static func parseGrok(_ json: [String: Any]) -> Lane? {
-        let config = json["config"] as? [String: Any] ?? json
-        let period = config["currentPeriod"] as? [String: Any]
+        let root = json["config"] as? [String: Any] ?? json
+        let period = root["currentPeriod"] as? [String: Any]
         let names: [String: String] = [
             "GrokChat": "Chat",
             "GrokAppBuilder": "Builder",
@@ -516,26 +534,28 @@ enum UsageClient {
             "GrokVoice": "Voice",
         ]
         var details: [LaneDetail] = []
-        if let products = (period?["productUsage"] ?? config["productUsage"] ?? json["productUsage"]) as? [[String: Any]] {
+        if let products = (period?["productUsage"] ?? root["productUsage"] ?? json["productUsage"]) as? [[String: Any]] {
             for item in products {
                 guard let product = item["product"] as? String else { continue }
                 details.append(LaneDetail(label: names[product] ?? product, usedPct: num(item["usagePercent"]) ?? 0))
             }
         }
-        guard let used = pickGrokUsed(config: config, period: period, root: json, details: details) else {
+        guard let used = pickGrokUsed(config: root, period: period, root: json, details: details) else {
             return nil
         }
         var bits = ["Weekly SuperGrok Heavy Limit"]
         if let r = resetLabel(
             period?["end"]
-                ?? config["end"]
+                ?? root["end"]
                 ?? json["end"]
+                ?? root["billingPeriodEnd"]
                 ?? json["billingPeriodEnd"]
         ) { bits.append(r) }
         return .used(.grok, percent: used, sub: bits.joined(separator: "  ·  "), details: details)
     }
 
     /// config.creditUsagePercent == 0 must not hide currentPeriod / productUsage.
+    /// Newer payloads use { val: cents } money objects instead of a percent.
     private static func pickGrokUsed(
         config: [String: Any],
         period: [String: Any]?,
@@ -547,17 +567,43 @@ enum UsageClient {
         let rootUsed = num(root["creditUsagePercent"])
         let productSum = details.map(\.usedPct).reduce(0, +)
         let productMax = details.map(\.usedPct).max() ?? 0
+        let moneyPct = moneyPercent(config) ?? moneyPercent(root) ?? moneyPercent(period ?? [:])
+        let onDemandPct = onDemandPercent(config) ?? onDemandPercent(root)
 
         if let periodUsed, periodUsed > 0 { return periodUsed }
         if let configUsed, configUsed > 0 { return configUsed }
         if let rootUsed, rootUsed > 0 { return rootUsed }
+        if let moneyPct, moneyPct > 0 { return moneyPct }
+        if let onDemandPct, onDemandPct > 0 { return onDemandPct }
         if productSum > 0, productSum <= 100 { return productSum }
         if productMax > 0 { return productMax }
         if period != nil, let periodUsed { return periodUsed }
-        if period != nil || !details.isEmpty {
-            return periodUsed ?? configUsed ?? rootUsed ?? 0
+        if period != nil || !details.isEmpty || moneyPct != nil || onDemandPct != nil {
+            return periodUsed ?? configUsed ?? rootUsed ?? moneyPct ?? onDemandPct ?? 0
         }
         return nil
+    }
+
+    private static func moneyVal(_ value: Any?) -> Double? {
+        if let n = num(value) { return n }
+        if let dict = value as? [String: Any] {
+            return num(dict["val"]) ?? num(dict["value"]) ?? num(dict["amount"])
+        }
+        return nil
+    }
+
+    private static func moneyPercent(_ bag: [String: Any]) -> Double? {
+        let used = moneyVal(bag["used"]) ?? moneyVal(bag["creditUsed"])
+        let cap = moneyVal(bag["monthlyLimit"]) ?? moneyVal(bag["limit"]) ?? moneyVal(bag["creditLimit"])
+        guard let used, let cap, cap > 0 else { return nil }
+        return min(100, max(0, used / cap * 100))
+    }
+
+    private static func onDemandPercent(_ bag: [String: Any]) -> Double? {
+        let used = moneyVal(bag["onDemandUsed"])
+        let cap = moneyVal(bag["onDemandCap"])
+        guard let used, let cap, cap > 0 else { return nil }
+        return min(100, max(0, used / cap * 100))
     }
 
     private static func parseSand(_ json: [String: Any]) -> Lane? {

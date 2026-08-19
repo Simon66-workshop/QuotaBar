@@ -10,7 +10,7 @@ struct MenuPanel: View {
                 sectionLabel("Usage")
                 UsageTable(lanes: listedLanes)
             }
-            if store.snap.isLinked(.grok) {
+            if TokenReader.hasGrokSession() {
                 AccountRow()
                     .padding(.top, 6)
             }
@@ -41,7 +41,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.8.5")
+                Text("v1.8.6")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -98,7 +98,7 @@ struct MenuPanel: View {
     }
 
     private var connectLanes: [Lane] {
-        store.snap.lanes.filter { $0.tone == .empty || $0.tone == .error }
+        store.snap.lanes.filter { $0.tone == .empty }
     }
 
     private var showConnect: Bool {

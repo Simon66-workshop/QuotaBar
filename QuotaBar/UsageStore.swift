@@ -127,6 +127,10 @@ final class UsageStore: ObservableObject {
                     }
                 }
                 await refresh()
+                if self.snap[.grok].tone == .error {
+                    try? await Task.sleep(nanoseconds: 1_200_000_000)
+                    await self.refresh()
+                }
             } catch {
                 await MainActor.run {
                     self.deviceNote = "CLI 没落盘。QuotaBar device login failed: \(error.localizedDescription)"
