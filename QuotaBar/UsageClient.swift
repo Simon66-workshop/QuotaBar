@@ -80,16 +80,11 @@ enum UsageClient {
         }
 
         do {
-            let json = try await getGrokBilling(token: auth.access)
+            let json = try await pullGrokBilling(token: auth.access)
             if var lane = parseGrok(json) {
                 if let persistNote, persistNote.contains("write failed") {
                     lane.sub += "  ·  auth.json write failed"
                 }
-                return lane
-            }
-            if let alt = try? await getGrokBilling(token: auth.access, credits: false),
-               let lane = parseGrok(alt)
-            {
                 return lane
             }
             return .error(.grok, message: "billing 200 empty")
@@ -98,7 +93,7 @@ enum UsageClient {
                 switch await refreshGrokOIDC(auth) {
                 case .ok(let next):
                     _ = TokenReader.persist(next)
-                    if let json = try? await getGrokBilling(token: next.access),
+                    if let json = try? await pullGrokBilling(token: next.access),
                        let lane = parseGrok(json)
                     {
                         return lane
@@ -236,7 +231,37 @@ enum UsageClient {
         return try decode(data, res)
     }
 
-    private static func getGrokBilling(token: String, credits: Bool = true) async throws -> [String: Any] {
+    private static func pullGrokBilling(token: String) async throws -> [String: Any] {
+        var last: Error = AuthError.bad
+        let tries: [(credits: Bool, header: Bool, direct: Bool)] = [
+            (true, true, true),
+            (true, false, true),
+            (false, true, true),
+            (true, true, false),
+        ]
+        for tryCfg in tries {
+            do {
+                let json = try await getGrokBilling(
+                    token: token,
+                    credits: tryCfg.credits,
+                    authHeader: tryCfg.header,
+                    direct: tryCfg.direct
+                )
+                if parseGrok(json) != nil { return json }
+                last = AuthError.bad
+            } catch {
+                last = error
+            }
+        }
+        throw last
+    }
+
+    private static func getGrokBilling(
+        token: String,
+        credits: Bool = true,
+        authHeader: Bool = true,
+        direct: Bool = true
+    ) async throws -> [String: Any] {
         let url = credits
             ? "https://cli-chat-proxy.grok.com/v1/billing?format=credits"
             : "https://cli-chat-proxy.grok.com/v1/billing"
@@ -244,10 +269,13 @@ enum UsageClient {
         req.httpMethod = "GET"
         req.timeoutInterval = timeout
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        req.setValue("xai-grok-cli", forHTTPHeaderField: "x-xai-token-auth")
+        if authHeader {
+            req.setValue("xai-grok-cli", forHTTPHeaderField: "x-xai-token-auth")
+        }
         req.setValue("application/json", forHTTPHeaderField: "Accept")
-        req.setValue("QuotaBar/1.8.6", forHTTPHeaderField: "User-Agent")
-        let (data, res) = try await URLSession.shared.data(for: req)
+        req.setValue("QuotaBar/1.8.9", forHTTPHeaderField: "User-Agent")
+        let session = direct ? GrokNet.direct : URLSession.shared
+        let (data, res) = try await session.data(for: req)
         return try decode(data, res)
     }
 
@@ -447,7 +475,7 @@ enum UsageClient {
             "client_id": rec.clientId,
         ])
         do {
-            let (data, res) = try await URLSession.shared.data(for: req)
+            let (data, res) = try await GrokNet.direct.data(for: req)
             let code = (res as? HTTPURLResponse)?.statusCode ?? 0
             let text = String(data: data, encoding: .utf8) ?? ""
             if code != 200 {

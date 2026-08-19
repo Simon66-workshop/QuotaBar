@@ -4,6 +4,24 @@ import Foundation
 /// (`loginmint persist failed; using unpersisted token`). There is no
 /// macOS Keychain write in that binary. QuotaBar runs the same OIDC
 /// device grant and writes ~/.grok/auth.json itself.
+enum GrokNet {
+    /// Clash / system HTTP proxy on 127.0.0.1 often 502s cli-chat-proxy.
+    /// Cursor still uses URLSession.shared; only xAI/Grok goes direct.
+    static let direct: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 15
+        config.timeoutIntervalForResource = 18
+        config.waitsForConnectivity = false
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.connectionProxyDictionary = [
+            kCFNetworkProxiesHTTPEnable: false,
+            kCFNetworkProxiesHTTPSEnable: false,
+            kCFNetworkProxiesSOCKSEnable: false,
+        ]
+        return URLSession(configuration: config)
+    }()
+}
+
 enum GrokDeviceAuth {
     static let clientId = "b1a00492-073a-47ea-816f-4c329264a828"
     static let issuer = "https://auth.x.ai"
@@ -42,7 +60,7 @@ enum GrokDeviceAuth {
             "client_id": clientId,
             "scope": scope,
         ])
-        let (data, res) = try await URLSession.shared.data(for: req)
+        let (data, res) = try await GrokNet.direct.data(for: req)
         let code = (res as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200,
               let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -81,7 +99,7 @@ enum GrokDeviceAuth {
                 "device_code": pending.deviceCode,
                 "client_id": clientId,
             ])
-            let (data, res) = try await URLSession.shared.data(for: req)
+            let (data, res) = try await GrokNet.direct.data(for: req)
             let status = (res as? HTTPURLResponse)?.statusCode ?? 0
             let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
             if status == 200, let access = obj["access_token"] as? String, !access.isEmpty {

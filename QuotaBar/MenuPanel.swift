@@ -23,7 +23,7 @@ struct MenuPanel: View {
             footer
         }
         .padding(16)
-        .frame(width: 360)
+        .frame(width: 420)
         .background(Color.clear)
     }
 
@@ -41,7 +41,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.8.8")
+                Text("v1.8.9")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -227,12 +227,12 @@ private struct AccountRow: View {
 }
 
 private enum Col {
-    static let gap: CGFloat = 6
+    static let gap: CGFloat = 5
     static let mark: CGFloat = 14
-    static let used: CGFloat = 36
-    static let bar: CGFloat = 44
-    static let meta: CGFloat = 50
-    static let extra: CGFloat = 54
+    static let used: CGFloat = 34
+    static let bar: CGFloat = 36
+    static let meta: CGFloat = 48
+    static let extra: CGFloat = 40
     static let action: CGFloat = 28
 }
 
@@ -262,6 +262,7 @@ private struct UsageTable: View {
                         Text(lane.key.title)
                             .font(.system(size: 12, weight: .medium))
                             .lineLimit(1)
+                            .truncationMode(.tail)
                         if lane.tone == .error || lane.tone == .empty {
                             Text(lane.sub)
                                 .font(.system(size: 10))
@@ -270,7 +271,7 @@ private struct UsageTable: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(minWidth: 120, maxWidth: .infinity, alignment: .leading)
                     Text(usedText(lane))
                         .font(.system(size: 12, weight: .semibold).monospacedDigit())
                         .foregroundStyle(lane.tone == .ok ? Color.primary : toneColor(lane.tone))
@@ -548,7 +549,7 @@ private struct DiskSection: View {
                                             .foregroundStyle(.orange)
                                     }
                                 }
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .frame(minWidth: 120, maxWidth: .infinity, alignment: .leading)
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
