@@ -264,6 +264,7 @@ final class UsageStore: ObservableObject {
         refreshRunning = true
         busy = true
         lastRefreshAt = Date()
+        TokenReader.invalidateClaudeCache()
         defer {
             busy = false
             refreshRunning = false

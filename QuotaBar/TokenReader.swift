@@ -134,6 +134,13 @@ enum TokenReader {
         cacheLock.unlock()
     }
 
+    /// Drop only the Claude auth cache so Refresh re-reads the keychain.
+    static func invalidateClaudeCache() {
+        cacheLock.lock()
+        claudeCache = nil
+        cacheLock.unlock()
+    }
+
     private static func invalidateGrokCache() {
         cacheLock.lock()
         grokDiskCache = nil
@@ -569,15 +576,7 @@ enum TokenReader {
     }
 
     static func hasClaudeSession() -> Bool {
-        cacheLock.lock()
-        if let cached = claudeCache {
-            let yes = cached.value != nil
-            cacheLock.unlock()
-            return yes
-        }
-        cacheLock.unlock()
-        if loadClaudeKeychainData() != nil { return true }
-        return claudeCandidateFiles().contains { FileManager.default.fileExists(atPath: $0.path) }
+        loadClaudeAuth() != nil
     }
 
     static func persistCodex(_ auth: CodexAuth) {
@@ -701,11 +700,19 @@ enum TokenReader {
         for url in claudeCandidateFiles() {
             if let auth = extractClaude(from: url) { found.append(auth) }
         }
-        let value = found.max(by: { $0.expiresAt < $1.expiresAt })
+        let value = pickClaudeAuth(found)
         cacheLock.lock()
         claudeCache = (Date(), value)
         cacheLock.unlock()
         return value
+    }
+
+    /// Prefer a token that is still usable. A stale `~/.claude/.credentials.json`
+    /// must not beat a newer keychain login.
+    private static func pickClaudeAuth(_ found: [ClaudeAuth]) -> ClaudeAuth? {
+        let live = found.filter { !$0.access.isEmpty && !$0.isStale }
+        if let best = live.max(by: { $0.expiresAt < $1.expiresAt }) { return best }
+        return found.max(by: { $0.expiresAt < $1.expiresAt })
     }
 
     static func persistClaude(_ auth: ClaudeAuth) {
@@ -843,7 +850,53 @@ enum TokenReader {
         return extractClaude(from: obj)
     }
 
+    /// Claude Code puts `/usr/bin/security` on the item ACL. `SecItemCopyMatching`
+    /// from QuotaBar is often denied, which left the Usage row on Connect.
+    /// Stdout is the credential JSON — never log it.
+    private static func loadClaudeKeychainViaSecurity() -> Data? {
+        var seen: Set<String> = []
+        let accounts: [String?] = [NSUserName(), NSUserName().lowercased(), nil]
+        for account in accounts {
+            let mark = account ?? "*"
+            if !seen.insert(mark).inserted { continue }
+            if let data = securityGenericPassword(service: claudeKeychainService, account: account) {
+                return data
+            }
+        }
+        return nil
+    }
+
+    private static func securityGenericPassword(service: String, account: String?) -> Data? {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        var args = ["find-generic-password", "-s", service]
+        if let account, !account.isEmpty {
+            args.append(contentsOf: ["-a", account])
+        }
+        args.append("-w")
+        proc.arguments = args
+        let stdout = Pipe()
+        let stderr = Pipe()
+        proc.standardOutput = stdout
+        proc.standardError = stderr
+        do {
+            try proc.run()
+        } catch {
+            return nil
+        }
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        _ = stderr.fileHandleForReading.readDataToEndOfFile()
+        proc.waitUntilExit()
+        guard proc.terminationStatus == 0 else { return nil }
+        var bytes = [UInt8](data)
+        while let last = bytes.last, last == 10 || last == 13 {
+            bytes.removeLast()
+        }
+        return bytes.isEmpty ? nil : Data(bytes)
+    }
+
     private static func loadClaudeKeychainData() -> Data? {
+        if let data = loadClaudeKeychainViaSecurity() { return data }
         let accounts = [NSUserName(), NSUserName().lowercased(), ""]
         for account in accounts {
             var query: [String: Any] = [

@@ -54,18 +54,20 @@ struct Lane: Identifiable {
     var sub: String
     var tone: Tone
     var details: [LaneDetail]
+    /// Window column. Defaults to the lane's short label (`5h`, `week`, …).
+    var window: String
 
     var showsOnBar: Bool { tone != .empty }
 
     static func empty(_ key: LaneKey, sub: String) -> Lane {
-        Lane(key: key, usedPct: nil, remainingPct: nil, label: "—", sub: sub, tone: .empty, details: [])
+        Lane(key: key, usedPct: nil, remainingPct: nil, label: "—", sub: sub, tone: .empty, details: [], window: key.windowShort)
     }
 
     static func error(_ key: LaneKey, message: String) -> Lane {
-        Lane(key: key, usedPct: nil, remainingPct: nil, label: "—", sub: message, tone: .error, details: [])
+        Lane(key: key, usedPct: nil, remainingPct: nil, label: "—", sub: message, tone: .error, details: [], window: key.windowShort)
     }
 
-    static func used(_ key: LaneKey, percent: Double, sub: String, details: [LaneDetail] = []) -> Lane {
+    static func used(_ key: LaneKey, percent: Double, sub: String, details: [LaneDetail] = [], window: String? = nil) -> Lane {
         let used = min(100, max(0, percent.rounded()))
         // 85 / 95 so a typical 60–80% day stays neutral on the bar.
         let tone: Tone = used >= 95 ? .crit : used >= 85 ? .warn : .ok
@@ -76,7 +78,8 @@ struct Lane: Identifiable {
             label: "\(Int(used))%",
             sub: sub,
             tone: tone,
-            details: details
+            details: details,
+            window: window ?? key.windowShort
         )
     }
 }

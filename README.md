@@ -1,4 +1,4 @@
-# QuotaBar 1.8.15
+# QuotaBar 1.8.16
 
 Mac menu bar extra for live Grok / Cursor / Grok Bot / ChatGPT / Claude Code usage, plus local and external disks.
 
@@ -25,7 +25,7 @@ QuotaBar appears on the right of the menu bar. Unconnected services stay off the
 - **Left-click** the bar → glass panel (details, connect, hide disks)
 - **Right-click** the bar → short native menu (refresh / copy / alerts / quit)
 
-The panel header should say **v1.8.15**. If it still says v1.8.14, quit QuotaBar and run `Start QuotaBar.command` again.
+The panel header should say **v1.8.16**. If it still says v1.8.15, quit QuotaBar and run `Start QuotaBar.command` again.
 
 Later launches: just double-click `Start QuotaBar.command` again.
 
@@ -34,18 +34,22 @@ Later launches: just double-click `Start QuotaBar.command` again.
 - Grok: `~/.grok/auth.json` + in-app device login (writes the file itself)
 - Cursor + Grok Bot: Cursor local session (`state.vscdb`)
 - ChatGPT: `~/.codex/auth.json` after `codex login` (refreshes the token itself)
-- Claude: `~/.claude/.credentials.json` and the `Claude Code-credentials` keychain after `claude` login
+- Claude: Claude Code keychain item `Claude Code-credentials` (read with `/usr/bin/security`, which that item allows) and `~/.claude/.credentials.json` after `claude` login. The Usage row is the 5-hour session and the 7-day week; the main percent is whichever of those two is higher. Fable this week is an extra detail when the usage payload includes that model window. Claude desktop Settings → Usage is the same windows — there is no separate local desktop cache to read.
 - Disks: mounted local + external volumes (auto add/remove), capacity, read/write rate, status
 
 If Cursor shows `—`, open Cursor once, then start QuotaBar again.
 
 If ChatGPT shows `—`, run `codex login` once in Terminal, then click Refresh.
 
-If Claude shows `—`, run `claude` once in Terminal, then click Refresh.
+If Claude stays under Connect, run `claude` once in Terminal (or paste credentials and click Save Claude), then click Refresh. A connected account leaves Connect and shows in Usage.
 
 Plug in a USB / Thunderbolt disk and it appears in the panel; eject it and it disappears. Hide Time Machine or VM disks from the panel — they stay off the bar until you Show them again.
 
 The bar only turns orange / red on a token that is actually high (85%+ services, 90%+ disks). A normal 60–80% day stays neutral.
+
+## 1.8.16
+
+Claude shows in Usage after a local Claude Code login, with Current session / This week detail rows (and Fable this week when the oauth usage payload has that window). The keychain is read via `/usr/bin/security` so the row is not stuck on Connect. The main percent is the tighter of the 5-hour session and the 7-day week.
 
 ## 1.8.15
 

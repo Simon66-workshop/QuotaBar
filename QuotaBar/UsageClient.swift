@@ -202,7 +202,7 @@ enum UsageClient {
         do {
             let json = try await getClaudeUsage(auth)
             if let lane = parseClaude(json, auth: auth) { return lane }
-            return .error(.claude, message: "Claude usage 200 but no 5h / 7d window")
+            return .error(.claude, message: "Claude usage 200 but no session or week window")
         } catch AuthError.http(let code) where code == 401 || code == 403 {
             if ProcessProbe.claudeLive() {
                 return .error(.claude, message: "Claude Code is running — token is stale, wait for it to refresh")
@@ -550,9 +550,25 @@ enum UsageClient {
         req.setValue("Bearer \(auth.access)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         req.setValue("QuotaBar/1.8", forHTTPHeaderField: "User-Agent")
         let (data, res) = try await URLSession.shared.data(for: req)
-        return try decode(data, res)
+        let code = (res as? HTTPURLResponse)?.statusCode ?? 0
+        if !(200 ..< 300).contains(code) { throw AuthError.http(code) }
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw AuthError.bad
+        }
+        // Keep the root when it already carries windows. `decode` unwraps `data`
+        // and would drop `limits` / `five_hour` sitting beside that key.
+        if jsonValue(obj["five_hour"]) != nil || jsonValue(obj["seven_day"]) != nil
+            || jsonValue(obj["fiveHour"]) != nil || jsonValue(obj["sevenDay"]) != nil
+            || obj["limits"] is [Any]
+        {
+            return obj
+        }
+        if let inner = obj["data"] as? [String: Any] { return inner }
+        if let inner = obj["result"] as? [String: Any] { return inner }
+        return obj
     }
 
     private static func refreshClaude(_ auth: ClaudeAuth) async -> ClaudeRefresh {
@@ -899,19 +915,82 @@ enum UsageClient {
         return "Weekly"
     }
 
-    private static func parseClaude(_ json: [String: Any], auth: ClaudeAuth) -> Lane? {
-        let fiveUsed = utilizationValue(json["five_hour"] ?? json["fiveHour"] ?? json["five_hour_utilization"])
-        let sevenUsed = utilizationValue(json["seven_day"] ?? json["sevenDay"] ?? json["seven_day_utilization"])
-        let sonnetUsed = utilizationValue(json["seven_day_sonnet"] ?? json["sevenDaySonnet"])
-        let five = windowDict(json["five_hour"] ?? json["fiveHour"])
-        let seven = windowDict(json["seven_day"] ?? json["sevenDay"])
-        guard fiveUsed != nil || sevenUsed != nil else { return nil }
+    private enum ClaudeWindowRole {
+        case session
+        case week
+        case model
+    }
 
-        let used = max(fiveUsed ?? 0, sevenUsed ?? 0)
-        var details: [LaneDetail] = []
-        if let fiveUsed { details.append(LaneDetail(label: "5h", usedPct: fiveUsed)) }
-        if let sevenUsed { details.append(LaneDetail(label: "7d", usedPct: sevenUsed)) }
-        if let sonnetUsed { details.append(LaneDetail(label: "Sonnet 7d", usedPct: sonnetUsed)) }
+    private struct ClaudeWindow {
+        var role: ClaudeWindowRole
+        var label: String
+        var usedPct: Double
+        var resetsAt: Any?
+    }
+
+    private enum ClaudeLimitKind {
+        case session
+        case week
+        case model(String)
+        case ignore
+    }
+
+    /// Session + shared week come from `five_hour` / `seven_day`. Desktop Max
+    /// also sends `limits[]` (`session`, `weekly_all`, `weekly_scoped` Fable).
+    /// Primary `usedPct` is the tighter of session and week (higher used %).
+    /// A tie keeps the session window. Fable stays a detail row — it is a
+    /// separate pool, and a missing window is omitted rather than invented.
+    private static func parseClaude(_ json: [String: Any], auth: ClaudeAuth) -> Lane? {
+        var windows: [ClaudeWindow] = []
+
+        let fiveRaw = jsonValue(json["five_hour"]) ?? jsonValue(json["fiveHour"])
+        if let five = windowDict(fiveRaw), let used = rawUtilization(five) {
+            appendClaude(&windows, role: .session, label: "Current session", used: used, resets: five["resets_at"] ?? five["reset_at"])
+        } else if let used = rawUtilization(fiveRaw ?? jsonValue(json["five_hour_utilization"])) {
+            appendClaude(&windows, role: .session, label: "Current session", used: used, resets: nil)
+        }
+
+        let sevenRaw = jsonValue(json["seven_day"]) ?? jsonValue(json["sevenDay"])
+        if let seven = windowDict(sevenRaw), let used = rawUtilization(seven) {
+            appendClaude(&windows, role: .week, label: "This week", used: used, resets: seven["resets_at"] ?? seven["reset_at"])
+        } else if let used = rawUtilization(sevenRaw ?? jsonValue(json["seven_day_utilization"])) {
+            appendClaude(&windows, role: .week, label: "This week", used: used, resets: nil)
+        }
+
+        if let sonnet = rawUtilization(jsonValue(json["seven_day_sonnet"]) ?? jsonValue(json["sevenDaySonnet"])) {
+            appendClaude(&windows, role: .model, label: "Sonnet this week", used: sonnet, resets: nil)
+        }
+        if let opus = rawUtilization(jsonValue(json["seven_day_opus"]) ?? jsonValue(json["sevenDayOpus"])) {
+            appendClaude(&windows, role: .model, label: "Opus this week", used: opus, resets: nil)
+        }
+
+        if let limits = json["limits"] as? [[String: Any]] {
+            for entry in limits {
+                guard let used = rawUtilization(jsonValue(entry["percent"]) ?? jsonValue(entry["utilization"]) ?? jsonValue(entry["used_percentage"]) ?? jsonValue(entry["used_percent"]))
+                else { continue }
+                let resets = entry["resets_at"] ?? entry["reset_at"]
+                switch limitKind(entry) {
+                case .session:
+                    appendClaude(&windows, role: .session, label: "Current session", used: used, resets: resets)
+                case .week:
+                    appendClaude(&windows, role: .week, label: "This week", used: used, resets: resets)
+                case .model(let name):
+                    appendClaude(&windows, role: .model, label: modelWeekLabel(name), used: used, resets: resets)
+                case .ignore:
+                    break
+                }
+            }
+        }
+
+        windows = scaleClaude(windows)
+        guard let primary = primaryClaudeWindow(windows) else { return nil }
+        windows = windows.enumerated().sorted { lhs, rhs in
+            let left = claudeRank(lhs.element.role)
+            let right = claudeRank(rhs.element.role)
+            if left != right { return left < right }
+            return lhs.offset < rhs.offset
+        }.map(\.element)
+        let details = windows.map { LaneDetail(label: $0.label, usedPct: $0.usedPct) }
 
         var plan = auth.subscription
         if plan.isEmpty { plan = (json["subscription_type"] as? String) ?? (json["plan"] as? String) ?? "Claude Code" }
@@ -921,22 +1000,107 @@ enum UsageClient {
         plan = plan.replacingOccurrences(of: "_", with: " ")
 
         var bits: [String] = [plan]
-        if let r = resetLabel(five?["resets_at"] ?? five?["reset_at"] ?? seven?["resets_at"] ?? seven?["reset_at"]) {
-            bits.append(r)
-        }
-        return .used(.claude, percent: used, sub: bits.joined(separator: "  ·  "), details: details)
+        if let r = resetLabel(primary.resetsAt) { bits.append(r) }
+        return .used(
+            .claude,
+            percent: primary.usedPct,
+            sub: bits.joined(separator: "  ·  "),
+            details: details,
+            window: claudeWindowShort(primary.role)
+        )
     }
 
-    /// Claude returns 0–1. Some builds send 0–100. Treat ≤1.5 as a fraction.
-    private static func utilizationValue(_ value: Any?) -> Double? {
-        if let dict = value as? [String: Any] {
-            if let n = num(dict["utilization"]) ?? num(dict["used_percent"]) ?? num(dict["usedPercent"]) {
-                return n <= 1.5 ? n * 100 : n
-            }
+    private static func appendClaude(
+        _ windows: inout [ClaudeWindow],
+        role: ClaudeWindowRole,
+        label: String,
+        used: Double,
+        resets: Any?
+    ) {
+        switch role {
+        case .session, .week:
+            if windows.contains(where: { $0.role == role }) { return }
+        case .model:
+            if windows.contains(where: { $0.label == label }) { return }
         }
-        if let n = num(value) {
-            return n <= 1.5 ? n * 100 : n
+        windows.append(ClaudeWindow(role: role, label: label, usedPct: used, resetsAt: jsonValue(resets)))
+    }
+
+    private static func limitKind(_ entry: [String: Any]) -> ClaudeLimitKind {
+        let kind = (entry["kind"] as? String) ?? ""
+        switch kind {
+        case "session":
+            return .session
+        case "weekly", "weekly_all", "seven_day":
+            return .week
+        case "weekly_scoped":
+            return .model(modelName(entry))
+        default:
+            return .ignore
         }
-        return nil
+    }
+
+    private static func modelName(_ entry: [String: Any]) -> String {
+        let scope = entry["scope"] as? [String: Any]
+        let model = scope?["model"] as? [String: Any]
+        return (model?["display_name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private static func modelWeekLabel(_ name: String) -> String {
+        if name.isEmpty { return "Model this week" }
+        return "\(name) this week"
+    }
+
+    /// Higher used % is the tighter account window. Equal session and week
+    /// keep the session, which is the shorter window.
+    private static func primaryClaudeWindow(_ windows: [ClaudeWindow]) -> ClaudeWindow? {
+        let account = windows.filter { $0.role == .session || $0.role == .week }
+        let pool = account.isEmpty ? windows : account
+        return pool.max { lhs, rhs in
+            if lhs.usedPct != rhs.usedPct { return lhs.usedPct < rhs.usedPct }
+            return lhs.role != .session && rhs.role == .session
+        }
+    }
+
+    private static func claudeRank(_ role: ClaudeWindowRole) -> Int {
+        switch role {
+        case .session: 0
+        case .week: 1
+        case .model: 2
+        }
+    }
+
+    private static func claudeWindowShort(_ role: ClaudeWindowRole) -> String {
+        switch role {
+        case .session: "5h"
+        case .week, .model: "week"
+        }
+    }
+
+    private static func jsonValue(_ value: Any?) -> Any? {
+        if value == nil || value is NSNull { return nil }
+        return value
+    }
+
+    /// Unscaled. Older payloads use 0–1; current oauth usage uses 0–100.
+    private static func rawUtilization(_ value: Any?) -> Double? {
+        let raw = jsonValue(value)
+        if let dict = raw as? [String: Any] {
+            return num(dict["utilization"]) ?? num(dict["percent"]) ?? num(dict["used_percentage"]) ?? num(dict["used_percent"]) ?? num(dict["usedPercent"])
+        }
+        return num(raw)
+    }
+
+    /// If any window is above 1.5, the payload is already 0–100 (`5` = 5%,
+    /// `12` = 12%). Otherwise it is the older 0–1 fraction (`0.12` = 12%).
+    /// One anchor above 1.5 keeps a 1% session from being read as 100%.
+    private static func scaleClaude(_ windows: [ClaudeWindow]) -> [ClaudeWindow] {
+        let alreadyPercent = windows.contains { $0.usedPct > 1.5 }
+        if alreadyPercent { return windows }
+        return windows.map { window in
+            var copy = window
+            copy.usedPct = window.usedPct * 100
+            return copy
+        }
     }
 }

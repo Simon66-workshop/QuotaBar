@@ -41,7 +41,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.8.15")
+                Text("v1.8.16")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -281,7 +281,7 @@ private struct UsageTable: View {
                         .font(.system(size: 11).monospacedDigit())
                         .foregroundStyle(.secondary)
                         .frame(width: Col.meta, alignment: .trailing)
-                    Text(lane.key.windowShort)
+                    Text(lane.window)
                         .font(.system(size: 10.5))
                         .foregroundStyle(.tertiary)
                         .frame(width: Col.extra, alignment: .trailing)
@@ -471,7 +471,7 @@ private struct ClaudeConnectForm: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Connect Claude Code")
                 .font(.system(size: 11, weight: .semibold))
-            Text("Reads ~/.claude/.credentials.json and the Claude Code keychain after you run `claude` once. 5-hour + 7-day windows.")
+            Text("Reads the Claude Code keychain and ~/.claude/.credentials.json after you run `claude` once. A connected account moves into Usage (current session, this week, and Fable when that window is present).")
                 .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
