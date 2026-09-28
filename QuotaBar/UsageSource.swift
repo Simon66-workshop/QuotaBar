@@ -97,9 +97,9 @@ struct ChatGPTUsageSource: UsageSource {
 
 struct ClaudeUsageSource: UsageSource {
     var key: LaneKey { .claude }
-    var emptySub: String { "Claude Code 5h + 7d  ·  not connected" }
+    var emptySub: String { "Claude Desktop  ·  open Claude and sign in" }
     var connectTitle: String? { "Claude" }
-    func hasSession() -> Bool { TokenReader.hasClaudeSession() }
+    func hasSession() -> Bool { ClaudeDesktop.hasLocalMaterial() || TokenReader.hasClaudeSession() }
     func fetch() async -> Lane { await UsageClient.fetchClaude() }
 }
 

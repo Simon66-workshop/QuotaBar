@@ -41,7 +41,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.8.16")
+                Text("v1.8.17")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -469,9 +469,9 @@ private struct ClaudeConnectForm: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Connect Claude Code")
+            Text("Connect Claude")
                 .font(.system(size: 11, weight: .semibold))
-            Text("Reads the Claude Code keychain and ~/.claude/.credentials.json after you run `claude` once. A connected account moves into Usage (current session, this week, and Fable when that window is present).")
+            Text("Reads Claude Desktop Settings → Usage from the app's local session. Open Claude and stay signed in. A terminal `claude` login is not required. If the row stays here, click Allow on the Keychain prompt for Claude Safe Storage, then Refresh. Pasting Claude Code credentials is optional.")
                 .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

@@ -319,9 +319,10 @@ final class UsageStore: ObservableObject {
             TokenReader.grokDir().path,
             TokenReader.home().appendingPathComponent(".codex").path,
             TokenReader.claudeDir().path,
+            TokenReader.home().appendingPathComponent("Library/Application Support/Claude").path,
         ]
         for dir in dirs {
-            let isOptional = dir.hasSuffix(".codex") || dir.hasSuffix(".claude")
+            let isOptional = dir.hasSuffix(".codex") || dir.hasSuffix(".claude") || dir.hasSuffix("Application Support/Claude")
             if isOptional {
                 if !FileManager.default.fileExists(atPath: dir) { continue }
             } else {

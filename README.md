@@ -1,6 +1,6 @@
-# QuotaBar 1.8.16
+# QuotaBar 1.8.17
 
-Mac menu bar extra for live Grok / Cursor / Grok Bot / ChatGPT / Claude Code usage, plus local and external disks.
+Mac menu bar extra for live Grok / Cursor / Grok Bot / ChatGPT / Claude usage, plus local and external disks.
 
 **Do not open `QuotaBar.xcodeproj`.** That path is retired.
 
@@ -19,13 +19,13 @@ QuotaBar appears on the right of the menu bar. Unconnected services stay off the
 - **C** Cursor Ultra monthly
 - **B** Grok Bot (Sand) weekly
 - **O** ChatGPT / Codex (5-hour + weekly)
-- **A** Claude Code (5-hour + 7-day)
+- **A** Claude (Desktop session + week; Claude Code oauth if that login exists)
 - **D** fullest visible disk used %
 
 - **Left-click** the bar → glass panel (details, connect, hide disks)
 - **Right-click** the bar → short native menu (refresh / copy / alerts / quit)
 
-The panel header should say **v1.8.16**. If it still says v1.8.15, quit QuotaBar and run `Start QuotaBar.command` again.
+The panel header should say **v1.8.17**. If it still says an older version, quit QuotaBar and run `Start QuotaBar.command` again.
 
 Later launches: just double-click `Start QuotaBar.command` again.
 
@@ -34,18 +34,22 @@ Later launches: just double-click `Start QuotaBar.command` again.
 - Grok: `~/.grok/auth.json` + in-app device login (writes the file itself)
 - Cursor + Grok Bot: Cursor local session (`state.vscdb`)
 - ChatGPT: `~/.codex/auth.json` after `codex login` (refreshes the token itself)
-- Claude: Claude Code keychain item `Claude Code-credentials` (read with `/usr/bin/security`, which that item allows) and `~/.claude/.credentials.json` after `claude` login. The Usage row is the 5-hour session and the 7-day week; the main percent is whichever of those two is higher. Fable this week is an extra detail when the usage payload includes that model window. Claude desktop Settings → Usage is the same windows — there is no separate local desktop cache to read.
+- Claude: Claude Desktop first. The signed-in Claude.app session lives in `~/Library/Application Support/Claude/` (`Network/Cookies` or `Cookies`, plus `config.json` when it has an oauth token cache). The cookie key is the login-keychain item **Claude Safe Storage** (read with `/usr/bin/security`, never written to a log). QuotaBar calls the same `claude.ai` usage endpoint Settings → Usage uses and shows Current session, This week, and a named bucket such as Fable when that window is in the payload. There is no plain usage-percent file to read. Claude Code oauth (`Claude Code-credentials`, `~/.claude/.credentials.json`) is only a fallback when that login already exists. A terminal `claude` login is not required.
 - Disks: mounted local + external volumes (auto add/remove), capacity, read/write rate, status
 
 If Cursor shows `—`, open Cursor once, then start QuotaBar again.
 
 If ChatGPT shows `—`, run `codex login` once in Terminal, then click Refresh.
 
-If Claude stays under Connect, run `claude` once in Terminal (or paste credentials and click Save Claude), then click Refresh. A connected account leaves Connect and shows in Usage.
+If Claude stays under Connect, open Claude Desktop while signed in, then click Refresh. The first read can ask for the Keychain item Claude Safe Storage — click Allow. Pasting Claude Code credentials is optional. A connected account leaves Connect and shows in Usage, including the **A** menubar letter.
 
 Plug in a USB / Thunderbolt disk and it appears in the panel; eject it and it disappears. Hide Time Machine or VM disks from the panel — they stay off the bar until you Show them again.
 
 The bar only turns orange / red on a token that is actually high (85%+ services, 90%+ disks). A normal 60–80% day stays neutral.
+
+## 1.8.17
+
+Claude Usage reads the Claude Desktop session first (Settings → Usage: Current session, This week, and Fable or another named bucket when the payload includes it). Rebuild on the Mini by double-clicking `Start QuotaBar.command`. The panel header should say **v1.8.17**. Claude Code oauth remains a fallback when those credentials already exist. The desktop token cache is read-only so QuotaBar does not rotate Claude.app's refresh token.
 
 ## 1.8.16
 
