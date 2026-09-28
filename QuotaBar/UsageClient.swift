@@ -179,9 +179,201 @@ enum UsageClient {
     }
 
     static func fetchClaude() async -> Lane {
-        guard var auth = TokenReader.loadClaudeAuth() else {
-            return .empty(.claude, sub: "Claude Code 5h + 7d  ·  run `claude` once")
+        switch ClaudeDesktop.read() {
+        case .web(let session):
+            switch await fetchClaudeDesktopWeb(session) {
+            case .lane(let lane):
+                return lane
+            case .retry(let message):
+                if let lane = await fetchClaudeDesktopOAuth() { return lane }
+                if let lane = await fetchClaudeCodeIfPresent() { return lane }
+                return .error(.claude, message: message)
+            }
+        case .oauth(let auth):
+            if let lane = await fetchClaudeOAuthReadOnly(auth) { return lane }
+            if let lane = await fetchClaudeCodeIfPresent() { return lane }
+            return .error(.claude, message: "Claude Desktop token could not load usage. Open Claude, then Refresh.")
+        case .blocked(let message):
+            if let lane = await fetchClaudeCodeIfPresent() { return lane }
+            return .error(.claude, message: message)
+        case .missing:
+            guard let auth = TokenReader.loadClaudeAuth() else {
+                return .empty(.claude, sub: "Claude Desktop  ·  open Claude and sign in")
+            }
+            return await fetchClaudeCode(auth)
         }
+    }
+
+    /// Claude Code oauth, used only when that store already has a working session.
+    /// A dead CLI token must not hide the desktop error.
+    private static func fetchClaudeCodeIfPresent() async -> Lane? {
+        guard let auth = TokenReader.loadClaudeAuth() else { return nil }
+        let lane = await fetchClaudeCode(auth)
+        guard lane.usedPct != nil else { return nil }
+        return lane
+    }
+
+    private static func fetchClaudeDesktopOAuth() async -> Lane? {
+        guard let auth = ClaudeDesktop.loadOAuth() else { return nil }
+        return await fetchClaudeOAuthReadOnly(auth)
+    }
+
+    /// Desktop `config.json` token. Refresh is blank, so this never rotates it.
+    private static func fetchClaudeOAuthReadOnly(_ auth: ClaudeAuth) async -> Lane? {
+        guard !auth.access.isEmpty else { return nil }
+        do {
+            let json = try await getClaudeUsage(auth)
+            return parseClaude(json, auth: auth)
+        } catch {
+            return nil
+        }
+    }
+
+    private enum DesktopWebResult {
+        case lane(Lane)
+        case retry(String)
+    }
+
+    private struct DesktopIdentity {
+        var org: String
+        var plan: String
+    }
+
+    private static let desktopIdentityLock = NSLock()
+    private static var desktopIdentityCache: (hint: String?, identity: DesktopIdentity, at: Date)?
+
+    private static func fetchClaudeDesktopWeb(_ session: ClaudeDesktop.WebSession) async -> DesktopWebResult {
+        guard let identity = await desktopIdentity(cookie: session.cookieHeader, hint: session.orgHint) else {
+            return .retry("Claude Desktop did not report an organization. Open Claude, then Refresh.")
+        }
+        let auth = ClaudeAuth(
+            access: "",
+            refresh: "",
+            expiresAt: .distantFuture,
+            subscription: identity.plan,
+            tier: ""
+        )
+        do {
+            let json = try await getClaudeWeb(
+                "https://claude.ai/api/organizations/\(identity.org)/usage",
+                cookie: session.cookieHeader
+            )
+            if let lane = parseClaude(json, auth: auth) { return .lane(lane) }
+            return .retry("Claude Desktop usage had no session or week window")
+        } catch AuthError.http(let code) where code == 401 || code == 403 {
+            clearDesktopIdentity()
+            return .retry("Claude Desktop session expired — open Claude and sign in, then Refresh.")
+        } catch AuthError.http(let code) where code == 404 {
+            clearDesktopIdentity()
+            if session.orgHint != nil,
+               let fresh = await bootstrapIdentity(cookie: session.cookieHeader, hint: nil),
+               fresh.org != identity.org
+            {
+                do {
+                    let json = try await getClaudeWeb(
+                        "https://claude.ai/api/organizations/\(fresh.org)/usage",
+                        cookie: session.cookieHeader
+                    )
+                    if let lane = parseClaude(json, auth: ClaudeAuth(
+                        access: "",
+                        refresh: "",
+                        expiresAt: .distantFuture,
+                        subscription: fresh.plan,
+                        tier: ""
+                    )) {
+                        return .lane(lane)
+                    }
+                } catch {
+                    return .retry("Claude Desktop usage request failed")
+                }
+            }
+            return .retry("Claude Desktop did not report an organization. Open Claude, then Refresh.")
+        } catch AuthError.http(let code) {
+            return .retry("Claude Desktop usage HTTP \(code)")
+        } catch {
+            return .retry("Claude Desktop usage request failed")
+        }
+    }
+
+    private static func desktopIdentity(cookie: String, hint: String?) async -> DesktopIdentity? {
+        desktopIdentityLock.lock()
+        if let cached = desktopIdentityCache,
+           cached.hint == hint,
+           Date().timeIntervalSince(cached.at) < 6 * 3600
+        {
+            let identity = cached.identity
+            desktopIdentityLock.unlock()
+            return identity
+        }
+        desktopIdentityLock.unlock()
+        if let found = await bootstrapIdentity(cookie: cookie, hint: hint) {
+            rememberDesktopIdentity(found, hint: hint)
+            return found
+        }
+        if let hint, ClaudeDesktop.isOrganizationID(hint) {
+            let fallback = DesktopIdentity(org: hint, plan: "Claude")
+            rememberDesktopIdentity(fallback, hint: hint)
+            return fallback
+        }
+        return nil
+    }
+
+    private static func rememberDesktopIdentity(_ identity: DesktopIdentity, hint: String?) {
+        desktopIdentityLock.lock()
+        desktopIdentityCache = (hint, identity, Date())
+        desktopIdentityLock.unlock()
+    }
+
+    private static func clearDesktopIdentity() {
+        desktopIdentityLock.lock()
+        desktopIdentityCache = nil
+        desktopIdentityLock.unlock()
+    }
+
+    private static func bootstrapIdentity(cookie: String, hint: String?) async -> DesktopIdentity? {
+        do {
+            let root = try await getClaudeWeb("https://claude.ai/api/bootstrap", cookie: cookie)
+            let orgs = claudeOrganizations(root).filter { orgID($0).map(ClaudeDesktop.isOrganizationID) ?? false }
+            let chosen = orgs.first { orgID($0) == hint } ?? orgs.first
+            guard let chosen, let id = orgID(chosen) else { return nil }
+            return DesktopIdentity(org: id, plan: planName(from: chosen))
+        } catch {
+            return nil
+        }
+    }
+
+    private static func claudeOrganizations(_ root: [String: Any]) -> [[String: Any]] {
+        var found: [[String: Any]] = []
+        func take(_ bag: [String: Any]) {
+            if let account = bag["account"] as? [String: Any],
+               let memberships = account["memberships"] as? [[String: Any]]
+            {
+                for membership in memberships {
+                    if let org = membership["organization"] as? [String: Any] { found.append(org) }
+                }
+            }
+            if let list = bag["organizations"] as? [[String: Any]] { found.append(contentsOf: list) }
+        }
+        take(root)
+        if let data = root["data"] as? [String: Any] { take(data) }
+        return found
+    }
+
+    private static func orgID(_ org: [String: Any]) -> String? {
+        (org["uuid"] as? String) ?? (org["id"] as? String) ?? (org["organization_uuid"] as? String)
+    }
+
+    private static func planName(from org: [String: Any]) -> String {
+        let tier = (org["rate_limit_tier"] as? String) ?? (org["rateLimitTier"] as? String) ?? ""
+        let sub = (org["subscription_type"] as? String)
+            ?? (org["subscriptionType"] as? String)
+            ?? (org["plan"] as? String)
+            ?? ""
+        return ClaudeDesktop.prettyPlan(subscription: sub, tier: tier)
+    }
+
+    private static func fetchClaudeCode(_ auth: ClaudeAuth) async -> Lane {
+        var auth = auth
         if auth.canRefresh, auth.isStale || auth.access.isEmpty {
             if ProcessProbe.claudeLive() {
                 if auth.access.isEmpty {
@@ -202,7 +394,7 @@ enum UsageClient {
         do {
             let json = try await getClaudeUsage(auth)
             if let lane = parseClaude(json, auth: auth) { return lane }
-            return .error(.claude, message: "Claude usage 200 but no 5h / 7d window")
+            return .error(.claude, message: "Claude usage 200 but no session or week window")
         } catch AuthError.http(let code) where code == 401 || code == 403 {
             if ProcessProbe.claudeLive() {
                 return .error(.claude, message: "Claude Code is running — token is stale, wait for it to refresh")
@@ -374,12 +566,12 @@ enum UsageClient {
             proto = raw
         }
         let root = protoFields(proto)
-        let innerData = root[1].compactMap { $0 as? Data }.first ?? proto
+        let innerData = (root[1] ?? []).compactMap { $0 as? Data }.first ?? proto
         let inner = protoFields(innerData)
         var used = protoFloat(inner[1]) ?? protoFloat(root[1])
         var products: [[String: Any]] = []
         let names = [1: "GrokAPI", 2: "GrokBuild", 4: "GrokChat", 5: "GrokImagine", 6: "GrokVoice"]
-        for blob in inner[7] {
+        for blob in inner[7] ?? [] {
             guard let data = blob as? Data else { continue }
             let item = protoFields(data)
             let kind = protoInt(item[1]) ?? 0
@@ -550,9 +742,63 @@ enum UsageClient {
         req.setValue("Bearer \(auth.access)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         req.setValue("QuotaBar/1.8", forHTTPHeaderField: "User-Agent")
         let (data, res) = try await URLSession.shared.data(for: req)
-        return try decode(data, res)
+        let code = (res as? HTTPURLResponse)?.statusCode ?? 0
+        if !(200 ..< 300).contains(code) { throw AuthError.http(code) }
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw AuthError.bad
+        }
+        return normalizeClaudeUsage(obj)
+    }
+
+    /// Desktop Settings → Usage. Ephemeral session so a Set-Cookie is not stored
+    /// on the shared cookie jar. The session header is not logged.
+    private static func getClaudeWeb(_ url: String, cookie: String) async throws -> [String: Any] {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpShouldSetCookies = false
+        configuration.httpCookieAcceptPolicy = .never
+        configuration.httpCookieStorage = nil
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        var req = URLRequest(url: URL(string: url)!)
+        req.httpMethod = "GET"
+        req.timeoutInterval = timeout
+        req.setValue(cookie, forHTTPHeaderField: "Cookie")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue("web_claude_ai", forHTTPHeaderField: "anthropic-client-platform")
+        req.setValue("https://claude.ai", forHTTPHeaderField: "Origin")
+        req.setValue("https://claude.ai/settings/usage", forHTTPHeaderField: "Referer")
+        req.setValue(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Claude/1.0.0 Chrome/132.0.0.0 Electron/34.0.0 Safari/537.36",
+            forHTTPHeaderField: "User-Agent"
+        )
+        let (data, res) = try await session.data(for: req)
+        let code = (res as? HTTPURLResponse)?.statusCode ?? 0
+        if !(200 ..< 300).contains(code) { throw AuthError.http(code) }
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw AuthError.bad
+        }
+        if url.contains("/usage") { return normalizeClaudeUsage(obj) }
+        return obj
+    }
+
+    /// Keep the root when it already carries windows. Unwrapping `data` would
+    /// drop `limits` / `five_hour` sitting beside that key.
+    private static func normalizeClaudeUsage(_ obj: [String: Any]) -> [String: Any] {
+        if jsonValue(obj["five_hour"]) != nil || jsonValue(obj["seven_day"]) != nil
+            || jsonValue(obj["fiveHour"]) != nil || jsonValue(obj["sevenDay"]) != nil
+            || jsonValue(obj["seven_day_fable"]) != nil || jsonValue(obj["sevenDayFable"]) != nil
+            || obj["limits"] is [Any]
+        {
+            return obj
+        }
+        if let inner = obj["data"] as? [String: Any] { return inner }
+        if let inner = obj["result"] as? [String: Any] { return inner }
+        return obj
     }
 
     private static func refreshClaude(_ auth: ClaudeAuth) async -> ClaudeRefresh {
@@ -899,19 +1145,91 @@ enum UsageClient {
         return "Weekly"
     }
 
-    private static func parseClaude(_ json: [String: Any], auth: ClaudeAuth) -> Lane? {
-        let fiveUsed = utilizationValue(json["five_hour"] ?? json["fiveHour"] ?? json["five_hour_utilization"])
-        let sevenUsed = utilizationValue(json["seven_day"] ?? json["sevenDay"] ?? json["seven_day_utilization"])
-        let sonnetUsed = utilizationValue(json["seven_day_sonnet"] ?? json["sevenDaySonnet"])
-        let five = windowDict(json["five_hour"] ?? json["fiveHour"])
-        let seven = windowDict(json["seven_day"] ?? json["sevenDay"])
-        guard fiveUsed != nil || sevenUsed != nil else { return nil }
+    private enum ClaudeWindowRole {
+        case session
+        case week
+        case model
+    }
 
-        let used = max(fiveUsed ?? 0, sevenUsed ?? 0)
-        var details: [LaneDetail] = []
-        if let fiveUsed { details.append(LaneDetail(label: "5h", usedPct: fiveUsed)) }
-        if let sevenUsed { details.append(LaneDetail(label: "7d", usedPct: sevenUsed)) }
-        if let sonnetUsed { details.append(LaneDetail(label: "Sonnet 7d", usedPct: sonnetUsed)) }
+    private struct ClaudeWindow {
+        var role: ClaudeWindowRole
+        var label: String
+        var usedPct: Double
+        var resetsAt: Any?
+    }
+
+    private enum ClaudeLimitKind {
+        case session
+        case week
+        case model(String)
+        case ignore
+    }
+
+    /// Session + shared week come from `five_hour` / `seven_day`. Desktop Max
+    /// also sends `limits[]` (`session`, `weekly_all`, `weekly_scoped` Fable).
+    /// Primary `usedPct` is the tighter of session and week (higher used %).
+    /// A tie keeps the session window. Fable stays a detail row — it is a
+    /// separate pool, and a missing window is omitted rather than invented.
+    private static func parseClaude(_ json: [String: Any], auth: ClaudeAuth) -> Lane? {
+        var windows: [ClaudeWindow] = []
+
+        let fiveRaw = jsonValue(json["five_hour"]) ?? jsonValue(json["fiveHour"])
+        if let five = windowDict(fiveRaw), let used = rawUtilization(five) {
+            appendClaude(&windows, role: .session, label: "Current session", used: used, resets: five["resets_at"] ?? five["reset_at"])
+        } else if let used = rawUtilization(fiveRaw ?? jsonValue(json["five_hour_utilization"])) {
+            appendClaude(&windows, role: .session, label: "Current session", used: used, resets: nil)
+        }
+
+        let sevenRaw = jsonValue(json["seven_day"]) ?? jsonValue(json["sevenDay"])
+        if let seven = windowDict(sevenRaw), let used = rawUtilization(seven) {
+            appendClaude(&windows, role: .week, label: "This week", used: used, resets: seven["resets_at"] ?? seven["reset_at"])
+        } else if let used = rawUtilization(sevenRaw ?? jsonValue(json["seven_day_utilization"])) {
+            appendClaude(&windows, role: .week, label: "This week", used: used, resets: nil)
+        }
+
+        appendClaudeNamedModels(json, &windows)
+        if let models = json["models"] as? [[String: Any]] {
+            for item in models {
+                let name = ((item["display_name"] as? String) ?? (item["name"] as? String) ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty,
+                      let used = rawUtilization(
+                        jsonValue(item["percent"])
+                            ?? jsonValue(item["utilization"])
+                            ?? jsonValue(item["used_percentage"])
+                            ?? jsonValue(item["used_percent"])
+                      )
+                else { continue }
+                appendClaude(&windows, role: .model, label: modelWeekLabel(name), used: used, resets: item["resets_at"] ?? item["reset_at"])
+            }
+        }
+
+        if let limits = json["limits"] as? [[String: Any]] {
+            for entry in limits {
+                guard let used = rawUtilization(jsonValue(entry["percent"]) ?? jsonValue(entry["utilization"]) ?? jsonValue(entry["used_percentage"]) ?? jsonValue(entry["used_percent"]))
+                else { continue }
+                let resets = entry["resets_at"] ?? entry["reset_at"]
+                switch limitKind(entry) {
+                case .session:
+                    appendClaude(&windows, role: .session, label: "Current session", used: used, resets: resets)
+                case .week:
+                    appendClaude(&windows, role: .week, label: "This week", used: used, resets: resets)
+                case .model(let name):
+                    appendClaude(&windows, role: .model, label: modelWeekLabel(name), used: used, resets: resets)
+                case .ignore:
+                    break
+                }
+            }
+        }
+
+        guard let primary = primaryClaudeWindow(windows) else { return nil }
+        windows = windows.enumerated().sorted { lhs, rhs in
+            let left = claudeRank(lhs.element.role)
+            let right = claudeRank(rhs.element.role)
+            if left != right { return left < right }
+            return lhs.offset < rhs.offset
+        }.map(\.element)
+        let details = windows.map { LaneDetail(label: $0.label, usedPct: $0.usedPct) }
 
         var plan = auth.subscription
         if plan.isEmpty { plan = (json["subscription_type"] as? String) ?? (json["plan"] as? String) ?? "Claude Code" }
@@ -921,22 +1239,111 @@ enum UsageClient {
         plan = plan.replacingOccurrences(of: "_", with: " ")
 
         var bits: [String] = [plan]
-        if let r = resetLabel(five?["resets_at"] ?? five?["reset_at"] ?? seven?["resets_at"] ?? seven?["reset_at"]) {
-            bits.append(r)
-        }
-        return .used(.claude, percent: used, sub: bits.joined(separator: "  ·  "), details: details)
+        if let r = resetLabel(primary.resetsAt) { bits.append(r) }
+        return .used(
+            .claude,
+            percent: primary.usedPct,
+            sub: bits.joined(separator: "  ·  "),
+            details: details,
+            window: claudeWindowShort(primary.role)
+        )
     }
 
-    /// Claude returns 0–1. Some builds send 0–100. Treat ≤1.5 as a fraction.
-    private static func utilizationValue(_ value: Any?) -> Double? {
-        if let dict = value as? [String: Any] {
-            if let n = num(dict["utilization"]) ?? num(dict["used_percent"]) ?? num(dict["usedPercent"]) {
-                return n <= 1.5 ? n * 100 : n
-            }
+    private static func appendClaudeNamedModels(_ json: [String: Any], _ windows: inout [ClaudeWindow]) {
+        let named = [
+            ("seven_day_fable", "Fable this week"),
+            ("sevenDayFable", "Fable this week"),
+            ("seven_day_sonnet", "Sonnet this week"),
+            ("sevenDaySonnet", "Sonnet this week"),
+            ("seven_day_opus", "Opus this week"),
+            ("sevenDayOpus", "Opus this week"),
+        ]
+        for (key, label) in named {
+            guard let used = rawUtilization(jsonValue(json[key])) else { continue }
+            let bag = json[key] as? [String: Any]
+            appendClaude(&windows, role: .model, label: label, used: used, resets: bag?["resets_at"] ?? bag?["reset_at"])
         }
-        if let n = num(value) {
-            return n <= 1.5 ? n * 100 : n
+    }
+
+    private static func appendClaude(
+        _ windows: inout [ClaudeWindow],
+        role: ClaudeWindowRole,
+        label: String,
+        used: Double,
+        resets: Any?
+    ) {
+        switch role {
+        case .session, .week:
+            if windows.contains(where: { $0.role == role }) { return }
+        case .model:
+            if windows.contains(where: { $0.label == label }) { return }
         }
-        return nil
+        windows.append(ClaudeWindow(role: role, label: label, usedPct: used, resetsAt: jsonValue(resets)))
+    }
+
+    private static func limitKind(_ entry: [String: Any]) -> ClaudeLimitKind {
+        let kind = (entry["kind"] as? String) ?? ""
+        switch kind {
+        case "session":
+            return .session
+        case "weekly", "weekly_all", "seven_day":
+            return .week
+        case "weekly_scoped":
+            return .model(modelName(entry))
+        default:
+            return .ignore
+        }
+    }
+
+    private static func modelName(_ entry: [String: Any]) -> String {
+        let scope = entry["scope"] as? [String: Any]
+        let model = scope?["model"] as? [String: Any]
+        return (model?["display_name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private static func modelWeekLabel(_ name: String) -> String {
+        if name.isEmpty { return "Model this week" }
+        return "\(name) this week"
+    }
+
+    /// Higher used % is the tighter account window. Equal session and week
+    /// keep the session, which is the shorter window.
+    private static func primaryClaudeWindow(_ windows: [ClaudeWindow]) -> ClaudeWindow? {
+        let account = windows.filter { $0.role == .session || $0.role == .week }
+        let pool = account.isEmpty ? windows : account
+        return pool.max { lhs, rhs in
+            if lhs.usedPct != rhs.usedPct { return lhs.usedPct < rhs.usedPct }
+            return lhs.role != .session && rhs.role == .session
+        }
+    }
+
+    private static func claudeRank(_ role: ClaudeWindowRole) -> Int {
+        switch role {
+        case .session: 0
+        case .week: 1
+        case .model: 2
+        }
+    }
+
+    private static func claudeWindowShort(_ role: ClaudeWindowRole) -> String {
+        switch role {
+        case .session: "5h"
+        case .week, .model: "week"
+        }
+    }
+
+    private static func jsonValue(_ value: Any?) -> Any? {
+        if value == nil || value is NSNull { return nil }
+        return value
+    }
+
+    /// Oauth usage is 0–100. Never rescale: a fresh week (session 0, week 1)
+    /// is indistinguishable from a 0–1 fraction and would read as 100%.
+    private static func rawUtilization(_ value: Any?) -> Double? {
+        let raw = jsonValue(value)
+        if let dict = raw as? [String: Any] {
+            return num(dict["utilization"]) ?? num(dict["percent"]) ?? num(dict["used_percentage"]) ?? num(dict["used_percent"]) ?? num(dict["usedPercent"])
+        }
+        return num(raw)
     }
 }

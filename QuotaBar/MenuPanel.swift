@@ -41,7 +41,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.8.15")
+                Text("v1.8.18")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -68,7 +68,7 @@ struct MenuPanel: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            Button("Refresh") { Task { await store.refresh() } }
+            Button("Refresh") { Task { await store.refresh(userInitiated: true) } }
                 .buttonStyle(.bordered)
             Button("Copy") { store.copySummary() }
                 .buttonStyle(.borderless)
@@ -281,7 +281,7 @@ private struct UsageTable: View {
                         .font(.system(size: 11).monospacedDigit())
                         .foregroundStyle(.secondary)
                         .frame(width: Col.meta, alignment: .trailing)
-                    Text(lane.key.windowShort)
+                    Text(lane.window)
                         .font(.system(size: 10.5))
                         .foregroundStyle(.tertiary)
                         .frame(width: Col.extra, alignment: .trailing)
@@ -469,9 +469,9 @@ private struct ClaudeConnectForm: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Connect Claude Code")
+            Text("Connect Claude")
                 .font(.system(size: 11, weight: .semibold))
-            Text("Reads ~/.claude/.credentials.json and the Claude Code keychain after you run `claude` once. 5-hour + 7-day windows.")
+            Text("Reads Claude Desktop Settings → Usage from the app's local session. Open Claude and stay signed in. A terminal `claude` login is not required. If the row stays here, click Allow on the Keychain prompt for Claude Safe Storage, then Refresh. Pasting Claude Code credentials is optional.")
                 .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -658,7 +658,7 @@ private struct DiskSection: View {
         } else if let health = store.diskHealth[disk.id] {
             Text(healthLine(health, disk))
                 .font(.system(size: 10.5))
-                .foregroundStyle(health.smart.lowercased().contains("fail") ? .orange : .tertiary)
+                .foregroundStyle(health.smart.lowercased().contains("fail") ? AnyShapeStyle(.orange) : AnyShapeStyle(.tertiary))
                 .fixedSize(horizontal: false, vertical: true)
         }
     }

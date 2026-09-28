@@ -256,7 +256,8 @@ final class UsageStore: ObservableObject {
             }
     }
 
-    func refresh() async {
+    func refresh(userInitiated: Bool = false) async {
+        if userInitiated { ClaudeDesktop.allowKeychainRetry() }
         if refreshRunning {
             refreshQueued = true
             return
@@ -264,6 +265,7 @@ final class UsageStore: ObservableObject {
         refreshRunning = true
         busy = true
         lastRefreshAt = Date()
+        TokenReader.invalidateClaudeCache()
         defer {
             busy = false
             refreshRunning = false

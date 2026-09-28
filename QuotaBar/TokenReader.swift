@@ -110,12 +110,12 @@ enum TokenReader {
            let obj = try? JSONSerialization.jsonObject(with: data),
            let auth = firstRecord(in: obj)
         {
-            persist(auth)
+            _ = persist(auth)
             return true
         }
         let token = scrub(trimmed)
         guard !token.isEmpty else { return false }
-        persist(GrokAuth(access: token, refresh: "", clientId: "", expiresAt: .distantPast))
+        _ = persist(GrokAuth(access: token, refresh: "", clientId: "", expiresAt: .distantPast))
         return true
     }
 
@@ -131,6 +131,13 @@ enum TokenReader {
         codexCache = nil
         claudeCache = nil
         cursorTokCache = nil
+        cacheLock.unlock()
+    }
+
+    /// Drop only the Claude auth cache so Refresh re-reads the keychain.
+    static func invalidateClaudeCache() {
+        cacheLock.lock()
+        claudeCache = nil
         cacheLock.unlock()
     }
 
@@ -569,15 +576,7 @@ enum TokenReader {
     }
 
     static func hasClaudeSession() -> Bool {
-        cacheLock.lock()
-        if let cached = claudeCache {
-            let yes = cached.value != nil
-            cacheLock.unlock()
-            return yes
-        }
-        cacheLock.unlock()
-        if loadClaudeKeychainData() != nil { return true }
-        return claudeCandidateFiles().contains { FileManager.default.fileExists(atPath: $0.path) }
+        loadClaudeAuth() != nil
     }
 
     static func persistCodex(_ auth: CodexAuth) {
@@ -701,11 +700,19 @@ enum TokenReader {
         for url in claudeCandidateFiles() {
             if let auth = extractClaude(from: url) { found.append(auth) }
         }
-        let value = found.max(by: { $0.expiresAt < $1.expiresAt })
+        let value = pickClaudeAuth(found)
         cacheLock.lock()
         claudeCache = (Date(), value)
         cacheLock.unlock()
         return value
+    }
+
+    /// Prefer a token that is still usable. A stale `~/.claude/.credentials.json`
+    /// must not beat a newer keychain login.
+    private static func pickClaudeAuth(_ found: [ClaudeAuth]) -> ClaudeAuth? {
+        let live = found.filter { !$0.access.isEmpty && !$0.isStale }
+        if let best = live.max(by: { $0.expiresAt < $1.expiresAt }) { return best }
+        return found.max(by: { $0.expiresAt < $1.expiresAt })
     }
 
     static func persistClaude(_ auth: ClaudeAuth) {
@@ -732,7 +739,11 @@ enum TokenReader {
         if !auth.subscription.isEmpty { oauth["subscriptionType"] = auth.subscription }
         if !auth.tier.isEmpty { oauth["rateLimitTier"] = auth.tier }
         bag["claudeAiOauth"] = oauth
-        guard let data = try? JSONSerialization.data(withJSONObject: bag, options: [.prettyPrinted, .sortedKeys]) else { return }
+        guard let data = try? JSONSerialization.data(withJSONObject: bag, options: [.prettyPrinted, .sortedKeys]),
+              // Keychain copy stays single-line: Claude Code parses `security -w`,
+              // which hex-encodes any secret containing a newline.
+              let compact = try? JSONSerialization.data(withJSONObject: bag, options: [.sortedKeys])
+        else { return }
 
         // Never invent ~/.claude/.credentials.json — Claude Code on macOS
         // treats the keychain as source of truth. Creating a stale file desyncs it.
@@ -740,7 +751,7 @@ enum TokenReader {
         if FileManager.default.fileExists(atPath: url.path) {
             try? data.write(to: url, options: .atomic)
         }
-        writeClaudeKeychain(data)
+        writeClaudeKeychain(compact)
         cacheLock.lock()
         claudeCache = (Date(), auth)
         cacheLock.unlock()
@@ -843,7 +854,105 @@ enum TokenReader {
         return extractClaude(from: obj)
     }
 
+    /// Claude Code puts `/usr/bin/security` on the item ACL. `SecItemCopyMatching`
+    /// from QuotaBar is often denied, which left the Usage row on Connect.
+    /// Stdout is the credential JSON — never log it.
+    private static func loadClaudeKeychainViaSecurity() -> Data? {
+        var seen: Set<String> = []
+        let accounts: [String?] = [NSUserName(), NSUserName().lowercased(), nil]
+        for account in accounts {
+            let mark = account ?? "*"
+            if !seen.insert(mark).inserted { continue }
+            if let data = securityGenericPassword(service: claudeKeychainService, account: account) {
+                return data
+            }
+        }
+        return nil
+    }
+
+    private static func securityGenericPassword(service: String, account: String?) -> Data? {
+        var args = ["find-generic-password", "-s", service]
+        if let account, !account.isEmpty {
+            args.append(contentsOf: ["-a", account])
+        }
+        args.append("-w")
+        guard let data = runSecurity(args) else { return nil }
+        var bytes = [UInt8](data)
+        while let last = bytes.last, last == 10 || last == 13 {
+            bytes.removeLast()
+        }
+        if bytes.isEmpty { return nil }
+        // `-w` prints a secret with newlines or non-ASCII bytes as bare hex.
+        if bytes.first != UInt8(ascii: "{"), let decoded = hexDecode(bytes) { return decoded }
+        return Data(bytes)
+    }
+
+    private static func hexDecode(_ bytes: [UInt8]) -> Data? {
+        guard bytes.count % 2 == 0 else { return nil }
+        func nibble(_ c: UInt8) -> UInt8? {
+            switch c {
+            case 48 ... 57: c - 48
+            case 65 ... 70: c - 55
+            case 97 ... 102: c - 87
+            default: nil
+            }
+        }
+        var out = [UInt8]()
+        out.reserveCapacity(bytes.count / 2)
+        var i = 0
+        while i < bytes.count {
+            guard let hi = nibble(bytes[i]), let lo = nibble(bytes[i + 1]) else { return nil }
+            out.append(hi << 4 | lo)
+            i += 2
+        }
+        return Data(out)
+    }
+
+    /// Returns stdout when `/usr/bin/security` exits 0. A keychain prompt holds
+    /// the process open, so give up after `timeout` instead of stalling Refresh.
+    @discardableResult
+    private static func runSecurity(_ args: [String], stdin: Data? = nil, timeout: TimeInterval = 10) -> Data? {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        proc.arguments = args
+        let stdout = Pipe()
+        proc.standardOutput = stdout
+        proc.standardError = FileHandle.nullDevice
+        let input = stdin == nil ? nil : Pipe()
+        if let input { proc.standardInput = input } else { proc.standardInput = FileHandle.nullDevice }
+        let exited = DispatchSemaphore(value: 0)
+        proc.terminationHandler = { _ in exited.signal() }
+        do {
+            try proc.run()
+        } catch {
+            return nil
+        }
+        if let input, let stdin {
+            try? input.fileHandleForWriting.write(contentsOf: stdin)
+            try? input.fileHandleForWriting.close()
+        }
+        if exited.wait(timeout: .now() + timeout) == .timedOut {
+            proc.terminate()
+            return nil
+        }
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        return proc.terminationStatus == 0 ? data : nil
+    }
+
+    /// Write through the same tool Claude Code uses so the item ACL keeps
+    /// trusting `/usr/bin/security` for both apps. The secret goes over stdin
+    /// (`security -i`), never argv; `-i` lines are capped near 4 KB.
+    private static func writeClaudeKeychainViaSecurity(_ data: Data) -> Bool {
+        let account = NSUserName()
+        let hex = data.map { String(format: "%02x", $0) }.joined()
+        let line = "add-generic-password -U -a \"\(account)\" -s \"\(claudeKeychainService)\" -X \(hex)\n"
+        guard line.utf8.count < 4000 else { return false }
+        runSecurity(["-i"], stdin: Data(line.utf8))
+        return securityGenericPassword(service: claudeKeychainService, account: account) == data
+    }
+
     private static func loadClaudeKeychainData() -> Data? {
+        if let data = loadClaudeKeychainViaSecurity() { return data }
         let accounts = [NSUserName(), NSUserName().lowercased(), ""]
         for account in accounts {
             var query: [String: Any] = [
@@ -878,6 +987,7 @@ enum TokenReader {
     }
 
     private static func writeClaudeKeychain(_ data: Data) {
+        if writeClaudeKeychainViaSecurity(data) { return }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: claudeKeychainService,
