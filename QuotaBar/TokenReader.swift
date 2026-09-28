@@ -110,12 +110,12 @@ enum TokenReader {
            let obj = try? JSONSerialization.jsonObject(with: data),
            let auth = firstRecord(in: obj)
         {
-            persist(auth)
+            _ = persist(auth)
             return true
         }
         let token = scrub(trimmed)
         guard !token.isEmpty else { return false }
-        persist(GrokAuth(access: token, refresh: "", clientId: "", expiresAt: .distantPast))
+        _ = persist(GrokAuth(access: token, refresh: "", clientId: "", expiresAt: .distantPast))
         return true
     }
 

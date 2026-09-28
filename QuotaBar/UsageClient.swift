@@ -374,12 +374,12 @@ enum UsageClient {
             proto = raw
         }
         let root = protoFields(proto)
-        let innerData = root[1].compactMap { $0 as? Data }.first ?? proto
+        let innerData = (root[1] ?? []).compactMap { $0 as? Data }.first ?? proto
         let inner = protoFields(innerData)
         var used = protoFloat(inner[1]) ?? protoFloat(root[1])
         var products: [[String: Any]] = []
         let names = [1: "GrokAPI", 2: "GrokBuild", 4: "GrokChat", 5: "GrokImagine", 6: "GrokVoice"]
-        for blob in inner[7] {
+        for blob in inner[7] ?? [] {
             guard let data = blob as? Data else { continue }
             let item = protoFields(data)
             let kind = protoInt(item[1]) ?? 0
