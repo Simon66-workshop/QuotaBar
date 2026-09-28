@@ -658,7 +658,7 @@ private struct DiskSection: View {
         } else if let health = store.diskHealth[disk.id] {
             Text(healthLine(health, disk))
                 .font(.system(size: 10.5))
-                .foregroundStyle(health.smart.lowercased().contains("fail") ? .orange : .tertiary)
+                .foregroundStyle(health.smart.lowercased().contains("fail") ? AnyShapeStyle(.orange) : AnyShapeStyle(.tertiary))
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
