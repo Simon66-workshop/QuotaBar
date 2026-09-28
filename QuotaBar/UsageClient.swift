@@ -982,7 +982,6 @@ enum UsageClient {
             }
         }
 
-        windows = scaleClaude(windows)
         guard let primary = primaryClaudeWindow(windows) else { return nil }
         windows = windows.enumerated().sorted { lhs, rhs in
             let left = claudeRank(lhs.element.role)
@@ -1082,25 +1081,13 @@ enum UsageClient {
         return value
     }
 
-    /// Unscaled. Older payloads use 0–1; current oauth usage uses 0–100.
+    /// Oauth usage is 0–100. Never rescale: a fresh week (session 0, week 1)
+    /// is indistinguishable from a 0–1 fraction and would read as 100%.
     private static func rawUtilization(_ value: Any?) -> Double? {
         let raw = jsonValue(value)
         if let dict = raw as? [String: Any] {
             return num(dict["utilization"]) ?? num(dict["percent"]) ?? num(dict["used_percentage"]) ?? num(dict["used_percent"]) ?? num(dict["usedPercent"])
         }
         return num(raw)
-    }
-
-    /// If any window is above 1.5, the payload is already 0–100 (`5` = 5%,
-    /// `12` = 12%). Otherwise it is the older 0–1 fraction (`0.12` = 12%).
-    /// One anchor above 1.5 keeps a 1% session from being read as 100%.
-    private static func scaleClaude(_ windows: [ClaudeWindow]) -> [ClaudeWindow] {
-        let alreadyPercent = windows.contains { $0.usedPct > 1.5 }
-        if alreadyPercent { return windows }
-        return windows.map { window in
-            var copy = window
-            copy.usedPct = window.usedPct * 100
-            return copy
-        }
     }
 }
