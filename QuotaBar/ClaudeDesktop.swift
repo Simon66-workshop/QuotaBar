@@ -35,7 +35,13 @@ enum ClaudeDesktop {
 
     private static let lock = NSLock()
     private static var rowCache: (at: Date, rows: [CookieRow])?
-    private static var keyCache: (at: Date, key: Data)?
+    /// Derived AES key, kept for the process lifetime. Re-reading it every few
+    /// minutes would re-prompt on "Allow" and push users toward "Always Allow",
+    /// which trusts `/usr/bin/security` for every process.
+    private static var keyCache: Data?
+    /// A denied or timed-out prompt is not retried by the timer. Only a
+    /// user Refresh clears it, so a Deny cannot turn into a prompt loop.
+    private static var keychainBackoff: String?
 
     private static var support: URL {
         TokenReader.home().appendingPathComponent("Library/Application Support/Claude")
@@ -343,12 +349,22 @@ enum ClaudeDesktop {
         case blocked(String)
     }
 
+    /// Called for a user-initiated Refresh so the next read may prompt again.
+    static func allowKeychainRetry() {
+        lock.lock()
+        keychainBackoff = nil
+        lock.unlock()
+    }
+
     private static func encryptionKey() -> KeyMaterial {
         lock.lock()
-        if let keyCache, Date().timeIntervalSince(keyCache.at) < 15 * 60 {
-            let key = keyCache.key
+        if let keyCache {
             lock.unlock()
-            return .key(key)
+            return .key(keyCache)
+        }
+        if let keychainBackoff {
+            lock.unlock()
+            return .blocked(keychainBackoff)
         }
         lock.unlock()
         let secret: Data
@@ -356,47 +372,40 @@ enum ClaudeDesktop {
         case .secret(let found):
             secret = found
         case .timedOut:
-            return .blocked("Keychain prompt for Claude Safe Storage timed out. Click Allow, then Refresh.")
+            return backOff("Keychain prompt for Claude Safe Storage timed out. Click Refresh, then Allow.")
+        case .denied:
+            return backOff("QuotaBar was not allowed to read Claude Safe Storage. Click Refresh, then Allow.")
         case .missing:
-            return .blocked("Allow QuotaBar to read the Keychain item Claude Safe Storage, then Refresh.")
+            return .blocked("Claude Safe Storage is not in the login keychain. Open Claude once, then Refresh.")
         }
         guard let key = deriveKey(secret) else {
             return .blocked("Claude Desktop storage key could not be derived. Open Claude, then Refresh.")
         }
         lock.lock()
-        keyCache = (Date(), key)
+        keyCache = key
         lock.unlock()
         return .key(key)
+    }
+
+    private static func backOff(_ message: String) -> KeyMaterial {
+        lock.lock()
+        keychainBackoff = message
+        lock.unlock()
+        return .blocked(message)
     }
 
     private enum SecretRead {
         case secret(Data)
         case missing
+        case denied
         case timedOut
     }
 
     /// `security -w` stdout is the Safe Storage password. It is not logged.
+    /// One query only: a service match already covers every account, and a
+    /// second query on the same item would raise a second prompt after Deny.
     private static func keychainSecret() -> SecretRead {
-        let service = "Claude Safe Storage"
-        switch runSecurity(["find-generic-password", "-s", service, "-w"], timeout: 20) {
-        case .secret(let value):
-            return .secret(value)
-        case .timedOut:
-            return .timedOut
-        case .missing:
-            break
-        }
-        for account in ["Claude Key", "Claude"] {
-            switch runSecurity(["find-generic-password", "-s", service, "-a", account, "-w"], timeout: 8) {
-            case .secret(let value):
-                return .secret(value)
-            case .timedOut:
-                return .timedOut
-            case .missing:
-                continue
-            }
-        }
-        return .missing
+        runSecurity(["find-generic-password", "-s", "Claude Safe Storage", "-w"], timeout: 20)
     }
 
     private static func runSecurity(_ args: [String], timeout: TimeInterval) -> SecretRead {
@@ -418,7 +427,9 @@ enum ClaudeDesktop {
             proc.terminate()
             return .timedOut
         }
-        guard proc.terminationStatus == 0 else { return .missing }
+        // 44 is errSecItemNotFound. Anything else (Deny, locked keychain) prompted or failed.
+        if proc.terminationStatus == 44 { return .missing }
+        guard proc.terminationStatus == 0 else { return .denied }
         var bytes = [UInt8](stdout.fileHandleForReading.readDataToEndOfFile())
         while let last = bytes.last, last == 10 || last == 13 { bytes.removeLast() }
         guard !bytes.isEmpty else { return .missing }

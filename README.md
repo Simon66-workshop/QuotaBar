@@ -41,7 +41,7 @@ If Cursor shows `—`, open Cursor once, then start QuotaBar again.
 
 If ChatGPT shows `—`, run `codex login` once in Terminal, then click Refresh.
 
-If Claude stays under Connect, open Claude Desktop while signed in, then click Refresh. The first read can ask for the Keychain item Claude Safe Storage — click Allow. Pasting Claude Code credentials is optional. A connected account leaves Connect and shows in Usage, including the **A** menubar letter.
+If Claude stays under Connect, open Claude Desktop while signed in, then click Refresh. The first read can ask for the Keychain item Claude Safe Storage — click **Allow**, not Always Allow (Always Allow trusts `/usr/bin/security` for every app). QuotaBar asks once per launch. After Deny or a timed-out prompt it does not ask again until you click Refresh. Pasting Claude Code credentials is optional. A connected account leaves Connect and shows in Usage, including the **A** menubar letter.
 
 Plug in a USB / Thunderbolt disk and it appears in the panel; eject it and it disappears. Hide Time Machine or VM disks from the panel — they stay off the bar until you Show them again.
 

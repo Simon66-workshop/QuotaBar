@@ -290,7 +290,7 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         return item
     }
 
-    @objc func menuRefresh() { Task { await store?.refresh() } }
+    @objc func menuRefresh() { Task { await store?.refresh(userInitiated: true) } }
     @objc func menuCopy() { store?.copySummary() }
     @objc func menuSignIn() { store?.startDeviceLogin() }
     @objc func menuDisconnect() { Task { await store?.disconnectGrok() } }

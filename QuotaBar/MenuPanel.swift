@@ -68,7 +68,7 @@ struct MenuPanel: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            Button("Refresh") { Task { await store.refresh() } }
+            Button("Refresh") { Task { await store.refresh(userInitiated: true) } }
                 .buttonStyle(.bordered)
             Button("Copy") { store.copySummary() }
                 .buttonStyle(.borderless)
