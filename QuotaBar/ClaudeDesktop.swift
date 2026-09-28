@@ -443,21 +443,23 @@ enum ClaudeDesktop {
         let passwordBytes = [UInt8](password)
         let saltBytes = Array("saltysalt".utf8)
         var derived = [UInt8](repeating: 0, count: 16)
+        // Reading derived.count in the same call as &derived overlaps on Swift 6.3.
+        let derivedCount = derived.count
         let status: Int32 = passwordBytes.withUnsafeBufferPointer { passwordBuf in
             saltBytes.withUnsafeBufferPointer { saltBuf in
                 guard let passwordBase = passwordBuf.baseAddress, let saltBase = saltBuf.baseAddress else {
                     return Int32(-1)
                 }
                 return CCKeyDerivationPBKDF(
-                    kCCPBKDF2,
+                    CCPBKDFAlgorithm(kCCPBKDF2),
                     UnsafePointer<Int8>(OpaquePointer(passwordBase)),
                     passwordBytes.count,
                     saltBase,
                     saltBytes.count,
-                    kCCPRFHmacAlgSHA1,
-                    1003,
+                    CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA1),
+                    UInt32(1003),
                     &derived,
-                    derived.count
+                    derivedCount
                 )
             }
         }
@@ -485,22 +487,24 @@ enum ClaudeDesktop {
         guard key.count == kCCKeySizeAES128, !data.isEmpty, data.count % kCCBlockSizeAES128 == 0 else { return nil }
         let iv = Data(repeating: 0x20, count: kCCBlockSizeAES128)
         var out = Data(count: data.count + kCCBlockSizeAES128)
+        // Reading out.count inside withUnsafeMutableBytes is an exclusivity error on Swift 6.3.
+        let outCount = out.count
         var moved = 0
         let status: CCCryptorStatus = out.withUnsafeMutableBytes { outRaw in
             data.withUnsafeBytes { dataRaw in
                 key.withUnsafeBytes { keyRaw in
                     iv.withUnsafeBytes { ivRaw in
                         CCCrypt(
-                            kCCDecrypt,
-                            kCCAlgorithmAES,
-                            kCCOptionPKCS7Padding,
+                            CCOperation(kCCDecrypt),
+                            CCAlgorithm(kCCAlgorithmAES),
+                            CCOptions(kCCOptionPKCS7Padding),
                             keyRaw.baseAddress,
                             key.count,
                             ivRaw.baseAddress,
                             dataRaw.baseAddress,
                             data.count,
                             outRaw.baseAddress,
-                            out.count,
+                            outCount,
                             &moved
                         )
                     }
