@@ -35,8 +35,11 @@ func sampleAuth() -> ClaudeAuth {
 
 let eastern = TimeZone(identifier: "America/New_York")!
 
-func parse(_ text: String, zone: TimeZone = eastern) -> Lane? {
-    ClaudeUsage.parse(payload(text), auth: sampleAuth(), resetTimeZone: zone)
+/// Wed Sep 30 8:32 PM Eastern, when the screenshot was taken.
+let screenshotNow = ISO8601DateFormatter().date(from: "2026-10-01T00:32:00Z")!
+
+func parse(_ text: String, zone: TimeZone = eastern, now: Date = screenshotNow) -> Lane? {
+    ClaudeUsage.parse(payload(text), auth: sampleAuth(), resetTimeZone: zone, now: now)
 }
 
 let sessionReset = "2026-10-01T04:10:00.000Z"
@@ -232,6 +235,28 @@ let emptyScoped = parse("""
 """)
 check(emptyScoped?.details.map(\.mark) == ["AC", "AT", nil], "unnamed scoped limit is not AF")
 check(emptyScoped?.details.last?.label == "Model this week", "empty model label")
+
+let farWeek = parse("""
+{
+  "five_hour": {"utilization": 19, "resets_at": "\(sessionReset)"},
+  "seven_day": {"utilization": 82, "resets_at": "2026-10-06T00:00:00.943648+00:00"},
+  "seven_day_fable": {"utilization": 94, "resets_at": "2026-10-06T00:00:00.943648+00:00"}
+}
+""")
+check(farWeek?.details.map(\.reset) == ["resets Thu 12:10 AM", "resets Mon 8:00 PM", "resets Mon 8:00 PM"], "weekly reset days out keeps weekday \(farWeek?.details.map(\.reset) ?? [])")
+
+let fableTwice = parse("""
+{
+  "five_hour": {"utilization": 19, "resets_at": "\(sessionReset)"},
+  "seven_day": {"utilization": 82, "resets_at": "\(weekReset)"},
+  "seven_day_fable": {"utilization": 94, "resets_at": "\(weekReset)"},
+  "limits": [
+    {"kind": "weekly_scoped", "utilization": 94, "resets_at": "\(weekReset)", "scope": {"model": {"display_name": "Claude Fable"}}}
+  ]
+}
+""")
+check(fableTwice?.details.filter { $0.mark == "AF" }.count == 1, "differently named Fable sources collapse to one AF \(fableTwice?.details.map(\.label) ?? [])")
+check(Snapshot.title(from: Snapshot.barGroups(lanes: [fableTwice].compactMap { $0 }, disks: [])) == "AC19 AT82 AF94", "bar has a single AF")
 
 if failures == 0 {
     print("ok \(checks) checks")

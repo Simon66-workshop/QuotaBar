@@ -18,7 +18,8 @@ enum ClaudeUsage {
     static func parse(
         _ json: [String: Any],
         auth: ClaudeAuth,
-        resetTimeZone: TimeZone = .current
+        resetTimeZone: TimeZone = .current,
+        now: Date = Date()
     ) -> Lane? {
         var windows: [ClaudeWindow] = []
 
@@ -87,7 +88,7 @@ enum ClaudeUsage {
             LaneDetail(
                 label: window.label,
                 usedPct: window.usedPct,
-                reset: resetLabel(window.resetsAt, role: window.role, timeZone: resetTimeZone),
+                reset: resetLabel(window.resetsAt, role: window.role, timeZone: resetTimeZone, now: now),
                 mark: mark(for: window.role, label: window.label),
                 window: windowShort(window.role)
             )
@@ -159,6 +160,8 @@ enum ClaudeUsage {
             if windows.contains(where: { $0.role == role }) { return }
         case .model:
             if windows.contains(where: { $0.label == label }) { return }
+            // Fable is one pool however the payload names it; a second AF would double the bar.
+            if isFable(label), windows.contains(where: { $0.role == .model && isFable($0.label) }) { return }
         }
         windows.append(ClaudeWindow(role: role, label: label, usedPct: used, resetsAt: jsonValue(resets)))
     }
@@ -221,23 +224,28 @@ enum ClaudeUsage {
         case .week:
             return "AT"
         case .model:
-            return label.range(of: "fable", options: .caseInsensitive) == nil ? nil : "AF"
+            return isFable(label) ? "AF" : nil
         }
     }
 
-    private static func resetLabel(_ value: Any?, role: WindowRole, timeZone: TimeZone) -> String? {
+    private static func isFable(_ label: String) -> Bool {
+        label.range(of: "fable", options: .caseInsensitive) != nil
+    }
+
+    /// A weekly reset more than a day out keeps its weekday so `8:00 PM` is not read as today.
+    private static func resetLabel(_ value: Any?, role: WindowRole, timeZone: TimeZone, now: Date) -> String? {
         guard let date = resetDate(value) else { return nil }
         let includeWeekday: Bool
         switch role {
         case .session:
             includeWeekday = true
         case .week, .model:
-            includeWeekday = false
+            includeWeekday = date.timeIntervalSince(now) > 24 * 3600
         }
         return "resets \(clock(date, timeZone: timeZone, includeWeekday: includeWeekday))"
     }
 
-    /// Local clock, `Thu 12:10 AM` for the session and `8:00 PM` for a weekly window.
+    /// Local clock, `Thu 12:10 AM` for the session and `8:00 PM` (or `Mon 8:00 PM`) for a weekly window.
     private static func clock(_ date: Date, timeZone: TimeZone, includeWeekday: Bool) -> String {
         var calendar = Calendar(identifier: .gregorian)
         calendar.locale = Locale(identifier: "en_US_POSIX")
