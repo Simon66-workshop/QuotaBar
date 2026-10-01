@@ -97,7 +97,7 @@ let groups = Snapshot.barGroups(lanes: [
     ),
 ])
 let title = Snapshot.title(from: groups)
-check(title == "G 21 · C 40 · AC19 AT82 AF94 · D 70", "bar title \(title)")
+check(title == "G 21 · C 40 · AC 19  AT 82  AF 94 · D 70", "bar title \(title)")
 check(groups.count == 4, "groups \(groups.count)")
 check(groups[2].map(\.tone) == [.ok, .ok, .warn], "bar tones \(groups[2].map(\.tone))")
 check(!title.contains("Chat"), "grok details stayed off the bar")
@@ -112,7 +112,7 @@ let noFable = parse("""
 """)
 check(noFable?.details.map(\.mark) == ["AC", "AT"], "missing fable marks \(noFable?.details.map(\.mark) ?? [])")
 check(noFable?.details.contains { $0.mark == "AF" } == false, "AF hidden when seven_day_fable is null")
-check(Snapshot.title(from: Snapshot.barGroups(lanes: [noFable].compactMap { $0 }, disks: [])) == "AC19 AT82", "bar without AF")
+check(Snapshot.title(from: Snapshot.barGroups(lanes: [noFable].compactMap { $0 }, disks: [])) == "AC 19  AT 82", "bar without AF")
 
 let absentKey = parse("""
 {
@@ -150,7 +150,7 @@ let opusNotFable = parse("""
 """)
 check(opusNotFable?.details.map(\.mark) == ["AC", "AT", nil, nil], "opus and sonnet are not AF \(opusNotFable?.details.map(\.mark) ?? [])")
 check(opusNotFable?.details.map(\.label) == ["Current session", "This week", "Sonnet this week", "Opus this week"], "named model order")
-check(Snapshot.title(from: Snapshot.barGroups(lanes: [opusNotFable].compactMap { $0 }, disks: [])) == "AC19 AT82", "opus stays off the bar")
+check(Snapshot.title(from: Snapshot.barGroups(lanes: [opusNotFable].compactMap { $0 }, disks: [])) == "AC 19  AT 82", "opus stays off the bar")
 
 let limits = parse("""
 {
@@ -256,7 +256,7 @@ let fableTwice = parse("""
 }
 """)
 check(fableTwice?.details.filter { $0.mark == "AF" }.count == 1, "differently named Fable sources collapse to one AF \(fableTwice?.details.map(\.label) ?? [])")
-check(Snapshot.title(from: Snapshot.barGroups(lanes: [fableTwice].compactMap { $0 }, disks: [])) == "AC19 AT82 AF94", "bar has a single AF")
+check(Snapshot.title(from: Snapshot.barGroups(lanes: [fableTwice].compactMap { $0 }, disks: [])) == "AC 19  AT 82  AF 94", "bar has a single AF")
 
 if failures == 0 {
     print("ok \(checks) checks")

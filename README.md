@@ -1,4 +1,4 @@
-# QuotaBar 1.8.19
+# QuotaBar 1.8.20
 
 Mac menu bar extra for live Grok / Cursor / Grok Bot / ChatGPT / Claude usage, plus local and external disks.
 
@@ -25,7 +25,7 @@ QuotaBar appears on the right of the menu bar. Unconnected services stay off the
 - **Left-click** the bar → glass panel (details, connect, hide disks)
 - **Right-click** the bar → short native menu (refresh / copy / alerts / quit)
 
-The panel header should say **v1.8.19**. If it still says an older version, quit QuotaBar and run `Start QuotaBar.command` again.
+The panel header should say **v1.8.20**. If it still says an older version, quit QuotaBar and run `Start QuotaBar.command` again.
 
 Later launches: just double-click `Start QuotaBar.command` again.
 
@@ -34,7 +34,7 @@ Later launches: just double-click `Start QuotaBar.command` again.
 - Grok: `~/.grok/auth.json` + in-app device login (writes the file itself)
 - Cursor + Grok Bot: Cursor local session (`state.vscdb`)
 - ChatGPT: `~/.codex/auth.json` after `codex login` (refreshes the token itself)
-- Claude: Claude Desktop first. The signed-in Claude.app session lives in `~/Library/Application Support/Claude/` (`Network/Cookies` or `Cookies`, plus `config.json` when it has an oauth token cache). The cookie key is the login-keychain item **Claude Safe Storage** (read with `/usr/bin/security`, never written to a log). QuotaBar calls the same `claude.ai` usage endpoint Settings → Usage uses and shows Current session (AC), This week (AT), and Fable this week (AF) when that window is in the payload. The menu bar prints them as `AC19 AT82 AF94`. A missing window, including Fable on non-Max plans, is left out. There is no plain usage-percent file to read. Claude Code oauth (`Claude Code-credentials`, `~/.claude/.credentials.json`) is only a fallback when that login already exists. A terminal `claude` login is not required.
+- Claude: Claude Desktop first. The signed-in Claude.app session lives in `~/Library/Application Support/Claude/` (`Network/Cookies` or `Cookies`, plus `config.json` when it has an oauth token cache). The cookie key is the login-keychain item **Claude Safe Storage** (read with `/usr/bin/security`, never written to a log). QuotaBar calls the same `claude.ai` usage endpoint Settings → Usage uses and shows Current session (AC), This week (AT), and Fable this week (AF) when that window is in the payload. The menu bar prints them as `AC 19  AT 82  AF 94`. A missing window, including Fable on non-Max plans, is left out. There is no plain usage-percent file to read. Claude Code oauth (`Claude Code-credentials`, `~/.claude/.credentials.json`) is only a fallback when that login already exists. A terminal `claude` login is not required.
 - Disks: mounted local + external volumes (auto add/remove), capacity, read/write rate, status
 
 If Cursor shows `—`, open Cursor once, then start QuotaBar again.
@@ -46,6 +46,11 @@ If Claude stays under Connect, open Claude Desktop while signed in, then click R
 Plug in a USB / Thunderbolt disk and it appears in the panel; eject it and it disappears. Hide Time Machine or VM disks from the panel — they stay off the bar until you Show them again.
 
 The bar only turns orange / red on a token that is actually high (85%+ services, 90%+ disks). A normal 60–80% day stays neutral.
+
+## 1.8.20
+
+- Menu bar: Claude marks get a little room, `AC 19  AT 82  AF 94` instead of `AC19 AT82 AF94`.
+- `Start QuotaBar.command` now builds for macOS 14 (`-target arm64-apple-macos14.0`), so a newer toolchain cannot stamp a higher minimum macOS than the Mac it runs on.
 
 ## 1.8.19
 

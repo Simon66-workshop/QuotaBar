@@ -743,7 +743,7 @@ enum UsageClient {
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        req.setValue("QuotaBar/1.8.19", forHTTPHeaderField: "User-Agent")
+        req.setValue("QuotaBar/1.8.20", forHTTPHeaderField: "User-Agent")
         let (data, res) = try await URLSession.shared.data(for: req)
         let code = (res as? HTTPURLResponse)?.statusCode ?? 0
         if !(200 ..< 300).contains(code) { throw AuthError.http(code) }

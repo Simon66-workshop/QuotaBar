@@ -246,14 +246,14 @@ struct Snapshot {
 
     /// One group per provider or disk, joined later with ` · `.
     /// A Claude lane that has AC / AT / AF marks is one group of compact tokens
-    /// (`AC19 AT82 AF94`). Every other lane stays `G 21`.
+    /// (`AC 19  AT 82  AF 94`). Every other lane stays `G 21`.
     static func barGroups(lanes: [Lane], disks: [DiskVolume]) -> [[BarToken]] {
         var groups: [[BarToken]] = []
         for lane in lanes {
             let marked = lane.details.filter { $0.mark != nil }
             if !marked.isEmpty {
                 groups.append(marked.map { detail in
-                    BarToken(text: "\(detail.mark ?? "")\(detail.shownPct)", tone: detail.tone)
+                    BarToken(text: "\(detail.mark ?? "") \(detail.shownPct)", tone: detail.tone)
                 })
                 continue
             }
@@ -271,7 +271,7 @@ struct Snapshot {
 
     static func title(from groups: [[BarToken]]) -> String {
         let parts = groups.map { group in
-            group.map(\.text).joined(separator: " ")
+            group.map(\.text).joined(separator: "  ")
         }.filter { !$0.isEmpty }
         return parts.isEmpty ? "QuotaBar" : parts.joined(separator: " · ")
     }
