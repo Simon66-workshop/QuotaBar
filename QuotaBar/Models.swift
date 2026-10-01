@@ -35,7 +35,7 @@ enum LaneKey: String, CaseIterable, Identifiable {
     }
 }
 
-enum Tone: String {
+enum Tone: String, Equatable {
     case ok, warn, crit, empty, error
 }
 
@@ -43,6 +43,23 @@ struct LaneDetail: Identifiable {
     var id: String { label }
     var label: String
     var usedPct: Double
+    /// Local reset phrase, e.g. `resets Thu 12:10 AM`. Omitted when the payload has no timestamp.
+    var reset: String? = nil
+    /// Menu-bar token. Claude uses AC / AT / AF. Nil stays off the bar.
+    var mark: String? = nil
+    /// Window column (`5h`, `week`) for a marked figure.
+    var window: String? = nil
+
+    /// Same 85 / 95 bands as `Lane.used`.
+    var shownPct: Int {
+        Int(min(100, max(0, usedPct.rounded())))
+    }
+
+    var tone: Tone {
+        if shownPct >= 95 { return .crit }
+        if shownPct >= 85 { return .warn }
+        return .ok
+    }
 }
 
 struct Lane: Identifiable {
@@ -210,22 +227,52 @@ struct Snapshot {
         assemble([], fetchedAt: .distantPast)
     }
 
+    struct BarToken: Equatable {
+        var text: String
+        var tone: Tone
+    }
+
     var menuTitle: String {
-        let parts = barLanes.map { lane -> String in
-            if let n = lane.usedPct { return "\(lane.key.letter) \(Int(n))" }
-            return "\(lane.key.letter) —"
-        }
-        return parts.isEmpty ? "QuotaBar" : parts.joined(separator: " · ")
+        Self.title(from: Self.barGroups(lanes: barLanes, disks: []))
+    }
+
+    func barGroups(disks: [DiskVolume]) -> [[BarToken]] {
+        Self.barGroups(lanes: barLanes, disks: disks)
     }
 
     func barTitle(disks: [DiskVolume]) -> String {
-        var parts = barLanes.map { lane -> String in
-            if let n = lane.usedPct { return "\(lane.key.letter) \(Int(n))" }
-            return "\(lane.key.letter) —"
+        Self.title(from: barGroups(disks: disks))
+    }
+
+    /// One group per provider or disk, joined later with ` · `.
+    /// A Claude lane that has AC / AT / AF marks is one group of compact tokens
+    /// (`AC19 AT82 AF94`). Every other lane stays `G 21`.
+    static func barGroups(lanes: [Lane], disks: [DiskVolume]) -> [[BarToken]] {
+        var groups: [[BarToken]] = []
+        for lane in lanes {
+            let marked = lane.details.filter { $0.mark != nil }
+            if !marked.isEmpty {
+                groups.append(marked.map { detail in
+                    BarToken(text: "\(detail.mark ?? "")\(detail.shownPct)", tone: detail.tone)
+                })
+                continue
+            }
+            if let n = lane.usedPct {
+                groups.append([BarToken(text: "\(lane.key.letter) \(Int(n))", tone: lane.tone)])
+            } else {
+                groups.append([BarToken(text: "\(lane.key.letter) —", tone: lane.tone)])
+            }
         }
-        for bit in Self.barDiskBits(disks) {
-            parts.append("\(bit.letter) \(bit.pct)")
+        for bit in barDiskBits(disks) {
+            groups.append([BarToken(text: "\(bit.letter) \(bit.pct)", tone: bit.tone)])
         }
+        return groups
+    }
+
+    static func title(from groups: [[BarToken]]) -> String {
+        let parts = groups.map { group in
+            group.map(\.text).joined(separator: " ")
+        }.filter { !$0.isEmpty }
         return parts.isEmpty ? "QuotaBar" : parts.joined(separator: " · ")
     }
 

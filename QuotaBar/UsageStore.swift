@@ -183,8 +183,21 @@ final class UsageStore: ObservableObject {
     }
 
     func copySummary() {
-        var lines = snap.lanes.map { lane in
-            "\(lane.key.title): \(lane.label) — \(lane.sub)"
+        var lines: [String] = []
+        for lane in snap.lanes {
+            let marked = lane.details.filter { $0.mark != nil }
+            if marked.isEmpty {
+                lines.append("\(lane.key.title): \(lane.label) — \(lane.sub)")
+                continue
+            }
+            for detail in lane.details {
+                let head = detail.mark.map { "\(lane.key.title) \($0)" } ?? lane.key.title
+                var line = "\(head) \(detail.label): \(detail.shownPct)%"
+                if let reset = detail.reset, !reset.isEmpty {
+                    line += " — \(reset)"
+                }
+                lines.append(line)
+            }
         }
         for disk in disks {
             lines.append("\(disk.name): \(Int(disk.usedPct.rounded()))% — \(disk.sizeLabel) · \(disk.statusLabel) · \(disk.rateLabel)")

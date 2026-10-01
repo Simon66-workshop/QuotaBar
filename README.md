@@ -1,4 +1,4 @@
-# QuotaBar 1.8.18
+# QuotaBar 1.8.19
 
 Mac menu bar extra for live Grok / Cursor / Grok Bot / ChatGPT / Claude usage, plus local and external disks.
 
@@ -19,13 +19,13 @@ QuotaBar appears on the right of the menu bar. Unconnected services stay off the
 - **C** Cursor Ultra monthly
 - **B** Grok Bot (Sand) weekly
 - **O** ChatGPT / Codex (5-hour + weekly)
-- **A** Claude (Desktop session + week; Claude Code oauth if that login exists)
+- **AC / AT / AF** Claude current session, this week, and Fable this week (AF hidden when that limit is absent)
 - **D** fullest visible disk used %
 
 - **Left-click** the bar → glass panel (details, connect, hide disks)
 - **Right-click** the bar → short native menu (refresh / copy / alerts / quit)
 
-The panel header should say **v1.8.18**. If it still says an older version, quit QuotaBar and run `Start QuotaBar.command` again.
+The panel header should say **v1.8.19**. If it still says an older version, quit QuotaBar and run `Start QuotaBar.command` again.
 
 Later launches: just double-click `Start QuotaBar.command` again.
 
@@ -34,18 +34,22 @@ Later launches: just double-click `Start QuotaBar.command` again.
 - Grok: `~/.grok/auth.json` + in-app device login (writes the file itself)
 - Cursor + Grok Bot: Cursor local session (`state.vscdb`)
 - ChatGPT: `~/.codex/auth.json` after `codex login` (refreshes the token itself)
-- Claude: Claude Desktop first. The signed-in Claude.app session lives in `~/Library/Application Support/Claude/` (`Network/Cookies` or `Cookies`, plus `config.json` when it has an oauth token cache). The cookie key is the login-keychain item **Claude Safe Storage** (read with `/usr/bin/security`, never written to a log). QuotaBar calls the same `claude.ai` usage endpoint Settings → Usage uses and shows Current session, This week, and a named bucket such as Fable when that window is in the payload. There is no plain usage-percent file to read. Claude Code oauth (`Claude Code-credentials`, `~/.claude/.credentials.json`) is only a fallback when that login already exists. A terminal `claude` login is not required.
+- Claude: Claude Desktop first. The signed-in Claude.app session lives in `~/Library/Application Support/Claude/` (`Network/Cookies` or `Cookies`, plus `config.json` when it has an oauth token cache). The cookie key is the login-keychain item **Claude Safe Storage** (read with `/usr/bin/security`, never written to a log). QuotaBar calls the same `claude.ai` usage endpoint Settings → Usage uses and shows Current session (AC), This week (AT), and Fable this week (AF) when that window is in the payload. The menu bar prints them as `AC19 AT82 AF94`. A missing window, including Fable on non-Max plans, is left out. There is no plain usage-percent file to read. Claude Code oauth (`Claude Code-credentials`, `~/.claude/.credentials.json`) is only a fallback when that login already exists. A terminal `claude` login is not required.
 - Disks: mounted local + external volumes (auto add/remove), capacity, read/write rate, status
 
 If Cursor shows `—`, open Cursor once, then start QuotaBar again.
 
 If ChatGPT shows `—`, run `codex login` once in Terminal, then click Refresh.
 
-If Claude stays under Connect, open Claude Desktop while signed in, then click Refresh. The first read can ask for the Keychain item Claude Safe Storage — click **Allow**, not Always Allow (Always Allow trusts `/usr/bin/security` for every app). QuotaBar asks once per launch. After Deny or a timed-out prompt it does not ask again until you click Refresh. Pasting Claude Code credentials is optional. A connected account leaves Connect and shows in Usage, including the **A** menubar letter.
+If Claude stays under Connect, open Claude Desktop while signed in, then click Refresh. The first read can ask for the Keychain item Claude Safe Storage — click **Allow**, not Always Allow (Always Allow trusts `/usr/bin/security` for every app). QuotaBar asks once per launch. After Deny or a timed-out prompt it does not ask again until you click Refresh. Pasting Claude Code credentials is optional. A connected account leaves Connect and shows in Usage, including **AC**, **AT**, and **AF** on the menu bar.
 
 Plug in a USB / Thunderbolt disk and it appears in the panel; eject it and it disappears. Hide Time Machine or VM disks from the panel — they stay off the bar until you Show them again.
 
 The bar only turns orange / red on a token that is actually high (85%+ services, 90%+ disks). A normal 60–80% day stays neutral.
+
+## 1.8.19
+
+The menu bar shows Claude as three figures: AC current session, AT this week, and AF Fable this week. Each figure keeps its own 85/95 colour. AF is omitted when that weekly limit is not in the payload. The Usage panel lists each figure with its percent and reset time.
 
 ## 1.8.18
 
