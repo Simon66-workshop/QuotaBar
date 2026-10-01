@@ -743,7 +743,7 @@ enum UsageClient {
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        req.setValue("QuotaBar/1.8", forHTTPHeaderField: "User-Agent")
+        req.setValue("QuotaBar/1.8.19", forHTTPHeaderField: "User-Agent")
         let (data, res) = try await URLSession.shared.data(for: req)
         let code = (res as? HTTPURLResponse)?.statusCode ?? 0
         if !(200 ..< 300).contains(code) { throw AuthError.http(code) }
@@ -791,8 +791,13 @@ enum UsageClient {
     private static func normalizeClaudeUsage(_ obj: [String: Any]) -> [String: Any] {
         if jsonValue(obj["five_hour"]) != nil || jsonValue(obj["seven_day"]) != nil
             || jsonValue(obj["fiveHour"]) != nil || jsonValue(obj["sevenDay"]) != nil
+            || jsonValue(obj["five_hour_utilization"]) != nil
+            || jsonValue(obj["seven_day_utilization"]) != nil
             || jsonValue(obj["seven_day_fable"]) != nil || jsonValue(obj["sevenDayFable"]) != nil
+            || jsonValue(obj["seven_day_sonnet"]) != nil || jsonValue(obj["sevenDaySonnet"]) != nil
+            || jsonValue(obj["seven_day_opus"]) != nil || jsonValue(obj["sevenDayOpus"]) != nil
             || obj["limits"] is [Any]
+            || obj["models"] is [Any]
         {
             return obj
         }
@@ -1145,205 +1150,12 @@ enum UsageClient {
         return "Weekly"
     }
 
-    private enum ClaudeWindowRole {
-        case session
-        case week
-        case model
-    }
-
-    private struct ClaudeWindow {
-        var role: ClaudeWindowRole
-        var label: String
-        var usedPct: Double
-        var resetsAt: Any?
-    }
-
-    private enum ClaudeLimitKind {
-        case session
-        case week
-        case model(String)
-        case ignore
-    }
-
-    /// Session + shared week come from `five_hour` / `seven_day`. Desktop Max
-    /// also sends `limits[]` (`session`, `weekly_all`, `weekly_scoped` Fable).
-    /// Primary `usedPct` is the tighter of session and week (higher used %).
-    /// A tie keeps the session window. Fable stays a detail row — it is a
-    /// separate pool, and a missing window is omitted rather than invented.
     private static func parseClaude(_ json: [String: Any], auth: ClaudeAuth) -> Lane? {
-        var windows: [ClaudeWindow] = []
-
-        let fiveRaw = jsonValue(json["five_hour"]) ?? jsonValue(json["fiveHour"])
-        if let five = windowDict(fiveRaw), let used = rawUtilization(five) {
-            appendClaude(&windows, role: .session, label: "Current session", used: used, resets: five["resets_at"] ?? five["reset_at"])
-        } else if let used = rawUtilization(fiveRaw ?? jsonValue(json["five_hour_utilization"])) {
-            appendClaude(&windows, role: .session, label: "Current session", used: used, resets: nil)
-        }
-
-        let sevenRaw = jsonValue(json["seven_day"]) ?? jsonValue(json["sevenDay"])
-        if let seven = windowDict(sevenRaw), let used = rawUtilization(seven) {
-            appendClaude(&windows, role: .week, label: "This week", used: used, resets: seven["resets_at"] ?? seven["reset_at"])
-        } else if let used = rawUtilization(sevenRaw ?? jsonValue(json["seven_day_utilization"])) {
-            appendClaude(&windows, role: .week, label: "This week", used: used, resets: nil)
-        }
-
-        appendClaudeNamedModels(json, &windows)
-        if let models = json["models"] as? [[String: Any]] {
-            for item in models {
-                let name = ((item["display_name"] as? String) ?? (item["name"] as? String) ?? "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !name.isEmpty,
-                      let used = rawUtilization(
-                        jsonValue(item["percent"])
-                            ?? jsonValue(item["utilization"])
-                            ?? jsonValue(item["used_percentage"])
-                            ?? jsonValue(item["used_percent"])
-                      )
-                else { continue }
-                appendClaude(&windows, role: .model, label: modelWeekLabel(name), used: used, resets: item["resets_at"] ?? item["reset_at"])
-            }
-        }
-
-        if let limits = json["limits"] as? [[String: Any]] {
-            for entry in limits {
-                guard let used = rawUtilization(jsonValue(entry["percent"]) ?? jsonValue(entry["utilization"]) ?? jsonValue(entry["used_percentage"]) ?? jsonValue(entry["used_percent"]))
-                else { continue }
-                let resets = entry["resets_at"] ?? entry["reset_at"]
-                switch limitKind(entry) {
-                case .session:
-                    appendClaude(&windows, role: .session, label: "Current session", used: used, resets: resets)
-                case .week:
-                    appendClaude(&windows, role: .week, label: "This week", used: used, resets: resets)
-                case .model(let name):
-                    appendClaude(&windows, role: .model, label: modelWeekLabel(name), used: used, resets: resets)
-                case .ignore:
-                    break
-                }
-            }
-        }
-
-        guard let primary = primaryClaudeWindow(windows) else { return nil }
-        windows = windows.enumerated().sorted { lhs, rhs in
-            let left = claudeRank(lhs.element.role)
-            let right = claudeRank(rhs.element.role)
-            if left != right { return left < right }
-            return lhs.offset < rhs.offset
-        }.map(\.element)
-        let details = windows.map { LaneDetail(label: $0.label, usedPct: $0.usedPct) }
-
-        var plan = auth.subscription
-        if plan.isEmpty { plan = (json["subscription_type"] as? String) ?? (json["plan"] as? String) ?? "Claude Code" }
-        if !auth.tier.isEmpty, !plan.lowercased().contains(auth.tier.lowercased()) {
-            plan = "\(plan) \(auth.tier)".trimmingCharacters(in: .whitespaces)
-        }
-        plan = plan.replacingOccurrences(of: "_", with: " ")
-
-        var bits: [String] = [plan]
-        if let r = resetLabel(primary.resetsAt) { bits.append(r) }
-        return .used(
-            .claude,
-            percent: primary.usedPct,
-            sub: bits.joined(separator: "  ·  "),
-            details: details,
-            window: claudeWindowShort(primary.role)
-        )
-    }
-
-    private static func appendClaudeNamedModels(_ json: [String: Any], _ windows: inout [ClaudeWindow]) {
-        let named = [
-            ("seven_day_fable", "Fable this week"),
-            ("sevenDayFable", "Fable this week"),
-            ("seven_day_sonnet", "Sonnet this week"),
-            ("sevenDaySonnet", "Sonnet this week"),
-            ("seven_day_opus", "Opus this week"),
-            ("sevenDayOpus", "Opus this week"),
-        ]
-        for (key, label) in named {
-            guard let used = rawUtilization(jsonValue(json[key])) else { continue }
-            let bag = json[key] as? [String: Any]
-            appendClaude(&windows, role: .model, label: label, used: used, resets: bag?["resets_at"] ?? bag?["reset_at"])
-        }
-    }
-
-    private static func appendClaude(
-        _ windows: inout [ClaudeWindow],
-        role: ClaudeWindowRole,
-        label: String,
-        used: Double,
-        resets: Any?
-    ) {
-        switch role {
-        case .session, .week:
-            if windows.contains(where: { $0.role == role }) { return }
-        case .model:
-            if windows.contains(where: { $0.label == label }) { return }
-        }
-        windows.append(ClaudeWindow(role: role, label: label, usedPct: used, resetsAt: jsonValue(resets)))
-    }
-
-    private static func limitKind(_ entry: [String: Any]) -> ClaudeLimitKind {
-        let kind = (entry["kind"] as? String) ?? ""
-        switch kind {
-        case "session":
-            return .session
-        case "weekly", "weekly_all", "seven_day":
-            return .week
-        case "weekly_scoped":
-            return .model(modelName(entry))
-        default:
-            return .ignore
-        }
-    }
-
-    private static func modelName(_ entry: [String: Any]) -> String {
-        let scope = entry["scope"] as? [String: Any]
-        let model = scope?["model"] as? [String: Any]
-        return (model?["display_name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    }
-
-    private static func modelWeekLabel(_ name: String) -> String {
-        if name.isEmpty { return "Model this week" }
-        return "\(name) this week"
-    }
-
-    /// Higher used % is the tighter account window. Equal session and week
-    /// keep the session, which is the shorter window.
-    private static func primaryClaudeWindow(_ windows: [ClaudeWindow]) -> ClaudeWindow? {
-        let account = windows.filter { $0.role == .session || $0.role == .week }
-        let pool = account.isEmpty ? windows : account
-        return pool.max { lhs, rhs in
-            if lhs.usedPct != rhs.usedPct { return lhs.usedPct < rhs.usedPct }
-            return lhs.role != .session && rhs.role == .session
-        }
-    }
-
-    private static func claudeRank(_ role: ClaudeWindowRole) -> Int {
-        switch role {
-        case .session: 0
-        case .week: 1
-        case .model: 2
-        }
-    }
-
-    private static func claudeWindowShort(_ role: ClaudeWindowRole) -> String {
-        switch role {
-        case .session: "5h"
-        case .week, .model: "week"
-        }
+        ClaudeUsage.parse(json, auth: auth)
     }
 
     private static func jsonValue(_ value: Any?) -> Any? {
         if value == nil || value is NSNull { return nil }
         return value
-    }
-
-    /// Oauth usage is 0–100. Never rescale: a fresh week (session 0, week 1)
-    /// is indistinguishable from a 0–1 fraction and would read as 100%.
-    private static func rawUtilization(_ value: Any?) -> Double? {
-        let raw = jsonValue(value)
-        if let dict = raw as? [String: Any] {
-            return num(dict["utilization"]) ?? num(dict["percent"]) ?? num(dict["used_percentage"]) ?? num(dict["used_percent"]) ?? num(dict["usedPercent"])
-        }
-        return num(raw)
     }
 }

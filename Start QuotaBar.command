@@ -40,9 +40,9 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleVersion</key>
-  <string>31</string>
+  <string>32</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.8.18</string>
+  <string>1.8.19</string>
   <key>LSUIElement</key>
   <true/>
   <key>LSMinimumSystemVersion</key>
@@ -59,12 +59,13 @@ echo -n 'APPL????' > "$APP/Contents/PkgInfo"
 SHA="$(cat "$SRC"/*.swift | shasum -a 256 | awk '{print $1}')"
 OLD="$(cat "$STAMP" 2>/dev/null || true)"
 if [[ ! -x "$BIN" || "$SHA" != "$OLD" ]]; then
-  osascript -e 'display notification "正在编译 QuotaBar 1.8.18…" with title "QuotaBar"'
+  osascript -e 'display notification "正在编译 QuotaBar 1.8.19…" with title "QuotaBar"'
   pkill -x QuotaBar 2>/dev/null || true
   sleep 0.3
   swiftc -parse-as-library -O \
     "$SRC/QuotaBarApp.swift" \
     "$SRC/Models.swift" \
+    "$SRC/ClaudeUsage.swift" \
     "$SRC/TokenReader.swift" \
     "$SRC/ClaudeDesktop.swift" \
     "$SRC/UsageClient.swift" \
@@ -92,7 +93,7 @@ pkill -x QuotaBar 2>/dev/null || true
 sleep 0.2
 open "$APP"
 
-osascript -e 'display notification "已出现在屏幕右上角 · 系统盘 D · 外接盘各一只 E · 插拔即更新" with title "QuotaBar 1.8.18"' || true
+osascript -e 'display notification "已出现在屏幕右上角 · 系统盘 D · 外接盘各一只 E · 插拔即更新" with title "QuotaBar 1.8.19"' || true
 
 tty -s && osascript <<'EOF' || true
 tell application "Terminal"

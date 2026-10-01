@@ -41,7 +41,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.8.18")
+                Text("v1.8.19")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -228,7 +228,7 @@ private struct AccountRow: View {
 
 private enum Col {
     static let gap: CGFloat = 5
-    static let mark: CGFloat = 14
+    static let mark: CGFloat = 22
     static let used: CGFloat = 34
     static let bar: CGFloat = 36
     static let meta: CGFloat = 48
@@ -253,46 +253,132 @@ private struct UsageTable: View {
             .font(.system(size: 9, weight: .semibold))
             .foregroundStyle(.tertiary)
             ForEach(Array(lanes.enumerated()), id: \.element.id) { index, lane in
-                GridRow {
-                    Text(lane.key.letter)
-                        .font(.system(size: 11, weight: .bold).monospaced())
-                        .foregroundStyle(lane.tone == .ok ? Color.secondary : toneColor(lane.tone))
-                        .frame(width: Col.mark, alignment: .center)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(lane.key.title)
-                            .font(.system(size: 12, weight: .medium))
+                let figures = lane.details.filter { $0.mark != nil }
+                if figures.isEmpty {
+                    GridRow {
+                        Text(lane.key.letter)
+                            .font(.system(size: 11, weight: .bold).monospaced())
+                            .foregroundStyle(lane.tone == .ok ? Color.secondary : toneColor(lane.tone))
+                            .frame(width: Col.mark, alignment: .center)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(lane.key.title)
+                                .font(.system(size: 12, weight: .medium))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            if lane.tone == .error || lane.tone == .empty {
+                                Text(lane.sub)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.tertiary)
+                                    .lineLimit(2)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .frame(minWidth: 148, maxWidth: .infinity, alignment: .leading)
+                        Text(usedText(lane))
+                            .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(lane.tone == .ok ? Color.primary : toneColor(lane.tone))
+                            .frame(width: Col.used, alignment: .trailing)
+                        Meter(value: lane.usedPct ?? 0, tone: lane.tone)
+                        Text(leftText(lane))
+                            .font(.system(size: 11).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: Col.meta, alignment: .trailing)
+                        Text(lane.window)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.tertiary)
+                            .frame(width: Col.extra, alignment: .trailing)
                             .lineLimit(1)
-                            .truncationMode(.tail)
-                        if lane.tone == .error || lane.tone == .empty {
-                            Text(lane.sub)
-                                .font(.system(size: 10))
-                                .foregroundStyle(.tertiary)
-                                .lineLimit(2)
-                                .fixedSize(horizontal: false, vertical: true)
+                        Color.clear.frame(width: Col.action)
+                    }
+                    .padding(.vertical, 5)
+                    .padding(.horizontal, 2)
+                    .background(index % 2 == 1 ? Color.white.opacity(0.045) : Color.clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    if (lane.key == .cursor || lane.key == .claude), !lane.details.isEmpty {
+                        ForEach(lane.details) { detail in
+                            GridRow {
+                                Color.clear.frame(width: Col.mark)
+                                Text(detail.label)
+                                    .font(.system(size: 10.5))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Text("\(Int(detail.usedPct.rounded()))%")
+                                    .font(.system(size: 11, weight: .medium).monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: Col.used, alignment: .trailing)
+                                Meter(value: detail.usedPct, tone: .ok)
+                                Color.clear.frame(width: Col.meta)
+                                Color.clear.frame(width: Col.extra)
+                                Color.clear.frame(width: Col.action)
+                            }
+                            .padding(.vertical, 2)
                         }
                     }
-                    .frame(minWidth: 148, maxWidth: .infinity, alignment: .leading)
-                    Text(usedText(lane))
-                        .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(lane.tone == .ok ? Color.primary : toneColor(lane.tone))
-                        .frame(width: Col.used, alignment: .trailing)
-                    Meter(value: lane.usedPct ?? 0, tone: lane.tone)
-                    Text(leftText(lane))
-                        .font(.system(size: 11).monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(width: Col.meta, alignment: .trailing)
-                    Text(lane.window)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.tertiary)
-                        .frame(width: Col.extra, alignment: .trailing)
-                        .lineLimit(1)
-                    Color.clear.frame(width: Col.action)
-                }
-                .padding(.vertical, 5)
-                .padding(.horizontal, 2)
-                .background(index % 2 == 1 ? Color.white.opacity(0.045) : Color.clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                if (lane.key == .cursor || lane.key == .claude), !lane.details.isEmpty {
-                    ForEach(lane.details) { detail in
+                } else {
+                    GridRow {
+                        Text(lane.key.letter)
+                            .font(.system(size: 11, weight: .bold).monospaced())
+                            .foregroundStyle(Color.secondary)
+                            .frame(width: Col.mark, alignment: .center)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(lane.key.title)
+                                .font(.system(size: 12, weight: .medium))
+                                .lineLimit(1)
+                            if !lane.sub.isEmpty {
+                                Text(lane.sub)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.tertiary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .frame(minWidth: 148, maxWidth: .infinity, alignment: .leading)
+                        Color.clear.frame(width: Col.used)
+                        Color.clear.frame(width: Col.bar)
+                        Color.clear.frame(width: Col.meta)
+                        Color.clear.frame(width: Col.extra)
+                        Color.clear.frame(width: Col.action)
+                    }
+                    .padding(.vertical, 5)
+                    .padding(.horizontal, 2)
+                    .background(index % 2 == 1 ? Color.white.opacity(0.045) : Color.clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    ForEach(figures) { detail in
+                        GridRow {
+                            Text(detail.mark ?? "")
+                                .font(.system(size: 10, weight: .bold).monospaced())
+                                .foregroundStyle(detail.tone == .ok ? Color.secondary : toneColor(detail.tone))
+                                .frame(width: Col.mark, alignment: .center)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(detail.label)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .lineLimit(1)
+                                if let reset = detail.reset, !reset.isEmpty {
+                                    Text(reset)
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.tertiary)
+                                        .lineLimit(1)
+                                }
+                            }
+                            .frame(minWidth: 148, maxWidth: .infinity, alignment: .leading)
+                            Text("\(detail.shownPct)%")
+                                .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                                .foregroundStyle(detail.tone == .ok ? Color.primary : toneColor(detail.tone))
+                                .frame(width: Col.used, alignment: .trailing)
+                            Meter(value: detail.usedPct, tone: detail.tone)
+                            Text("\(100 - detail.shownPct)%")
+                                .font(.system(size: 11).monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .frame(width: Col.meta, alignment: .trailing)
+                            Text(detail.window ?? "")
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(.tertiary)
+                                .frame(width: Col.extra, alignment: .trailing)
+                                .lineLimit(1)
+                            Color.clear.frame(width: Col.action)
+                        }
+                        .padding(.vertical, 3)
+                        .padding(.horizontal, 2)
+                    }
+                    ForEach(lane.details.filter { $0.mark == nil }) { detail in
                         GridRow {
                             Color.clear.frame(width: Col.mark)
                             Text(detail.label)
@@ -300,7 +386,7 @@ private struct UsageTable: View {
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            Text("\(Int(detail.usedPct.rounded()))%")
+                            Text("\(detail.shownPct)%")
                                 .font(.system(size: 11, weight: .medium).monospacedDigit())
                                 .foregroundStyle(.secondary)
                                 .frame(width: Col.used, alignment: .trailing)

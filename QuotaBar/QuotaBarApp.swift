@@ -300,45 +300,54 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
 
     private func applyTitle(_ snap: Snapshot, disks: [DiskVolume]) {
         guard let button = statusItem?.button else { return }
-        let raw = snap.barTitle(disks: disks)
+        let groups = snap.barGroups(disks: disks)
+        let raw = Snapshot.title(from: groups)
         if raw != lastTitle {
             lastTitle = raw
             rebindBar()
         }
-        let attr = NSMutableAttributedString(string: raw)
         let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
-        attr.addAttribute(.font, value: font, range: NSRange(location: 0, length: attr.length))
-        attr.addAttribute(.foregroundColor, value: NSColor.labelColor, range: NSRange(location: 0, length: attr.length))
-
-        func color(for tone: Tone) -> NSColor? {
+        let attr = NSMutableAttributedString()
+        func color(for tone: Tone) -> NSColor {
             switch tone {
             case .warn: return .systemOrange
             case .crit, .error: return .systemRed
-            default: return nil
+            default: return .labelColor
             }
         }
-
-        var searchFrom = raw.startIndex
-        for (lane, letter) in snap.barLanes.map({ ($0, $0.key.letter) }) {
-            guard let tint = color(for: lane.tone) else { continue }
-            let needle = "\(letter) \(lane.label == "—" ? "—" : "\(Int(lane.usedPct ?? 0))")"
-            if let range = raw.range(of: needle, range: searchFrom..<raw.endIndex) {
-                attr.addAttribute(.foregroundColor, value: tint, range: NSRange(range, in: raw))
-                searchFrom = range.upperBound
-            }
+        func append(_ text: String, _ tone: Tone) {
+            attr.append(NSAttributedString(string: text, attributes: [
+                .font: font,
+                .foregroundColor: color(for: tone),
+            ]))
         }
-        searchFrom = raw.startIndex
-        for bit in Snapshot.barDiskBits(disks) {
-            let needle = "\(bit.letter) \(bit.pct)"
-            if let range = raw.range(of: needle, range: searchFrom..<raw.endIndex) {
-                if let tint = color(for: bit.tone) {
-                    attr.addAttribute(.foregroundColor, value: tint, range: NSRange(range, in: raw))
+        if groups.isEmpty {
+            append("QuotaBar", .ok)
+        } else {
+            for (groupIndex, group) in groups.enumerated() {
+                if groupIndex > 0 { append(" · ", .ok) }
+                for (tokenIndex, token) in group.enumerated() {
+                    if tokenIndex > 0 { append(" ", .ok) }
+                    append(token.text, token.tone)
                 }
-                searchFrom = range.upperBound
             }
         }
         button.attributedTitle = attr
-        var tip = snap.barLanes.map { "\($0.key.title) \($0.label) · \($0.sub)" }
+        var tip: [String] = []
+        for lane in snap.barLanes {
+            let marked = lane.details.filter { $0.mark != nil }
+            if marked.isEmpty {
+                tip.append("\(lane.key.title) \(lane.label) · \(lane.sub)")
+            } else {
+                for detail in marked {
+                    var line = "\(detail.mark ?? "") \(detail.label) \(detail.shownPct)%"
+                    if let reset = detail.reset, !reset.isEmpty {
+                        line += " · \(reset)"
+                    }
+                    tip.append(line)
+                }
+            }
+        }
         tip.append(contentsOf: disks.map { "\($0.name) \(Int($0.usedPct.rounded()))% · \($0.sizeLabel) · \($0.rateLabel)" })
         button.toolTip = tip.isEmpty ? "QuotaBar" : tip.joined(separator: "\n")
     }
