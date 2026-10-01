@@ -327,7 +327,7 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
             for (groupIndex, group) in groups.enumerated() {
                 if groupIndex > 0 { append(" · ", .ok) }
                 for (tokenIndex, token) in group.enumerated() {
-                    if tokenIndex > 0 { append(" ", .ok) }
+                    if tokenIndex > 0 { append("  ", .ok) }
                     append(token.text, token.tone)
                 }
             }
