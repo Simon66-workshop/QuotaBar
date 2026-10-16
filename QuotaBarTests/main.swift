@@ -77,6 +77,8 @@ let groups = Snapshot.barGroups(lanes: [
         LaneDetail(label: "Cursor Models", usedPct: 12),
         LaneDetail(label: "Other Models", usedPct: 28),
     ]),
+    Lane.used(.bot, percent: 55, sub: "week"),
+    Lane.used(.gpt, percent: 15, sub: "cap"),
     full,
 ], disks: [
     DiskVolume(
@@ -95,15 +97,33 @@ let groups = Snapshot.barGroups(lanes: [
         suggestedIgnore: false,
         ignoreHint: nil
     ),
+    DiskVolume(
+        id: "ext",
+        name: "Backup",
+        path: "/Volumes/Backup",
+        kind: .external,
+        totalBytes: 1000,
+        freeBytes: 600,
+        usedPct: 40,
+        readBps: 0,
+        writeBps: 0,
+        isReadOnly: false,
+        isRoot: false,
+        justChanged: nil,
+        suggestedIgnore: false,
+        ignoreHint: nil
+    ),
 ])
 let title = Snapshot.title(from: groups)
-check(title == "G 21", "bar title \(title)")
-check(groups.count == 1, "groups \(groups.count)")
-check(groups[0].map(\.tone) == [.ok], "bar tones \(groups[0].map(\.tone))")
+check(title == "G 21 · O 15 · AC 19  AT 82  AF 94 · D 70 · E 40", "bar title \(title)")
+check(groups.count == 5, "groups \(groups.count)")
+check(groups[2].map(\.tone) == [.ok, .ok, .warn], "bar tones \(groups[2].map(\.tone))")
 check(!title.contains("Chat"), "grok details stayed off the bar")
 check(!title.contains("C 40"), "cursor stayed off the bar")
-check(!title.contains("AC"), "claude marks stayed off the bar")
-check(!title.contains("D 70"), "disk stayed off the bar")
+check(!title.contains("B 55"), "grok bot stayed off the bar")
+check(LaneKey.cursor.foldedIntoGrok && LaneKey.bot.foldedIntoGrok, "cursor and bot fold into G")
+check(!LaneKey.grok.foldedIntoGrok && !LaneKey.gpt.foldedIntoGrok && !LaneKey.claude.foldedIntoGrok, "other lanes stay separate")
+check(LaneKey.sharedPoolCaption == "Shared Grok + Cursor + Bot pool", "shared pool caption")
 
 let noFable = parse("""
 {
@@ -114,7 +134,7 @@ let noFable = parse("""
 """)
 check(noFable?.details.map(\.mark) == ["AC", "AT"], "missing fable marks \(noFable?.details.map(\.mark) ?? [])")
 check(noFable?.details.contains { $0.mark == "AF" } == false, "AF hidden when seven_day_fable is null")
-check(Snapshot.title(from: Snapshot.barGroups(lanes: [noFable].compactMap { $0 }, disks: [])) == "QuotaBar", "claude session stays off the bar")
+check(Snapshot.title(from: Snapshot.barGroups(lanes: [noFable].compactMap { $0 }, disks: [])) == "AC 19  AT 82", "bar without AF")
 
 let absentKey = parse("""
 {
@@ -152,7 +172,7 @@ let opusNotFable = parse("""
 """)
 check(opusNotFable?.details.map(\.mark) == ["AC", "AT", nil, nil], "opus and sonnet are not AF \(opusNotFable?.details.map(\.mark) ?? [])")
 check(opusNotFable?.details.map(\.label) == ["Current session", "This week", "Sonnet this week", "Opus this week"], "named model order")
-check(Snapshot.title(from: Snapshot.barGroups(lanes: [opusNotFable].compactMap { $0 }, disks: [])) == "QuotaBar", "claude figures stay off the bar")
+check(Snapshot.title(from: Snapshot.barGroups(lanes: [opusNotFable].compactMap { $0 }, disks: [])) == "AC 19  AT 82", "opus stays off the bar")
 
 let limits = parse("""
 {
@@ -205,11 +225,12 @@ let opusOnly = parse("""
 """)
 check(opusOnly?.details.map(\.mark) == [nil], "opus-only has no AF mark")
 check(opusOnly?.details.first?.label == "Opus this week", "opus label")
-check(Snapshot.title(from: Snapshot.barGroups(lanes: [opusOnly].compactMap { $0 }, disks: [])) == "QuotaBar", "opus-only stays off the bar")
+check(Snapshot.title(from: Snapshot.barGroups(lanes: [opusOnly].compactMap { $0 }, disks: [])) == "A 94", "opus-only stays a single A figure")
 
 let broken = Lane.error(.claude, message: "Claude Desktop usage had no session or week window")
-check(Snapshot.title(from: Snapshot.barGroups(lanes: [broken], disks: [])) == "QuotaBar", "claude error stays off the bar")
+check(Snapshot.title(from: Snapshot.barGroups(lanes: [broken], disks: [])) == "A —", "error lane stays A —")
 check(Snapshot.title(from: Snapshot.barGroups(lanes: [Lane.error(.grok, message: "billing HTTP 401")], disks: [])) == "G —", "grok error stays on the bar")
+check(Snapshot.title(from: Snapshot.barGroups(lanes: [Lane.used(.cursor, percent: 40, sub: "month"), Lane.used(.bot, percent: 9, sub: "week")], disks: [])) == "QuotaBar", "cursor and bot alone stay off the bar")
 
 check(parse("{}") == nil, "empty object")
 check(parse("{\"five_hour\": \"nope\", \"seven_day\": [], \"seven_day_fable\": {\"utilization\": null}, \"limits\": {\"kind\": \"session\"}, \"models\": \"fable\"}") == nil, "malformed types")
@@ -259,7 +280,7 @@ let fableTwice = parse("""
 }
 """)
 check(fableTwice?.details.filter { $0.mark == "AF" }.count == 1, "differently named Fable sources collapse to one AF \(fableTwice?.details.map(\.label) ?? [])")
-check(Snapshot.title(from: Snapshot.barGroups(lanes: [fableTwice].compactMap { $0 }, disks: [])) == "QuotaBar", "fable stays off the bar")
+check(Snapshot.title(from: Snapshot.barGroups(lanes: [fableTwice].compactMap { $0 }, disks: [])) == "AC 19  AT 82  AF 94", "bar has a single AF")
 
 if failures == 0 {
     print("ok \(checks) checks")

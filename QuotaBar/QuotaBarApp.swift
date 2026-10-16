@@ -198,14 +198,22 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
     }
 
     private func applyFittedSize(_ host: ClearHosting<AnyView>, under button: NSView) {
-        // Unconstrain so sizeThatFits measures content, not the last frame.
+        // Measure the SwiftUI ideal height. A floor of 200/360 left one short
+        // row floating in a tall glass with blank space above and below.
+        host.sizingOptions = [.intrinsicContentSize]
         host.view.setFrameSize(NSSize(width: Self.panelWidth, height: 1))
+        host.view.invalidateIntrinsicContentSize()
         host.view.layoutSubtreeIfNeeded()
-        var fitted = host.sizeThatFits(in: NSSize(width: Self.panelWidth, height: 900))
-        if !fitted.height.isFinite || fitted.height < 160 {
-            fitted = NSSize(width: Self.panelWidth, height: 360)
+        let proposed = host.sizeThatFits(in: NSSize(width: Self.panelWidth, height: .greatestFiniteMagnitude))
+        let intrinsic = host.view.intrinsicContentSize.height
+        var height = proposed.height
+        if !height.isFinite || height < 48 || height > 4000 {
+            height = intrinsic
         }
-        let height = Swift.min(Swift.max(fitted.height, 200), 720)
+        if !height.isFinite || height < 48 || height > 4000 {
+            height = 160
+        }
+        height = Swift.min(ceil(height), 720)
         let size = NSSize(width: Self.panelWidth, height: height)
         host.view.frame = NSRect(origin: .zero, size: size)
 
@@ -337,7 +345,11 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         for lane in snap.barLanes {
             let marked = lane.details.filter { $0.mark != nil }
             if marked.isEmpty {
-                tip.append("\(lane.key.title) \(lane.label) · \(lane.sub)")
+                if lane.key == .grok {
+                    tip.append("Grok \(lane.label) · \(LaneKey.sharedPoolCaption) · \(lane.sub)")
+                } else {
+                    tip.append("\(lane.key.title) \(lane.label) · \(lane.sub)")
+                }
             } else {
                 for detail in marked {
                     var line = "\(detail.mark ?? "") \(detail.label) \(detail.shownPct)%"
@@ -348,6 +360,7 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
                 }
             }
         }
+        tip.append(contentsOf: disks.map { "\($0.name) \(Int($0.usedPct.rounded()))% · \($0.sizeLabel) · \($0.rateLabel)" })
         button.toolTip = tip.isEmpty ? "QuotaBar" : tip.joined(separator: "\n")
     }
 

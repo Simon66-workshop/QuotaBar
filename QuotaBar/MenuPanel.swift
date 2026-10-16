@@ -4,26 +4,26 @@ struct MenuPanel: View {
     @EnvironmentObject private var store: UsageStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: PanelSpace.section) {
             header
             if !listedLanes.isEmpty {
-                sectionLabel("Usage")
-                UsageTable(lanes: listedLanes)
+                VStack(alignment: .leading, spacing: PanelSpace.label) {
+                    sectionLabel("Usage")
+                    UsageTable(lanes: listedLanes)
+                }
             }
             if TokenReader.hasGrokSession() {
                 AccountRow()
-                    .padding(.top, 6)
             }
             if showConnect {
                 ConnectCell(idle: connectLanes)
-                    .padding(.top, listedLanes.isEmpty ? 0 : 8)
             }
             DiskSection()
-                .padding(.top, listedLanes.isEmpty && !showConnect ? 0 : 12)
             footer
         }
         .padding(16)
-        .frame(width: 448)
+        .frame(width: 448, alignment: .topLeading)
+        .fixedSize(horizontal: false, vertical: true)
         .background(Color.clear)
     }
 
@@ -32,7 +32,6 @@ struct MenuPanel: View {
             .font(.system(size: 10, weight: .semibold))
             .foregroundStyle(.secondary)
             .tracking(0.4)
-            .padding(.bottom, 4)
     }
 
     private var header: some View {
@@ -41,7 +40,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.8.21")
+                Text("v1.8.22")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -54,7 +53,6 @@ struct MenuPanel: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.bottom, 10)
     }
 
     private var statusLine: String {
@@ -88,22 +86,21 @@ struct MenuPanel: View {
             Button("Quit") { store.quit() }
                 .buttonStyle(.borderless)
         }
-        .padding(.top, 12)
         .font(.system(size: 12, weight: .semibold))
     }
 
-    /// Shared Grok pool only. Other providers stay in the snapshot unread.
-    private var grokLanes: [Lane] {
-        store.snap.lanes.filter { $0.key == .grok }
+    /// Connected or broken — those stay as rows. Empty ones fold into Connect.
+    /// Cursor and Grok Bot are the G row, not their own rows.
+    private var panelLanes: [Lane] {
+        store.snap.lanes.filter { !$0.key.foldedIntoGrok }
     }
 
-    /// Connected or broken — those stay as rows. Empty ones fold into Connect.
     private var listedLanes: [Lane] {
-        grokLanes.filter { $0.tone != .empty }
+        panelLanes.filter { $0.tone != .empty }
     }
 
     private var connectLanes: [Lane] {
-        grokLanes.filter { $0.tone == .empty }
+        panelLanes.filter { $0.tone == .empty }
     }
 
     private var showConnect: Bool {
@@ -231,14 +228,22 @@ private struct AccountRow: View {
     }
 }
 
+private enum PanelSpace {
+    /// Same gap between usage, the Grok account row, connect, and disks.
+    static let section: CGFloat = 10
+    static let label: CGFloat = 4
+    static let row: CGFloat = 3
+}
+
 private enum Col {
-    static let gap: CGFloat = 5
+    static let gap: CGFloat = 6
     static let mark: CGFloat = 22
-    static let used: CGFloat = 34
-    static let bar: CGFloat = 36
+    static let nameMin: CGFloat = 132
+    static let used: CGFloat = 36
+    static let bar: CGFloat = 44
     static let meta: CGFloat = 48
-    static let extra: CGFloat = 40
-    static let action: CGFloat = 28
+    static let extra: CGFloat = 44
+    static let action: CGFloat = 32
 }
 
 private struct UsageTable: View {
@@ -247,16 +252,20 @@ private struct UsageTable: View {
     var body: some View {
         Grid(alignment: .center, horizontalSpacing: Col.gap, verticalSpacing: 0) {
             GridRow {
-                Text("").frame(width: Col.mark)
+                Text("").frame(width: Col.mark, height: 12)
                 Text("Name").gridHeader()
                 Text("Used").frame(width: Col.used, alignment: .trailing)
-                Color.clear.frame(width: Col.bar)
+                Color.clear.frame(width: Col.bar, height: 1)
                 Text("Left").frame(width: Col.meta, alignment: .trailing)
                 Text("Window").frame(width: Col.extra, alignment: .trailing)
-                Color.clear.frame(width: Col.action)
+                Color.clear.frame(width: Col.action, height: 1)
             }
             .font(.system(size: 9, weight: .semibold))
             .foregroundStyle(.tertiary)
+            .padding(.bottom, 2)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(Color.white.opacity(0.12)).frame(height: 0.5)
+            }
             ForEach(Array(lanes.enumerated()), id: \.element.id) { index, lane in
                 let figures = lane.details.filter { $0.mark != nil }
                 if figures.isEmpty {
@@ -265,20 +274,11 @@ private struct UsageTable: View {
                             .font(.system(size: 11, weight: .bold).monospaced())
                             .foregroundStyle(lane.tone == .ok ? Color.secondary : toneColor(lane.tone))
                             .frame(width: Col.mark, alignment: .center)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(lane.key.title)
-                                .font(.system(size: 12, weight: .medium))
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                            if lane.tone == .error || lane.tone == .empty {
-                                Text(lane.sub)
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.tertiary)
-                                    .lineLimit(2)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                        .frame(minWidth: 148, maxWidth: .infinity, alignment: .leading)
+                        nameCell(
+                            title: lane.key.title,
+                            caption: lane.key == .grok ? LaneKey.sharedPoolCaption : nil,
+                            sub: (lane.tone == .error || lane.tone == .empty) ? lane.sub : nil
+                        )
                         Text(usedText(lane))
                             .font(.system(size: 12, weight: .semibold).monospacedDigit())
                             .foregroundStyle(lane.tone == .ok ? Color.primary : toneColor(lane.tone))
@@ -293,9 +293,9 @@ private struct UsageTable: View {
                             .foregroundStyle(.tertiary)
                             .frame(width: Col.extra, alignment: .trailing)
                             .lineLimit(1)
-                        Color.clear.frame(width: Col.action)
+                        Color.clear.frame(width: Col.action, height: 1)
                     }
-                    .padding(.vertical, 5)
+                    .padding(.vertical, PanelSpace.row)
                     .padding(.horizontal, 2)
                     .background(index % 2 == 1 ? Color.white.opacity(0.045) : Color.clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
                     if (lane.key == .cursor || lane.key == .claude), !lane.details.isEmpty {
@@ -306,17 +306,17 @@ private struct UsageTable: View {
                                     .font(.system(size: 10.5))
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .frame(minWidth: Col.nameMin, maxWidth: .infinity, alignment: .leading)
                                 Text("\(Int(detail.usedPct.rounded()))%")
                                     .font(.system(size: 11, weight: .medium).monospacedDigit())
                                     .foregroundStyle(.secondary)
                                     .frame(width: Col.used, alignment: .trailing)
                                 Meter(value: detail.usedPct, tone: .ok)
-                                Color.clear.frame(width: Col.meta)
-                                Color.clear.frame(width: Col.extra)
-                                Color.clear.frame(width: Col.action)
+                                Color.clear.frame(width: Col.meta, height: 1)
+                                Color.clear.frame(width: Col.extra, height: 1)
+                                Color.clear.frame(width: Col.action, height: 1)
                             }
-                            .padding(.vertical, 2)
+                            .padding(.vertical, 1)
                         }
                     }
                 } else {
@@ -325,25 +325,18 @@ private struct UsageTable: View {
                             .font(.system(size: 11, weight: .bold).monospaced())
                             .foregroundStyle(Color.secondary)
                             .frame(width: Col.mark, alignment: .center)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(lane.key.title)
-                                .font(.system(size: 12, weight: .medium))
-                                .lineLimit(1)
-                            if !lane.sub.isEmpty {
-                                Text(lane.sub)
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.tertiary)
-                                    .lineLimit(1)
-                            }
-                        }
-                        .frame(minWidth: 148, maxWidth: .infinity, alignment: .leading)
-                        Color.clear.frame(width: Col.used)
-                        Color.clear.frame(width: Col.bar)
-                        Color.clear.frame(width: Col.meta)
-                        Color.clear.frame(width: Col.extra)
-                        Color.clear.frame(width: Col.action)
+                        nameCell(
+                            title: lane.key.title,
+                            caption: lane.key == .grok ? LaneKey.sharedPoolCaption : nil,
+                            sub: lane.sub.isEmpty ? nil : lane.sub
+                        )
+                        Color.clear.frame(width: Col.used, height: 1)
+                        Color.clear.frame(width: Col.bar, height: 1)
+                        Color.clear.frame(width: Col.meta, height: 1)
+                        Color.clear.frame(width: Col.extra, height: 1)
+                        Color.clear.frame(width: Col.action, height: 1)
                     }
-                    .padding(.vertical, 5)
+                    .padding(.vertical, PanelSpace.row)
                     .padding(.horizontal, 2)
                     .background(index % 2 == 1 ? Color.white.opacity(0.045) : Color.clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
                     ForEach(figures) { detail in
@@ -363,7 +356,7 @@ private struct UsageTable: View {
                                         .lineLimit(1)
                                 }
                             }
-                            .frame(minWidth: 148, maxWidth: .infinity, alignment: .leading)
+                            .frame(minWidth: Col.nameMin, maxWidth: .infinity, alignment: .leading)
                             Text("\(detail.shownPct)%")
                                 .font(.system(size: 12, weight: .semibold).monospacedDigit())
                                 .foregroundStyle(detail.tone == .ok ? Color.primary : toneColor(detail.tone))
@@ -378,9 +371,9 @@ private struct UsageTable: View {
                                 .foregroundStyle(.tertiary)
                                 .frame(width: Col.extra, alignment: .trailing)
                                 .lineLimit(1)
-                            Color.clear.frame(width: Col.action)
+                            Color.clear.frame(width: Col.action, height: 1)
                         }
-                        .padding(.vertical, 3)
+                        .padding(.vertical, PanelSpace.row)
                         .padding(.horizontal, 2)
                     }
                     ForEach(lane.details.filter { $0.mark == nil }) { detail in
@@ -390,25 +383,46 @@ private struct UsageTable: View {
                                 .font(.system(size: 10.5))
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .frame(minWidth: Col.nameMin, maxWidth: .infinity, alignment: .leading)
                             Text("\(detail.shownPct)%")
                                 .font(.system(size: 11, weight: .medium).monospacedDigit())
                                 .foregroundStyle(.secondary)
                                 .frame(width: Col.used, alignment: .trailing)
                             Meter(value: detail.usedPct, tone: .ok)
-                            Color.clear.frame(width: Col.meta)
-                            Color.clear.frame(width: Col.extra)
-                            Color.clear.frame(width: Col.action)
+                            Color.clear.frame(width: Col.meta, height: 1)
+                            Color.clear.frame(width: Col.extra, height: 1)
+                            Color.clear.frame(width: Col.action, height: 1)
                         }
-                        .padding(.vertical, 2)
+                        .padding(.vertical, 1)
                     }
                 }
             }
         }
-        .padding(.top, 2)
-        .overlay(alignment: .top) {
-            Rectangle().fill(Color.white.opacity(0.12)).frame(height: 0.5).padding(.top, 16)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func nameCell(title: String, caption: String?, sub: String?) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            if let caption, !caption.isEmpty {
+                Text(caption)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let sub, !sub.isEmpty {
+                Text(sub)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
+        .frame(minWidth: Col.nameMin, maxWidth: .infinity, alignment: .leading)
     }
 
     private func usedText(_ lane: Lane) -> String {
@@ -429,13 +443,13 @@ private struct Meter: View {
     var tone: Tone
 
     var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.10))
-                Capsule()
-                    .fill(fill)
-                    .frame(width: max(value <= 0 ? 0 : 2, geo.size.width * CGFloat(min(max(value, 0), 100) / 100)))
-            }
+        let fraction = CGFloat(min(max(value, 0), 100) / 100)
+        let fillWidth = value <= 0 ? CGFloat(0) : max(2, Col.bar * fraction)
+        ZStack(alignment: .leading) {
+            Capsule().fill(Color.white.opacity(0.10))
+            Capsule()
+                .fill(fill)
+                .frame(width: fillWidth)
         }
         .frame(width: Col.bar, height: 5)
     }
@@ -459,7 +473,8 @@ private func toneColor(_ tone: Tone) -> Color {
 
 private extension Text {
     func gridHeader() -> some View {
-        self.frame(maxWidth: .infinity, alignment: .leading)
+        self.frame(minWidth: Col.nameMin, maxWidth: .infinity, alignment: .leading)
+            .lineLimit(1)
     }
 }
 
@@ -587,7 +602,7 @@ private struct DiskSection: View {
     @EnvironmentObject private var store: UsageStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: PanelSpace.label) {
             HStack {
                 Text("Disks")
                     .font(.system(size: 10, weight: .semibold))
@@ -598,7 +613,6 @@ private struct DiskSection: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
-            .padding(.bottom, 4)
             if store.disks.isEmpty && store.hiddenDisks.isEmpty {
                 Text("Waiting for mounted volumes…")
                     .font(.system(size: 11))
@@ -606,16 +620,20 @@ private struct DiskSection: View {
             } else if !store.disks.isEmpty {
                 Grid(alignment: .center, horizontalSpacing: Col.gap, verticalSpacing: 0) {
                     GridRow {
-                        Text("").frame(width: Col.mark)
-                        Text("Name").frame(maxWidth: .infinity, alignment: .leading)
+                        Text("").frame(width: Col.mark, height: 12)
+                        Text("Name").gridHeader()
                         Text("Used").frame(width: Col.used, alignment: .trailing)
-                        Color.clear.frame(width: Col.bar)
+                        Color.clear.frame(width: Col.bar, height: 1)
                         Text("Free").frame(width: Col.meta, alignment: .trailing)
                         Text("I/O").frame(width: Col.extra, alignment: .trailing)
-                        Color.clear.frame(width: Col.action)
+                        Color.clear.frame(width: Col.action, height: 1)
                     }
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.tertiary)
+                    .padding(.bottom, 2)
+                    .overlay(alignment: .bottom) {
+                        Rectangle().fill(Color.white.opacity(0.12)).frame(height: 0.5)
+                    }
                     ForEach(Array(store.disks.prefix(8).enumerated()), id: \.element.id) { index, disk in
                         GridRow {
                             Button {
@@ -642,7 +660,7 @@ private struct DiskSection: View {
                                             .foregroundStyle(.orange)
                                     }
                                 }
-                                .frame(minWidth: 148, maxWidth: .infinity, alignment: .leading)
+                                .frame(minWidth: Col.nameMin, maxWidth: .infinity, alignment: .leading)
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
@@ -667,7 +685,7 @@ private struct DiskSection: View {
                                 .foregroundStyle(.tertiary)
                                 .frame(width: Col.action, alignment: .trailing)
                         }
-                        .padding(.vertical, 5)
+                        .padding(.vertical, PanelSpace.row)
                         .padding(.horizontal, 2)
                         .background(index % 2 == 1 ? Color.white.opacity(0.045) : Color.clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
                         if store.expandedDiskID == disk.id {
@@ -680,10 +698,7 @@ private struct DiskSection: View {
                         }
                     }
                 }
-                .padding(.top, 2)
-                .overlay(alignment: .top) {
-                    Rectangle().fill(Color.white.opacity(0.12)).frame(height: 0.5).padding(.top, 16)
-                }
+                .fixedSize(horizontal: false, vertical: true)
             }
             if store.disks.count > 8 {
                 Text("+\(store.disks.count - 8) more")
@@ -702,8 +717,7 @@ private struct DiskSection: View {
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                 }
-                .padding(.top, 8)
-                .padding(.bottom, 2)
+                .padding(.top, 4)
                 ForEach(store.hiddenDisks) { disk in
                     HStack(spacing: Col.gap) {
                         Text(disk.barLetter)
