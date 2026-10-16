@@ -210,7 +210,8 @@ struct Snapshot {
     }
 
     var lanes: [Lane] { LaneKey.allCases.map { self[$0] } }
-    var barLanes: [Lane] { lanes.filter(\.showsOnBar) }
+    /// Menu bar is the shared weekly Grok pool only.
+    var barLanes: [Lane] { lanes.filter { $0.key == .grok && $0.showsOnBar } }
 
     func isLinked(_ key: LaneKey) -> Bool {
         let tone = self[key].tone
@@ -244,12 +245,13 @@ struct Snapshot {
         Self.title(from: barGroups(disks: disks))
     }
 
-    /// One group per provider or disk, joined later with ` · `.
-    /// A Claude lane that has AC / AT / AF marks is one group of compact tokens
-    /// (`AC 19  AT 82  AF 94`). Every other lane stays `G 21`.
+    /// One group for the shared Grok pool (`G 21`). Other providers and disk
+    /// letters stay off the bar; disks still render in the panel.
+    /// A lane with marks (Claude AC / AT / AF) stays one group of compact
+    /// tokens if that lane is ever passed through — the bar filter drops it.
     static func barGroups(lanes: [Lane], disks: [DiskVolume]) -> [[BarToken]] {
         var groups: [[BarToken]] = []
-        for lane in lanes {
+        for lane in lanes where lane.key == .grok && lane.showsOnBar {
             let marked = lane.details.filter { $0.mark != nil }
             if !marked.isEmpty {
                 groups.append(marked.map { detail in
@@ -263,9 +265,8 @@ struct Snapshot {
                 groups.append([BarToken(text: "\(lane.key.letter) —", tone: lane.tone)])
             }
         }
-        for bit in barDiskBits(disks) {
-            groups.append([BarToken(text: "\(bit.letter) \(bit.pct)", tone: bit.tone)])
-        }
+        // `barDiskBits` still describes D / E. The bar does not draw them.
+        _ = disks
         return groups
     }
 
