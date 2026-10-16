@@ -40,9 +40,9 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleVersion</key>
-  <string>35</string>
+  <string>36</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.8.22</string>
+  <string>1.8.23</string>
   <key>LSUIElement</key>
   <true/>
   <key>LSMinimumSystemVersion</key>
@@ -59,7 +59,7 @@ echo -n 'APPL????' > "$APP/Contents/PkgInfo"
 SHA="$(cat "$SRC"/*.swift | shasum -a 256 | awk '{print $1}')"
 OLD="$(cat "$STAMP" 2>/dev/null || true)"
 if [[ ! -x "$BIN" || "$SHA" != "$OLD" ]]; then
-  osascript -e 'display notification "正在编译 QuotaBar 1.8.22…" with title "QuotaBar"'
+  osascript -e 'display notification "正在编译 QuotaBar 1.8.23…" with title "QuotaBar"'
   pkill -x QuotaBar 2>/dev/null || true
   sleep 0.3
   swiftc -parse-as-library -O -target arm64-apple-macos14.0 \
@@ -71,6 +71,7 @@ if [[ ! -x "$BIN" || "$SHA" != "$OLD" ]]; then
     "$SRC/UsageClient.swift" \
     "$SRC/UsageStore.swift" \
     "$SRC/UsageSource.swift" \
+    "$SRC/PanelFit.swift" \
     "$SRC/MenuPanel.swift" \
     "$SRC/GrokDeviceAuth.swift" \
     "$SRC/DiskMonitor.swift" \
@@ -93,7 +94,7 @@ pkill -x QuotaBar 2>/dev/null || true
 sleep 0.2
 open "$APP"
 
-osascript -e 'display notification "已出现在屏幕右上角 · G 为共享池 · Claude / Codex / 磁盘照常" with title "QuotaBar 1.8.22"' || true
+osascript -e 'display notification "已出现在屏幕右上角 · G 为共享池 · Claude / Codex / 磁盘照常" with title "QuotaBar 1.8.23"' || true
 
 tty -s && osascript <<'EOF' || true
 tell application "Terminal"

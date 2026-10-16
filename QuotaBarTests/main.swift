@@ -282,9 +282,187 @@ let fableTwice = parse("""
 check(fableTwice?.details.filter { $0.mark == "AF" }.count == 1, "differently named Fable sources collapse to one AF \(fableTwice?.details.map(\.label) ?? [])")
 check(Snapshot.title(from: Snapshot.barGroups(lanes: [fableTwice].compactMap { $0 }, disks: [])) == "AC 19  AT 82  AF 94", "bar has a single AF")
 
+runPanelFitChecks()
+
 if failures == 0 {
     print("ok \(checks) checks")
 } else {
     fputs("\(failures) failed of \(checks)\n", stderr)
     exit(1)
+}
+
+func near(_ value: TimeInterval?, _ expected: TimeInterval) -> Bool {
+    guard let value else { return false }
+    return abs(value - expected) < 0.000_001
+}
+
+func fired(_ decision: PanelRefitDecision, at expected: TimeInterval) -> Bool {
+    guard case .schedule(let fireAt) = decision else { return false }
+    return near(fireAt, expected)
+}
+
+func runPanelFitChecks() {
+    check(menuBarHeight(screenMaxY: 900, visibleMaxY: 875) == 25, "menu bar is the strip above the visible frame")
+    check(menuBarHeight(screenMaxY: 800, visibleMaxY: 800) == 0, "flush frames have no menu bar inset")
+    check(menuBarHeight(screenMaxY: 100, visibleMaxY: 140) == 0, "negative menu bar clamps to zero")
+
+    let cap = panelHeightCap(visibleHeight: 1000, menuBarHeight: 40, safetyMargin: 16)
+    check(cap == 944, "cap is visible frame minus menu bar and margin, got \(cap)")
+    let anchored = panelHeightCap(visibleHeight: 1000, menuBarHeight: 40, safetyMargin: 16, roomBelowAnchor: 700)
+    check(anchored == 684, "room under the status item tightens the cap, got \(anchored)")
+    let collapsed = panelHeightCap(visibleHeight: 100, menuBarHeight: 200, safetyMargin: 16)
+    check(collapsed == 0, "cap clamps at zero, got \(collapsed)")
+    let room = roomBelowStatusItem(statusBottom: 880, anchorGap: 6, visibleMinY: 40)
+    check(room == 834, "room below the anchor, got \(room)")
+
+    let compact = fitPanel(
+        measured: nil,
+        header: 40, usage: 100, bottom: 80,
+        verticalPadding: 32, sectionSpacing: 10,
+        cap: 800,
+        minUsageViewport: 72, epsilon: 0.5,
+        currentlyScrolling: false, hysteresis: 8
+    )
+    check(compact == PanelFitPlan(height: 272, scroll: .none), "small content keeps its compact height \(compact)")
+
+    let measuredWins = fitPanel(
+        measured: 300,
+        header: 40, usage: 400, bottom: 80,
+        verticalPadding: 32, sectionSpacing: 10,
+        cap: 800,
+        minUsageViewport: 72, epsilon: 0.5,
+        currentlyScrolling: false, hysteresis: 8
+    )
+    check(measuredWins.scroll == .none && measuredWins.height == 300, "a real measurement wins when it fits \(measuredWins)")
+
+    let usageScroll = fitPanel(
+        measured: nil,
+        header: 40, usage: 900, bottom: 200,
+        verticalPadding: 32, sectionSpacing: 10,
+        cap: 700.8,
+        minUsageViewport: 72, epsilon: 0.5,
+        currentlyScrolling: false, hysteresis: 8
+    )
+    check(usageScroll == PanelFitPlan(height: 700, scroll: .usage(408)), "tall usage scrolls inside the cap \(usageScroll)")
+
+    let measuredSplit = fitPanel(
+        measured: 900,
+        header: 10, usage: 600, bottom: 10,
+        verticalPadding: 0, sectionSpacing: 0,
+        cap: 700,
+        minUsageViewport: 72, epsilon: 0.5,
+        currentlyScrolling: false, hysteresis: 8
+    )
+    check(measuredSplit == PanelFitPlan(height: 700, scroll: .usage(400)), "split uses measured total minus usage \(measuredSplit)")
+
+    let bodyScroll = fitPanel(
+        measured: nil,
+        header: 200, usage: 400, bottom: 400,
+        verticalPadding: 32, sectionSpacing: 10,
+        cap: 500,
+        minUsageViewport: 72, epsilon: 0.5,
+        currentlyScrolling: false, hysteresis: 8
+    )
+    check(bodyScroll == PanelFitPlan(height: 500, scroll: .body), "chrome that does not fit scrolls the whole body \(bodyScroll)")
+
+    let noUsage = fitPanel(
+        measured: nil,
+        header: 40, usage: 0, bottom: 800,
+        verticalPadding: 32, sectionSpacing: 10,
+        cap: 400,
+        minUsageViewport: 72, epsilon: 0.5,
+        currentlyScrolling: false, hysteresis: 8
+    )
+    check(noUsage == PanelFitPlan(height: 400, scroll: .body), "no usage block scrolls the body \(noUsage)")
+    check(panelSectionExtra(header: 40, usage: 0, bottom: 800, verticalPadding: 32, sectionSpacing: 10) == 42, "one gap when usage is absent")
+
+    let barelyOver = fitPanel(
+        measured: 600.4,
+        header: 40, usage: 400, bottom: 80,
+        verticalPadding: 32, sectionSpacing: 10,
+        cap: 600,
+        minUsageViewport: 72, epsilon: 0.5,
+        currentlyScrolling: false, hysteresis: 8
+    )
+    check(barelyOver == PanelFitPlan(height: 600, scroll: .none), "sub-point overflow stays unscrolling \(barelyOver)")
+
+    let holdScroll = fitPanel(
+        measured: 596,
+        header: 40, usage: 400, bottom: 80,
+        verticalPadding: 32, sectionSpacing: 10,
+        cap: 600,
+        minUsageViewport: 72, epsilon: 0.5,
+        currentlyScrolling: true, hysteresis: 8
+    )
+    check(holdScroll.scroll != .none && holdScroll.height == 600, "hysteresis keeps an open scroller \(holdScroll)")
+
+    let releaseScroll = fitPanel(
+        measured: 580,
+        header: 40, usage: 400, bottom: 80,
+        verticalPadding: 32, sectionSpacing: 10,
+        cap: 600,
+        minUsageViewport: 72, epsilon: 0.5,
+        currentlyScrolling: true, hysteresis: 8
+    )
+    check(releaseScroll == PanelFitPlan(height: 580, scroll: .none), "a real shrink leaves the scroller \(releaseScroll)")
+
+    let badProbe = fitPanel(
+        measured: 900,
+        header: 40, usage: 0, bottom: 80,
+        verticalPadding: 32, sectionSpacing: 10,
+        cap: 600,
+        minUsageViewport: 72, epsilon: 0.5,
+        currentlyScrolling: false, hysteresis: 8
+    )
+    check(badProbe == PanelFitPlan(height: 600, scroll: .body), "missing usage measurement scrolls the body \(badProbe)")
+
+    let empty = fitPanel(
+        measured: nil,
+        header: .nan, usage: .infinity, bottom: -4,
+        verticalPadding: 32, sectionSpacing: 10,
+        cap: 600,
+        minUsageViewport: 72, epsilon: 0.5,
+        currentlyScrolling: false, hysteresis: 8
+    )
+    check(empty == PanelFitPlan(height: 160, scroll: .none), "non-finite sections fall back \(empty)")
+
+    let uncapped = fitPanel(
+        measured: 400,
+        header: 40, usage: 100, bottom: 80,
+        verticalPadding: 32, sectionSpacing: 10,
+        cap: 0,
+        minUsageViewport: 72, epsilon: 0.5,
+        currentlyScrolling: false, hysteresis: 8
+    )
+    check(uncapped == PanelFitPlan(height: 400, scroll: .none), "a zero cap does not squash a measurement \(uncapped)")
+    check(panelFormulaHeight(header: 40, usage: 100, bottom: 80, verticalPadding: 32, sectionSpacing: 10) == 272, "formula matches the compact stack")
+    check(panelNaturalHeight(measured: 300, formula: 280, slack: 8) == 300, "a live measurement beats the rebuilt height")
+    check(panelNaturalHeight(measured: nil, formula: 280, slack: 8) == 288, "while scrolling, rebuild from formula plus slack")
+    check(panelNaturalHeight(measured: nil, formula: 0, slack: 8) == nil, "no bands and no measurement is not a height")
+
+    var state = PanelRefitState()
+    let first = coalescePanelRefit(state: state, signal: .content("a"), now: 10, delay: 0.12)
+    state = first.0
+    check(fired(first.1, at: 10.12), "content schedules a trailing fire \(first.1)")
+    check(state.contentKey == "a" && near(state.pendingFireAt, 10.12), "pending fire is stored")
+
+    let burst = coalescePanelRefit(state: state, signal: .content("b"), now: 10.05, delay: 0.12)
+    state = burst.0
+    check(fired(burst.1, at: 10.17), "a second change pushes the fire back \(burst.1)")
+    check(state.contentKey == "b", "latest content key wins")
+
+    let tick = coalescePanelRefit(state: state, signal: .timer, now: 10.10, delay: 0.12)
+    check(tick.0 == state && tick.1 == .ignore, "a timer tick does not schedule or clear \(tick.1)")
+
+    let same = coalescePanelRefit(state: PanelRefitState(contentKey: "b"), signal: .content("b"), now: 20, delay: 0.12)
+    check(same.1 == .ignore && same.0.pendingFireAt == nil, "the same content key does not refit")
+
+    let screen = coalescePanelRefit(state: state, signal: .screen, now: 10.20, delay: 0.12)
+    check(fired(screen.1, at: 10.32), "screen changes schedule even when content is unchanged \(screen.1)")
+    check(screen.0.contentKey == "b", "a screen change keeps the content key")
+
+    check(shouldApplyPanelHeight(current: 200, proposed: 200.4, epsilon: 0.5) == false, "sub-point height is ignored")
+    check(shouldApplyPanelHeight(current: 200, proposed: 212, epsilon: 0.5) == true, "a real height change applies")
+    check(shouldApplyPanelHeight(current: 0, proposed: 180, epsilon: 0.5) == true, "the first height applies")
+    check(shouldApplyPanelHeight(current: 180, proposed: .nan, epsilon: 0.5) == false, "a non-finite height does not apply")
 }

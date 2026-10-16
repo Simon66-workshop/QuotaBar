@@ -1,4 +1,4 @@
-# QuotaBar 1.8.22
+# QuotaBar 1.8.23
 
 Mac menu bar extra for live usage. **G** is the shared weekly pool (X Subscription Super: Grok, Cursor, and Grok Bot). ChatGPT / Codex, Claude, and local and external disks stay on the bar.
 
@@ -26,7 +26,7 @@ Cursor and Grok Bot are not separate bar, tooltip, or panel items.
 - **Left-click** the bar → glass panel (details, connect, hide disks)
 - **Right-click** the bar → short native menu (refresh / copy / alerts / quit)
 
-The panel header should say **v1.8.22**. If it still says an older version, quit QuotaBar and run `Start QuotaBar.command` again.
+The panel header should say **v1.8.23**. If it still says an older version, quit QuotaBar and run `Start QuotaBar.command` again.
 
 Later launches: just double-click `Start QuotaBar.command` again.
 
@@ -44,6 +44,10 @@ If Claude stays under Connect, open Claude Desktop while signed in, then click R
 Plug in a USB / Thunderbolt disk and it appears in the panel; eject it and it disappears. Hide Time Machine or VM disks from the panel — they stay off the bar until you Show them again.
 
 The bar only turns orange / red on a token that is actually high (85%+ services, 90%+ disks). A normal 60–80% day stays neutral.
+
+## 1.8.23
+
+While the panel is open it refits to the height of its content: a refresh, a disk appearing or leaving, a copied note, an expanded row, or a connect form. Bursts of those changes settle together, and a sub-point difference does not move the window. The top edge stays under the menu-bar item. The tallest the panel grows is the visible frame of the screen that holds the status item, minus the menu bar and a safety margin. Past that, the usage list scrolls and the header, account, disks, and footer stay put. On a shorter screen the whole panel scrolls instead of clipping.
 
 ## 1.8.22
 

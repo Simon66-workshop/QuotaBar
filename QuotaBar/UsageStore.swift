@@ -22,7 +22,8 @@ final class UsageStore: ObservableObject {
 
     var onWillOpenBrowser: (() -> Void)?
     var onLoginFinished: (() -> Void)?
-    var onPanelRelayout: (() -> Void)?
+    /// Layout key. The app coalesces these; identical keys do not resize.
+    var onPanelRelayout: ((String) -> Void)?
 
     private var timer: AnyCancellable?
     private var diskTimer: AnyCancellable?
@@ -39,7 +40,7 @@ final class UsageStore: ObservableObject {
     private var forceDiskTick = false
     private var mountedAt: [String: Date] = [:]
     private var lastRefreshAt = Date.distantPast
-    private var relayoutWork: DispatchWorkItem?
+    private var relayoutGeneration = 0
     private var refreshQueued = false
 
     init() {
@@ -214,18 +215,19 @@ final class UsageStore: ObservableObject {
 
     private func flashCopied(_ note: String) {
         copiedNote = note
+        requestPanelRelayout()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
-            if self?.copiedNote == note { self?.copiedNote = "" }
+            guard let self, self.copiedNote == note else { return }
+            self.copiedNote = ""
+            self.requestPanelRelayout()
         }
     }
 
+    /// Asks the open panel to measure again. Disk I/O ticks do not call this
+    /// unless the row structure changed; the app also drops timer signals.
     func requestPanelRelayout() {
-        relayoutWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            self?.onPanelRelayout?()
-        }
-        relayoutWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
+        relayoutGeneration += 1
+        onPanelRelayout?("c\(relayoutGeneration)")
     }
 
     func toggleInspect(_ disk: DiskVolume) {
@@ -291,6 +293,7 @@ final class UsageStore: ObservableObject {
         let loaded = await UsageSources.loadAll()
         let next = Snapshot.assemble(loaded, fetchedAt: Date())
         snap = next
+        requestPanelRelayout()
         if liveIO { forceDiskTick = true }
         tickDisks()
         notifyIfNeeded(next)
@@ -374,7 +377,6 @@ final class UsageStore: ObservableObject {
 
     private func stopWatch() {
         watchDebounce?.cancel()
-        relayoutWork?.cancel()
         for src in authWatchers { src.cancel() }
         authWatchers.removeAll()
         watchFds.removeAll()
@@ -492,9 +494,20 @@ final class UsageStore: ObservableObject {
         let hidden = next.filter { ignoredIDs.contains($0.id) }
 
         if sameDisks(previous, visible), hiddenDisks.map(\.id) == hidden.map(\.id) { return }
+        let beforeLayout = diskLayoutToken(previous) + "#" + diskLayoutToken(hiddenDisks)
+        let afterLayout = diskLayoutToken(visible) + "#" + diskLayoutToken(hidden)
         disks = visible
         hiddenDisks = hidden
         notifyIfNeeded(snap)
+        if afterLayout != beforeLayout {
+            requestPanelRelayout()
+        }
+    }
+
+    /// Names, mount badges, and hidden rows change the panel. Rates and percents do not.
+    private func diskLayoutToken(_ list: [DiskVolume]) -> String {
+        list.map { "\($0.id)\u{1f}\($0.name)\u{1f}\($0.justChanged ?? "")\u{1f}\($0.ignoreHint ?? "")" }
+            .joined(separator: "\u{1e}")
     }
 
     private func sameDisks(_ a: [DiskVolume], _ b: [DiskVolume]) -> Bool {

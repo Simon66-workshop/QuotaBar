@@ -17,8 +17,14 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
     private var lastBarToggle = Date.distantPast
     private var lastTitle = ""
     private var barActionAt = Date.distantPast
+    private let fitModel = PanelFitModel()
+    private var panelLive = false
+    private var refitState = PanelRefitState()
+    private var refitWork: DispatchWorkItem?
+    private var refitSerial = 0
+    private var scrollFollowUps = 0
 
-    private static let panelWidth: CGFloat = 448
+    private static let panelWidth: CGFloat = CGFloat(PanelFitMetrics.panelWidth)
 
     static func main() {
         let app = NSApplication.shared
@@ -42,8 +48,8 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
             self?.hidePanel()
             self?.rebuildStatusItem()
         }
-        store.onPanelRelayout = { [weak self] in
-            self?.relayoutPanel()
+        store.onPanelRelayout = { [weak self] key in
+            self?.noteRefit(.content(key))
         }
         self.store = store
 
@@ -72,11 +78,23 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
             name: NSWorkspace.didActivateApplicationNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screenParametersChanged(_:)),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         if let localMonitor { NSEvent.removeMonitor(localMonitor) }
         if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
+        NotificationCenter.default.removeObserver(self, name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        refitWork?.cancel()
+    }
+
+    @objc private func screenParametersChanged(_ notification: Notification) {
+        noteRefit(.screen)
     }
 
     private func rebuildStatusItem() {
@@ -182,49 +200,191 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         guard let store, let button = statusItem?.button else { return }
         rebindBar()
 
-        let host = ClearHosting(rootView: AnyView(MenuPanel().environmentObject(store)))
+        let host = ClearHosting(rootView: AnyView(
+            MenuPanel(probeEpoch: fitModel.epoch)
+                .environmentObject(store)
+                .environmentObject(fitModel)
+        ))
         _ = host.view
-        applyFittedSize(host, under: button)
         self.panelHost = host
+        panelLive = true
+        applyFittedSize(host, under: button, animate: false)
         // Never NSApp.activate — that is what dies the bar action after Safari.
         panel?.orderFrontRegardless()
         button.highlight(true)
         store.setLiveIO(true)
+        noteRefit(.content("open"))
     }
 
-    private func relayoutPanel() {
-        guard let host = panelHost, let button = statusItem?.button, panelOnScreen else { return }
-        applyFittedSize(host, under: button)
+    private func noteRefit(_ signal: PanelRefitSignal) {
+        switch signal {
+        case .content(let key) where key.hasPrefix("scroll-"):
+            break
+        default:
+            scrollFollowUps = 0
+        }
+        guard panelLive else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        let (next, decision) = coalescePanelRefit(
+            state: refitState,
+            signal: signal,
+            now: now,
+            delay: PanelFitMetrics.refitDelay
+        )
+        refitState = next
+        guard case .schedule(let fireAt) = decision else { return }
+        refitWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.performRefit()
+        }
+        refitWork = work
+        let delay = max(0, fireAt - ProcessInfo.processInfo.systemUptime)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
-    private func applyFittedSize(_ host: ClearHosting<AnyView>, under button: NSView) {
+    private func performRefit() {
+        refitState.pendingFireAt = nil
+        guard panelLive, let host = panelHost, let button = statusItem?.button else { return }
+        applyFittedSize(host, under: button, animate: true)
+    }
+
+    private func applyFittedSize(_ host: ClearHosting<AnyView>, under button: NSView, animate: Bool) {
         // Measure the SwiftUI ideal height. A floor of 200/360 left one short
         // row floating in a tall glass with blank space above and below.
+        let cap = screenCap(under: button)
+        let scrolling = fitModel.plan.scroll != .none
+        host.view.layoutSubtreeIfNeeded()
+
+        let formula = panelFormulaHeight(
+            header: fitModel.header,
+            usage: fitModel.usage,
+            bottom: fitModel.bottom,
+            verticalPadding: PanelFitMetrics.verticalPadding,
+            sectionSpacing: PanelFitMetrics.sectionSpacing
+        )
+        let liveMeasure: Double? = scrolling ? nil : measureIntrinsic(host, resetFrame: panel == nil)
+        if let liveMeasure {
+            fitModel.lastUnconstrained = liveMeasure
+            if formula > 0 {
+                fitModel.slack = liveMeasure - formula
+            }
+        } else if scrolling, formula > 0, fitModel.slack == 0, fitModel.lastUnconstrained > 0 {
+            fitModel.slack = fitModel.lastUnconstrained - formula
+        }
+        let measured = panelNaturalHeight(measured: liveMeasure, formula: formula, slack: fitModel.slack)
+        let plan = makePlan(measured: measured, cap: cap, scrolling: scrolling)
+        let previousScroll = fitModel.plan.scroll
+        if plan != fitModel.plan {
+            fitModel.apply(plan)
+            host.view.layoutSubtreeIfNeeded()
+        }
+        host.sizingOptions = []
+        place(host, height: CGFloat(plan.height), under: button, animate: animate && panelOnScreen)
+        if previousScroll != fitModel.plan.scroll, scrollFollowUps < 2 {
+            scrollFollowUps += 1
+            refitSerial += 1
+            noteRefit(.content("scroll-\(refitSerial)"))
+        }
+    }
+
+    private func makePlan(measured: Double?, cap: Double, scrolling: Bool) -> PanelFitPlan {
+        if scrolling && !fitModel.probesReady {
+            let limit = cap > 0 ? cap.rounded(.down) : max(fitModel.plan.height, 1)
+            return PanelFitPlan(height: max(limit, 1), scroll: .body)
+        }
+        return fitPanel(
+            measured: measured,
+            header: fitModel.header,
+            usage: fitModel.usage,
+            bottom: fitModel.bottom,
+            verticalPadding: PanelFitMetrics.verticalPadding,
+            sectionSpacing: PanelFitMetrics.sectionSpacing,
+            cap: cap,
+            minUsageViewport: PanelFitMetrics.minUsageViewport,
+            epsilon: PanelFitMetrics.heightEpsilon,
+            currentlyScrolling: scrolling,
+            hysteresis: PanelFitMetrics.scrollHysteresis
+        )
+    }
+
+    /// Unconstrained content height. Do not squash a visible panel down to 1pt;
+    /// that flash is what the trailing refit is there to avoid.
+    private func measureIntrinsic(_ host: ClearHosting<AnyView>, resetFrame: Bool) -> Double {
         host.sizingOptions = [.intrinsicContentSize]
-        host.view.setFrameSize(NSSize(width: Self.panelWidth, height: 1))
+        if resetFrame {
+            host.view.setFrameSize(NSSize(width: Self.panelWidth, height: 1))
+        }
         host.view.invalidateIntrinsicContentSize()
         host.view.layoutSubtreeIfNeeded()
         let proposed = host.sizeThatFits(in: NSSize(width: Self.panelWidth, height: .greatestFiniteMagnitude))
-        let intrinsic = host.view.intrinsicContentSize.height
         var height = proposed.height
-        if !height.isFinite || height < 48 || height > 4000 {
+        let intrinsic = host.view.intrinsicContentSize.height
+        if !height.isFinite || height < 48 {
             height = intrinsic
         }
-        if !height.isFinite || height < 48 || height > 4000 {
-            height = 160
+        if !height.isFinite || height < 48 {
+            height = CGFloat(PanelFitMetrics.invalidMeasureFallback)
         }
-        height = Swift.min(ceil(height), 720)
-        let size = NSSize(width: Self.panelWidth, height: height)
-        host.view.frame = NSRect(origin: .zero, size: size)
+        return Double(height)
+    }
 
-        if let panel, panelOnScreen {
-            if let glass = panel.contentView {
-                glass.setFrameSize(size)
+    private func screenCap(under button: NSView) -> Double {
+        let screen = button.window?.screen ?? NSScreen.main
+        guard let screen else {
+            return panelHeightCap(visibleHeight: 900, menuBarHeight: 24, safetyMargin: PanelFitMetrics.safetyMargin)
+        }
+        let visible = screen.visibleFrame
+        let menu = menuBarHeight(screenMaxY: Double(screen.frame.maxY), visibleMaxY: Double(visible.maxY))
+        let room: Double?
+        if let buttonWindow = button.window {
+            let buttonRect = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
+            room = roomBelowStatusItem(
+                statusBottom: Double(buttonRect.minY),
+                anchorGap: PanelFitMetrics.anchorGap,
+                visibleMinY: Double(visible.minY)
+            )
+        } else {
+            room = nil
+        }
+        return panelHeightCap(
+            visibleHeight: Double(visible.height),
+            menuBarHeight: menu,
+            safetyMargin: PanelFitMetrics.safetyMargin,
+            roomBelowAnchor: room
+        )
+    }
+
+    private func place(_ host: ClearHosting<AnyView>, height: CGFloat, under button: NSView, animate: Bool) {
+        let size = NSSize(width: Self.panelWidth, height: height)
+        let frame = panelFrame(size: size, under: button)
+        if let panel {
+            let moved = abs(panel.frame.minX - frame.minX) > 0.5 || abs(panel.frame.minY - frame.minY) > 0.5
+            let resized = shouldApplyPanelHeight(
+                current: Double(panel.frame.height),
+                proposed: Double(height),
+                epsilon: PanelFitMetrics.heightEpsilon
+            )
+            guard resized || moved else { return }
+            if resized && animate {
+                let target = size
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = PanelFitMetrics.refitAnimation
+                    context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                    panel.animator().setFrame(frame, display: true)
+                } completionHandler: {
+                    guard abs(panel.frame.height - target.height) <= 0.5 else { return }
+                    host.view.frame = NSRect(origin: .zero, size: target)
+                    panel.contentView?.setFrameSize(target)
+                }
+                return
             }
-            panel.setContentSize(size)
-            position(panel, size: size, under: button)
+            host.view.frame = NSRect(origin: .zero, size: size)
+            panel.contentView?.setFrameSize(size)
+            panel.setFrame(frame, display: true)
             return
         }
+
+        host.view.frame = NSRect(origin: .zero, size: size)
 
         let glass = GlassBackdrop(frame: NSRect(origin: .zero, size: size))
         host.view.autoresizingMask = [.width, .height]
@@ -249,11 +409,16 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         panel.setContentSize(size)
         panel.appearance = NSApp.effectiveAppearance
 
-        position(panel, size: size, under: button)
+        panel.setFrame(frame, display: true)
         self.panel = panel
     }
 
     private func hidePanel() {
+        panelLive = false
+        refitWork?.cancel()
+        refitWork = nil
+        refitState = PanelRefitState()
+        scrollFollowUps = 0
         store?.setLiveIO(false)
         statusItem?.button?.highlight(false)
         if let panel {
@@ -263,6 +428,7 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         }
         self.panel = nil
         self.panelHost = nil
+        fitModel.reset()
     }
 
     private func showFallbackMenu() {
@@ -364,22 +530,69 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         button.toolTip = tip.isEmpty ? "QuotaBar" : tip.joined(separator: "\n")
     }
 
-    private func position(_ panel: NSPanel, size: NSSize, under button: NSView) {
+    /// Top edge stays `anchorGap` points under the status item while the height changes.
+    private func panelFrame(size: NSSize, under button: NSView) -> NSRect {
         guard let buttonWindow = button.window else {
-            panel.setFrame(NSRect(origin: NSPoint(x: 80, y: 80), size: size), display: true)
-            return
+            return NSRect(origin: NSPoint(x: 80, y: 80), size: size)
         }
         let buttonRect = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
+        let gap = CGFloat(PanelFitMetrics.anchorGap)
         var x = buttonRect.midX - size.width / 2
-        var y = buttonRect.minY - size.height - 6
+        var y = buttonRect.minY - size.height - gap
         if let screen = buttonWindow.screen ?? NSScreen.main {
             let visible = screen.visibleFrame
             x = Swift.min(Swift.max(x, visible.minX + 8), visible.maxX - size.width - 8)
             if y < visible.minY + 8 {
-                y = buttonRect.maxY + 6
+                y = buttonRect.maxY + gap
             }
         }
-        panel.setFrame(NSRect(x: x, y: y, width: size.width, height: size.height), display: true)
+        return NSRect(x: x, y: y, width: size.width, height: size.height)
+    }
+}
+
+@MainActor
+final class PanelFitModel: ObservableObject {
+    @Published private(set) var plan = PanelFitPlan(height: 0, scroll: .none)
+    private(set) var epoch = 0
+    private(set) var header: Double = 0
+    private(set) var usage: Double = 0
+    private(set) var bottom: Double = 0
+    /// sizeThatFits minus the section formula, learned while the panel is not scrolling.
+    var slack: Double = 0
+    var lastUnconstrained: Double = 0
+
+    var probesReady: Bool { header >= 1 && bottom >= 1 }
+
+    func record(header: CGFloat, usage: CGFloat, bottom: CGFloat, epoch: Int) {
+        guard epoch == self.epoch else { return }
+        let headerH = Double(header)
+        let usageH = Double(usage)
+        let bottomH = Double(bottom)
+        if headerH > 0.5 { self.header = headerH }
+        if bottomH > 0.5 { self.bottom = bottomH }
+        if usageH > 0.5 {
+            self.usage = usageH
+        } else if headerH > 0.5 && bottomH > 0.5 {
+            self.usage = 0
+        }
+    }
+
+    func apply(_ plan: PanelFitPlan) {
+        guard plan != self.plan else { return }
+        self.plan = plan
+    }
+
+    func reset() {
+        epoch += 1
+        header = 0
+        usage = 0
+        bottom = 0
+        slack = 0
+        lastUnconstrained = 0
+        let cleared = PanelFitPlan(height: 0, scroll: .none)
+        if plan != cleared {
+            plan = cleared
+        }
     }
 }
 
