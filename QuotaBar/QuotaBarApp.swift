@@ -21,7 +21,6 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
     private var panelLive = false
     private var refitState = PanelRefitState()
     private var refitWork: DispatchWorkItem?
-    private var refitSerial = 0
     private var scrollFollowUps = 0
 
     private static let panelWidth: CGFloat = CGFloat(PanelFitMetrics.panelWidth)
@@ -48,8 +47,8 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
             self?.hidePanel()
             self?.rebuildStatusItem()
         }
-        store.onPanelRelayout = { [weak self] key in
-            self?.noteRefit(.content(key))
+        store.onPanelRelayout = { [weak self] signal in
+            self?.noteRefit(signal)
         }
         self.store = store
 
@@ -213,17 +212,17 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         panel?.orderFrontRegardless()
         button.highlight(true)
         store.setLiveIO(true)
-        noteRefit(.content("open"))
+        store.requestPanelRelayout()
     }
 
     private func noteRefit(_ signal: PanelRefitSignal) {
-        switch signal {
-        case .content(let key) where key.hasPrefix("scroll-"):
-            break
-        default:
-            scrollFollowUps = 0
+        guard panelLive else {
+            switch signal {
+            case .content, .screen: scrollFollowUps = 0
+            case .measure, .scrollFollowUp, .timer: break
+            }
+            return
         }
-        guard panelLive else { return }
         let now = ProcessInfo.processInfo.systemUptime
         let (next, decision) = coalescePanelRefit(
             state: refitState,
@@ -233,6 +232,15 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         )
         refitState = next
         guard case .schedule(let fireAt) = decision else { return }
+        switch signal {
+        case .content:
+            fitModel.noteContentRefit()
+            scrollFollowUps = 0
+        case .screen:
+            scrollFollowUps = 0
+        case .measure, .scrollFollowUp, .timer:
+            break
+        }
         refitWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             self?.performRefit()
@@ -263,15 +271,16 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
             sectionSpacing: PanelFitMetrics.sectionSpacing
         )
         let liveMeasure: Double? = scrolling ? nil : measureIntrinsic(host, resetFrame: panel == nil)
-        if let liveMeasure {
-            fitModel.lastUnconstrained = liveMeasure
-            if formula > 0 {
-                fitModel.slack = liveMeasure - formula
-            }
-        } else if scrolling, formula > 0, fitModel.slack == 0, fitModel.lastUnconstrained > 0 {
-            fitModel.slack = fitModel.lastUnconstrained - formula
-        }
-        let measured = panelNaturalHeight(measured: liveMeasure, formula: formula, slack: fitModel.slack)
+        fitModel.calibration = calibratePanelSlack(
+            fitModel.calibration,
+            liveMeasure: liveMeasure,
+            formula: formula
+        )
+        let measured = panelNaturalHeight(
+            measured: liveMeasure,
+            formula: formula,
+            calibration: fitModel.calibration
+        )
         let plan = makePlan(measured: measured, cap: cap, scrolling: scrolling)
         let previousScroll = fitModel.plan.scroll
         if plan != fitModel.plan {
@@ -282,8 +291,7 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         place(host, height: CGFloat(plan.height), under: button, animate: animate && panelOnScreen)
         if previousScroll != fitModel.plan.scroll, scrollFollowUps < 2 {
             scrollFollowUps += 1
-            refitSerial += 1
-            noteRefit(.content("scroll-\(refitSerial)"))
+            noteRefit(.scrollFollowUp)
         }
     }
 
@@ -300,7 +308,6 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
             verticalPadding: PanelFitMetrics.verticalPadding,
             sectionSpacing: PanelFitMetrics.sectionSpacing,
             cap: cap,
-            minUsageViewport: PanelFitMetrics.minUsageViewport,
             epsilon: PanelFitMetrics.heightEpsilon,
             currentlyScrolling: scrolling,
             hysteresis: PanelFitMetrics.scrollHysteresis
@@ -554,41 +561,46 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
 final class PanelFitModel: ObservableObject {
     @Published private(set) var plan = PanelFitPlan(height: 0, scroll: .none)
     private(set) var epoch = 0
-    private(set) var header: Double = 0
-    private(set) var usage: Double = 0
-    private(set) var bottom: Double = 0
-    /// sizeThatFits minus the section formula, learned while the panel is not scrolling.
-    var slack: Double = 0
-    var lastUnconstrained: Double = 0
+    private(set) var bandWatch = PanelBandWatch()
+    /// sizeThatFits minus the section formula. Validity is separate from the slack value.
+    var calibration = PanelSlackCalibration()
 
+    var header: Double { bandWatch.header }
+    var usage: Double { bandWatch.usage }
+    var bottom: Double { bandWatch.bottom }
     var probesReady: Bool { header >= 1 && bottom >= 1 }
 
-    func record(header: CGFloat, usage: CGFloat, bottom: CGFloat, epoch: Int) {
-        guard epoch == self.epoch else { return }
-        let headerH = Double(header)
-        let usageH = Double(usage)
-        let bottomH = Double(bottom)
-        if headerH > 0.5 { self.header = headerH }
-        if bottomH > 0.5 { self.bottom = bottomH }
-        if usageH > 0.5 {
-            self.usage = usageH
-        } else if headerH > 0.5 && bottomH > 0.5 {
-            self.usage = 0
-        }
+    /// Stores the sample and reports whether it should schedule the debounced refit.
+    func record(header: CGFloat, usage: CGFloat, bottom: CGFloat, epoch: Int) -> Bool {
+        let viewport: Double?
+        if case .usage(let value) = plan.scroll { viewport = value } else { viewport = nil }
+        let (next, decision) = observePanelBands(
+            watch: bandWatch,
+            header: Double(header),
+            usage: Double(usage),
+            bottom: Double(bottom),
+            epoch: epoch,
+            epsilon: PanelFitMetrics.heightEpsilon,
+            usageViewport: viewport
+        )
+        bandWatch = next
+        return decision == .schedule
+    }
+
+    func noteContentRefit() {
+        bandWatch = resetPanelBandBurst(bandWatch)
     }
 
     func apply(_ plan: PanelFitPlan) {
         guard plan != self.plan else { return }
         self.plan = plan
+        bandWatch = armPanelBandEcho(bandWatch)
     }
 
     func reset() {
         epoch += 1
-        header = 0
-        usage = 0
-        bottom = 0
-        slack = 0
-        lastUnconstrained = 0
+        calibration = PanelSlackCalibration()
+        bandWatch = PanelBandWatch(epoch: epoch)
         let cleared = PanelFitPlan(height: 0, scroll: .none)
         if plan != cleared {
             plan = cleared

@@ -9,7 +9,9 @@ struct MenuPanel: View {
         fitted
             .background(Color.clear)
             .onPreferenceChange(PanelBandKey.self) { bands in
-                fit.record(header: bands.header, usage: bands.usage, bottom: bands.bottom, epoch: probeEpoch)
+                if fit.record(header: bands.header, usage: bands.usage, bottom: bands.bottom, epoch: probeEpoch) {
+                    store.requestMeasuredRefit(header: fit.header, usage: fit.usage, bottom: fit.bottom)
+                }
             }
     }
 
@@ -220,10 +222,11 @@ private struct ConnectCell: View {
         .onChange(of: idle.map(\.id)) { _, _ in syncPick() }
         .onChange(of: store.loginInProgress) { _, live in
             if live { pick = .grok }
+            store.noteConnectPick(pick)
             store.requestPanelRelayout()
         }
-        .onChange(of: pick) { _, _ in
-            store.requestPanelRelayout()
+        .onChange(of: pick) { _, newValue in
+            store.noteConnectPick(newValue)
         }
         .onChange(of: store.deviceUserCode) { _, _ in
             store.requestPanelRelayout()
@@ -253,14 +256,19 @@ private struct ConnectCell: View {
     private func syncPick() {
         if store.loginInProgress {
             pick = .grok
+            store.noteConnectPick(pick)
             return
         }
-        if formKeys.contains(pick) { return }
+        if formKeys.contains(pick) {
+            store.noteConnectPick(pick)
+            return
+        }
         if let broken = idle.first(where: { $0.tone == .error && formKeys.contains($0.key) }) {
             pick = broken.key
-            return
+        } else {
+            pick = formKeys.first ?? .grok
         }
-        pick = formKeys.first ?? .grok
+        store.noteConnectPick(pick)
     }
 }
 
