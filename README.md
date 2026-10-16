@@ -1,6 +1,6 @@
-# QuotaBar 1.8.20
+# QuotaBar 1.8.21
 
-Mac menu bar extra for live Grok / Cursor / Grok Bot / ChatGPT / Claude usage, plus local and external disks.
+Mac menu bar extra for the shared weekly Grok pool (X Subscription Super: Grok, Cursor, and Grok Bot). The panel also lists local and external disks.
 
 **Do not open `QuotaBar.xcodeproj`.** That path is retired.
 
@@ -13,39 +13,29 @@ Mac menu bar extra for live Grok / Cursor / Grok Bot / ChatGPT / Claude usage, p
 5. First run only: if asked to install **Command Line Tools**, accept. That is a small Apple installer, not the Xcode app.
 6. After it finishes, double-click `Start QuotaBar.command` again
 
-QuotaBar appears on the right of the menu bar. Unconnected services stay off the bar.
+QuotaBar appears on the right of the menu bar. The bar shows one figure: **G** for the shared weekly Grok pool. Unconnected Grok stays off the bar.
 
-- **G** Grok SuperGrok Heavy weekly
-- **C** Cursor Ultra monthly
-- **B** Grok Bot (Sand) weekly
-- **O** ChatGPT / Codex (5-hour + weekly)
-- **AC / AT / AF** Claude current session, this week, and Fable this week (AF hidden when that limit is absent)
-- **D** fullest visible disk used %
-
-- **Left-click** the bar → glass panel (details, connect, hide disks)
+- **Left-click** the bar → glass panel (Grok usage, connect, disks)
 - **Right-click** the bar → short native menu (refresh / copy / alerts / quit)
 
-The panel header should say **v1.8.20**. If it still says an older version, quit QuotaBar and run `Start QuotaBar.command` again.
+The panel header should say **v1.8.21**. If it still says an older version, quit QuotaBar and run `Start QuotaBar.command` again.
 
 Later launches: just double-click `Start QuotaBar.command` again.
 
 ## What it reads
 
-- Grok: `~/.grok/auth.json` + in-app device login (writes the file itself)
-- Cursor + Grok Bot: Cursor local session (`state.vscdb`)
-- ChatGPT: `~/.codex/auth.json` after `codex login` (refreshes the token itself)
-- Claude: Claude Desktop first. The signed-in Claude.app session lives in `~/Library/Application Support/Claude/` (`Network/Cookies` or `Cookies`, plus `config.json` when it has an oauth token cache). The cookie key is the login-keychain item **Claude Safe Storage** (read with `/usr/bin/security`, never written to a log). QuotaBar calls the same `claude.ai` usage endpoint Settings → Usage uses and shows Current session (AC), This week (AT), and Fable this week (AF) when that window is in the payload. The menu bar prints them as `AC 19  AT 82  AF 94`. A missing window, including Fable on non-Max plans, is left out. There is no plain usage-percent file to read. Claude Code oauth (`Claude Code-credentials`, `~/.claude/.credentials.json`) is only a fallback when that login already exists. A terminal `claude` login is not required.
-- Disks: mounted local + external volumes (auto add/remove), capacity, read/write rate, status
+- Grok: `~/.grok/auth.json` + in-app device login (writes the file itself). This is the only usage figure QuotaBar fetches. The number is the shared weekly pool.
+- Disks: mounted local + external volumes (auto add/remove), capacity, read/write rate, status. They appear in the panel, not on the menu bar.
 
-If Cursor shows `—`, open Cursor once, then start QuotaBar again.
+Cursor, Grok Bot, ChatGPT, and Claude readers are still in the source tree. QuotaBar does not poll them, so it does not read the Cursor session, Codex auth, or the Claude keychain.
 
-If ChatGPT shows `—`, run `codex login` once in Terminal, then click Refresh.
+Plug in a USB / Thunderbolt disk and it appears in the panel; eject it and it disappears. Hide Time Machine or VM disks from the panel.
 
-If Claude stays under Connect, open Claude Desktop while signed in, then click Refresh. The first read can ask for the Keychain item Claude Safe Storage — click **Allow**, not Always Allow (Always Allow trusts `/usr/bin/security` for every app). QuotaBar asks once per launch. After Deny or a timed-out prompt it does not ask again until you click Refresh. Pasting Claude Code credentials is optional. A connected account leaves Connect and shows in Usage, including **AC**, **AT**, and **AF** on the menu bar.
+The bar turns orange / red when the Grok pool is actually high (85%+). A normal 60–80% day stays neutral.
 
-Plug in a USB / Thunderbolt disk and it appears in the panel; eject it and it disappears. Hide Time Machine or VM disks from the panel — they stay off the bar until you Show them again.
+## 1.8.21
 
-The bar only turns orange / red on a token that is actually high (85%+ services, 90%+ disks). A normal 60–80% day stays neutral.
+The menu bar shows only the shared weekly Grok pool. Claude, Codex, Cursor, and Grok Bot stay off the bar and out of the panel. Those sources are not polled. Disks stay in the panel and stay off the bar.
 
 ## 1.8.20
 

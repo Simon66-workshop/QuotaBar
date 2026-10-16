@@ -9,7 +9,9 @@ import Foundation
 /// 3. Paste / device-login form: set `connectTitle` and add a branch in
 ///    `ConnectCell`. Local-file sources (Cursor, Codex) leave `connectTitle` nil.
 ///
-/// `UsageStore.refresh()` walks `all`. Do not add another ad-hoc fetch.
+/// `UsageStore.refresh()` walks `polled` (the shared Grok pool). Other
+/// sources stay in `all` so their readers still compile, but they are not
+/// fetched. Do not add another ad-hoc fetch.
 protocol UsageSource: Sendable {
     var key: LaneKey { get }
     var emptySub: String { get }
@@ -34,6 +36,11 @@ enum UsageSources {
         ClaudeUsageSource(),
     ]
 
+    /// Live poll. Cursor, Grok Bot, ChatGPT, and Claude stay in `all`.
+    static let polled: [any UsageSource] = [
+        GrokUsageSource(),
+    ]
+
     static func source(for key: LaneKey) -> (any UsageSource)? {
         all.first(where: { $0.key == key })
     }
@@ -44,11 +51,11 @@ enum UsageSources {
 
     static func loadAll() async -> [Lane] {
         await withTaskGroup(of: Lane.self) { group in
-            for src in all {
+            for src in polled {
                 group.addTask { await src.load() }
             }
             var rows: [Lane] = []
-            rows.reserveCapacity(all.count)
+            rows.reserveCapacity(polled.count)
             for await lane in group { rows.append(lane) }
             return rows
         }

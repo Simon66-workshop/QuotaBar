@@ -348,7 +348,6 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
                 }
             }
         }
-        tip.append(contentsOf: disks.map { "\($0.name) \(Int($0.usedPct.rounded()))% · \($0.sizeLabel) · \($0.rateLabel)" })
         button.toolTip = tip.isEmpty ? "QuotaBar" : tip.joined(separator: "\n")
     }
 

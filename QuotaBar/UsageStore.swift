@@ -184,7 +184,7 @@ final class UsageStore: ObservableObject {
 
     func copySummary() {
         var lines: [String] = []
-        for lane in snap.lanes {
+        for lane in snap.lanes where lane.key == .grok {
             let marked = lane.details.filter { $0.mark != nil }
             if marked.isEmpty {
                 lines.append("\(lane.key.title): \(lane.label) — \(lane.sub)")
@@ -329,10 +329,10 @@ final class UsageStore: ObservableObject {
     }
 
     private func watchAuthDirs() {
+        // Codex and Claude directories stay unwatched so a file change
+        // cannot wake a fetch (and a Claude keychain prompt).
         let dirs = [
             TokenReader.grokDir().path,
-            TokenReader.home().appendingPathComponent(".codex").path,
-            TokenReader.claudeDir().path,
         ]
         for dir in dirs {
             let isOptional = dir.hasSuffix(".codex") || dir.hasSuffix(".claude")
@@ -378,7 +378,7 @@ final class UsageStore: ObservableObject {
 
     private func notifyIfNeeded(_ snap: Snapshot) {
         guard notifyEnabled else { return }
-        for lane in snap.lanes {
+        for lane in snap.lanes where lane.key == .grok {
             guard let used = lane.usedPct else {
                 lastAlert[lane.key] = nil
                 continue

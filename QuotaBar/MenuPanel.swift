@@ -41,7 +41,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.8.20")
+                Text("v1.8.21")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -92,13 +92,18 @@ struct MenuPanel: View {
         .font(.system(size: 12, weight: .semibold))
     }
 
+    /// Shared Grok pool only. Other providers stay in the snapshot unread.
+    private var grokLanes: [Lane] {
+        store.snap.lanes.filter { $0.key == .grok }
+    }
+
     /// Connected or broken — those stay as rows. Empty ones fold into Connect.
     private var listedLanes: [Lane] {
-        store.snap.lanes.filter { $0.tone != .empty }
+        grokLanes.filter { $0.tone != .empty }
     }
 
     private var connectLanes: [Lane] {
-        store.snap.lanes.filter { $0.tone == .empty }
+        grokLanes.filter { $0.tone == .empty }
     }
 
     private var showConnect: Bool {
