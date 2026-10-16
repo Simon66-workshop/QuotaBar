@@ -22,7 +22,8 @@ final class UsageStore: ObservableObject {
 
     var onWillOpenBrowser: (() -> Void)?
     var onLoginFinished: (() -> Void)?
-    var onPanelRelayout: (() -> Void)?
+    /// Layout or measurement signal. The app coalesces these; identical keys do not resize.
+    var onPanelRelayout: ((PanelRefitSignal) -> Void)?
 
     private var timer: AnyCancellable?
     private var diskTimer: AnyCancellable?
@@ -39,8 +40,9 @@ final class UsageStore: ObservableObject {
     private var forceDiskTick = false
     private var mountedAt: [String: Date] = [:]
     private var lastRefreshAt = Date.distantPast
-    private var relayoutWork: DispatchWorkItem?
     private var refreshQueued = false
+    /// Service chosen in Connect. Included in the layout key so a picker change refits once.
+    var connectPick: LaneKey = .grok
 
     init() {
         launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
@@ -214,18 +216,73 @@ final class UsageStore: ObservableObject {
 
     private func flashCopied(_ note: String) {
         copiedNote = note
+        requestPanelRelayout()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
-            if self?.copiedNote == note { self?.copiedNote = "" }
+            guard let self, self.copiedNote == note else { return }
+            self.copiedNote = ""
+            self.requestPanelRelayout()
         }
     }
 
+    /// Asks the open panel to measure again when layout-relevant content changed.
+    /// An unchanged 90s refresh sends the same key and does no window work.
+    /// Disk I/O ticks do not call this unless the row structure changed.
     func requestPanelRelayout() {
-        relayoutWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            self?.onPanelRelayout?()
+        onPanelRelayout?(.content(panelLayoutKey(parts: layoutParts())))
+    }
+
+    /// Natural band heights moved. The key is the measurement, not a request number.
+    func requestMeasuredRefit(header: Double, usage: Double, bottom: Double) {
+        let key = panelMeasureKey(
+            header: header,
+            usage: usage,
+            bottom: bottom,
+            epsilon: PanelFitMetrics.heightEpsilon
+        )
+        onPanelRelayout?(.measure(key))
+    }
+
+    func noteConnectPick(_ key: LaneKey) {
+        guard connectPick != key else { return }
+        connectPick = key
+        requestPanelRelayout()
+    }
+
+    /// Rows and chrome that can change the panel's height. Percents, rates, and
+    /// the "live · Ns ago" clock are omitted so a quiet refresh does not refit.
+    private func layoutParts() -> [String] {
+        var parts: [String] = []
+        for lane in snap.lanes where !lane.key.foldedIntoGrok {
+            parts.append(laneLayoutToken(lane))
         }
-        relayoutWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
+        parts.append("copied:\(copiedNote)")
+        parts.append("pick:\(connectPick.rawValue)")
+        parts.append("login:\(loginInProgress ? 1 : 0)")
+        parts.append("code:\(deviceUserCode)")
+        parts.append("note:\(deviceNote)")
+        parts.append("disks:\(diskLayoutToken(disks))")
+        parts.append("hidden:\(diskLayoutToken(hiddenDisks))")
+        parts.append("expanded:\(expandedDiskID ?? "")")
+        parts.append("healthBusy:\(healthBusyID ?? "")")
+        if let id = expandedDiskID, let health = diskHealth[id] {
+            parts.append("health:\(health.line)")
+        } else {
+            parts.append("health:")
+        }
+        return parts
+    }
+
+    private func laneLayoutToken(_ lane: Lane) -> String {
+        let placement: String
+        switch lane.tone {
+        case .empty: placement = "connect"
+        case .error: placement = "error"
+        default: placement = "listed"
+        }
+        let details = lane.details.map { detail in
+            "\(detail.mark ?? "")|\(detail.label)|\(detail.reset ?? "")|\(detail.window ?? "")"
+        }.joined(separator: "/")
+        return "\(lane.key.rawValue)|\(placement)|\(lane.sub)|\(lane.window)|\(details)"
     }
 
     func toggleInspect(_ disk: DiskVolume) {
@@ -240,6 +297,7 @@ final class UsageStore: ObservableObject {
             return
         }
         healthBusyID = disk.id
+        requestPanelRelayout()
         let id = disk.id
         let path = disk.path
         Task.detached {
@@ -291,6 +349,7 @@ final class UsageStore: ObservableObject {
         let loaded = await UsageSources.loadAll()
         let next = Snapshot.assemble(loaded, fetchedAt: Date())
         snap = next
+        requestPanelRelayout()
         if liveIO { forceDiskTick = true }
         tickDisks()
         notifyIfNeeded(next)
@@ -374,7 +433,6 @@ final class UsageStore: ObservableObject {
 
     private func stopWatch() {
         watchDebounce?.cancel()
-        relayoutWork?.cancel()
         for src in authWatchers { src.cancel() }
         authWatchers.removeAll()
         watchFds.removeAll()
@@ -492,9 +550,20 @@ final class UsageStore: ObservableObject {
         let hidden = next.filter { ignoredIDs.contains($0.id) }
 
         if sameDisks(previous, visible), hiddenDisks.map(\.id) == hidden.map(\.id) { return }
+        let beforeLayout = diskLayoutToken(previous) + "#" + diskLayoutToken(hiddenDisks)
+        let afterLayout = diskLayoutToken(visible) + "#" + diskLayoutToken(hidden)
         disks = visible
         hiddenDisks = hidden
         notifyIfNeeded(snap)
+        if afterLayout != beforeLayout {
+            requestPanelRelayout()
+        }
+    }
+
+    /// Names, mount badges, and hidden rows change the panel. Rates and percents do not.
+    private func diskLayoutToken(_ list: [DiskVolume]) -> String {
+        list.map { "\($0.id)\u{1f}\($0.name)\u{1f}\($0.justChanged ?? "")\u{1f}\($0.ignoreHint ?? "")" }
+            .joined(separator: "\u{1e}")
     }
 
     private func sameDisks(_ a: [DiskVolume], _ b: [DiskVolume]) -> Bool {

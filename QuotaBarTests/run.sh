@@ -9,5 +9,6 @@ swiftc \
   "$HERE/UsageSourcesStub.swift" \
   "$ROOT/QuotaBar/Models.swift" \
   "$ROOT/QuotaBar/ClaudeUsage.swift" \
+  "$ROOT/QuotaBar/PanelFit.swift" \
   -o "$OUT"
 "$OUT"

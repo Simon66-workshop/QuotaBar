@@ -1,17 +1,83 @@
 import SwiftUI
 
 struct MenuPanel: View {
+    var probeEpoch: Int
     @EnvironmentObject private var store: UsageStore
+    @EnvironmentObject private var fit: PanelFitModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: PanelSpace.section) {
-            header
-            if !listedLanes.isEmpty {
-                VStack(alignment: .leading, spacing: PanelSpace.label) {
-                    sectionLabel("Usage")
-                    UsageTable(lanes: listedLanes)
+        fitted
+            .background(Color.clear)
+            .onPreferenceChange(PanelBandKey.self) { bands in
+                if fit.record(header: bands.header, usage: bands.usage, bottom: bands.bottom, epoch: probeEpoch) {
+                    store.requestMeasuredRefit(header: fit.header, usage: fit.usage, bottom: fit.bottom)
                 }
             }
+    }
+
+    @ViewBuilder
+    private var fitted: some View {
+        switch fit.plan.scroll {
+        case .body:
+            ScrollView(.vertical) {
+                stack(usageViewport: nil)
+                    .frame(width: CGFloat(PanelFitMetrics.panelWidth), alignment: .topLeading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(width: CGFloat(PanelFitMetrics.panelWidth), height: CGFloat(max(fit.plan.height, 1)))
+        case .usage(let viewport):
+            stack(usageViewport: viewport)
+                .frame(
+                    width: CGFloat(PanelFitMetrics.panelWidth),
+                    height: CGFloat(max(fit.plan.height, 1)),
+                    alignment: .top
+                )
+        case .none:
+            stack(usageViewport: nil)
+                .frame(width: CGFloat(PanelFitMetrics.panelWidth), alignment: .topLeading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Header, usage, and the account / disk / footer chrome keep the 1.8.22 gaps.
+    /// Usage is the only band that scrolls; the others stay intrinsic.
+    private func stack(usageViewport: Double?) -> some View {
+        VStack(alignment: .leading, spacing: PanelSpace.section) {
+            header
+                .fixedSize(horizontal: false, vertical: true)
+                .panelBand(.header)
+            usageBand(viewport: usageViewport)
+            bottomChrome
+                .fixedSize(horizontal: false, vertical: true)
+                .panelBand(.bottom)
+        }
+        .padding(CGFloat(PanelFitMetrics.outerPadding))
+    }
+
+    @ViewBuilder
+    private func usageBand(viewport: Double?) -> some View {
+        if !listedLanes.isEmpty {
+            let block = usageBlock.panelBand(.usage)
+            if let viewport, viewport > 0 {
+                ScrollView(.vertical) {
+                    block.fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(height: CGFloat(viewport))
+            } else {
+                block
+            }
+        }
+    }
+
+    private var usageBlock: some View {
+        VStack(alignment: .leading, spacing: PanelSpace.label) {
+            sectionLabel("Usage")
+            UsageTable(lanes: listedLanes)
+        }
+    }
+
+    private var bottomChrome: some View {
+        VStack(alignment: .leading, spacing: PanelSpace.section) {
             if TokenReader.hasGrokSession() {
                 AccountRow()
             }
@@ -21,10 +87,6 @@ struct MenuPanel: View {
             DiskSection()
             footer
         }
-        .padding(16)
-        .frame(width: 448, alignment: .topLeading)
-        .fixedSize(horizontal: false, vertical: true)
-        .background(Color.clear)
     }
 
     private func sectionLabel(_ title: String) -> some View {
@@ -40,7 +102,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.8.22")
+                Text("v1.8.23")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -160,12 +222,11 @@ private struct ConnectCell: View {
         .onChange(of: idle.map(\.id)) { _, _ in syncPick() }
         .onChange(of: store.loginInProgress) { _, live in
             if live { pick = .grok }
+            store.noteConnectPick(pick)
             store.requestPanelRelayout()
         }
-        .onChange(of: pick) { _, _ in
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                store.requestPanelRelayout()
-            }
+        .onChange(of: pick) { _, newValue in
+            store.noteConnectPick(newValue)
         }
         .onChange(of: store.deviceUserCode) { _, _ in
             store.requestPanelRelayout()
@@ -195,14 +256,19 @@ private struct ConnectCell: View {
     private func syncPick() {
         if store.loginInProgress {
             pick = .grok
+            store.noteConnectPick(pick)
             return
         }
-        if formKeys.contains(pick) { return }
+        if formKeys.contains(pick) {
+            store.noteConnectPick(pick)
+            return
+        }
         if let broken = idle.first(where: { $0.tone == .error && formKeys.contains($0.key) }) {
             pick = broken.key
-            return
+        } else {
+            pick = formKeys.first ?? .grok
         }
-        pick = formKeys.first ?? .grok
+        store.noteConnectPick(pick)
     }
 }
 
@@ -230,7 +296,7 @@ private struct AccountRow: View {
 
 private enum PanelSpace {
     /// Same gap between usage, the Grok account row, connect, and disks.
-    static let section: CGFloat = 10
+    static let section: CGFloat = CGFloat(PanelFitMetrics.sectionSpacing)
     static let label: CGFloat = 4
     static let row: CGFloat = 3
 }
@@ -460,6 +526,49 @@ private struct Meter: View {
         case .crit, .error: .red
         default: Color.accentColor.opacity(0.85)
         }
+    }
+}
+
+private enum PanelBand {
+    case header, usage, bottom
+}
+
+private struct PanelBandHeights: Equatable {
+    var header: CGFloat = 0
+    var usage: CGFloat = 0
+    var bottom: CGFloat = 0
+
+    static func reading(_ band: PanelBand, _ height: CGFloat) -> PanelBandHeights {
+        var value = PanelBandHeights()
+        switch band {
+        case .header: value.header = height
+        case .usage: value.usage = height
+        case .bottom: value.bottom = height
+        }
+        return value
+    }
+}
+
+private struct PanelBandKey: PreferenceKey {
+    static var defaultValue = PanelBandHeights()
+    static func reduce(value: inout PanelBandHeights, nextValue: () -> PanelBandHeights) {
+        let next = nextValue()
+        if next.header > 0 { value.header = next.header }
+        if next.usage > 0 { value.usage = next.usage }
+        if next.bottom > 0 { value.bottom = next.bottom }
+    }
+}
+
+private extension View {
+    func panelBand(_ band: PanelBand) -> some View {
+        background(
+            GeometryReader { geo in
+                Color.clear.preference(
+                    key: PanelBandKey.self,
+                    value: PanelBandHeights.reading(band, geo.size.height)
+                )
+            }
+        )
     }
 }
 
