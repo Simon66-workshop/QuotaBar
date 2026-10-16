@@ -24,6 +24,12 @@ enum LaneKey: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Cursor and Grok Bot bill against the same weekly pool as Grok.
+    /// They are not separate bar, tooltip, or panel items.
+    var foldedIntoGrok: Bool { self == .cursor || self == .bot }
+
+    static let sharedPoolCaption = "Shared Grok + Cursor + Bot pool"
+
     var windowShort: String {
         switch self {
         case .grok: "week"
@@ -210,8 +216,8 @@ struct Snapshot {
     }
 
     var lanes: [Lane] { LaneKey.allCases.map { self[$0] } }
-    /// Menu bar is the shared weekly Grok pool only.
-    var barLanes: [Lane] { lanes.filter { $0.key == .grok && $0.showsOnBar } }
+    /// Menu bar lanes. Cursor and Grok Bot stay off; their pool is G.
+    var barLanes: [Lane] { lanes.filter { $0.showsOnBar && !$0.key.foldedIntoGrok } }
 
     func isLinked(_ key: LaneKey) -> Bool {
         let tone = self[key].tone
@@ -245,13 +251,13 @@ struct Snapshot {
         Self.title(from: barGroups(disks: disks))
     }
 
-    /// One group for the shared Grok pool (`G 21`). Other providers and disk
-    /// letters stay off the bar; disks still render in the panel.
-    /// A lane with marks (Claude AC / AT / AF) stays one group of compact
-    /// tokens if that lane is ever passed through — the bar filter drops it.
+    /// One group per provider or disk, joined later with ` · `.
+    /// A Claude lane that has AC / AT / AF marks is one group of compact tokens
+    /// (`AC 19  AT 82  AF 94`). Grok stays `G 21` (the shared pool). Cursor and
+    /// Grok Bot are dropped. Every other lane stays `O 15`.
     static func barGroups(lanes: [Lane], disks: [DiskVolume]) -> [[BarToken]] {
         var groups: [[BarToken]] = []
-        for lane in lanes where lane.key == .grok && lane.showsOnBar {
+        for lane in lanes where !lane.key.foldedIntoGrok {
             let marked = lane.details.filter { $0.mark != nil }
             if !marked.isEmpty {
                 groups.append(marked.map { detail in
@@ -265,8 +271,9 @@ struct Snapshot {
                 groups.append([BarToken(text: "\(lane.key.letter) —", tone: lane.tone)])
             }
         }
-        // `barDiskBits` still describes D / E. The bar does not draw them.
-        _ = disks
+        for bit in barDiskBits(disks) {
+            groups.append([BarToken(text: "\(bit.letter) \(bit.pct)", tone: bit.tone)])
+        }
         return groups
     }
 

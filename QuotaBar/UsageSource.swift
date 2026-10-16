@@ -9,9 +9,9 @@ import Foundation
 /// 3. Paste / device-login form: set `connectTitle` and add a branch in
 ///    `ConnectCell`. Local-file sources (Cursor, Codex) leave `connectTitle` nil.
 ///
-/// `UsageStore.refresh()` walks `polled` (the shared Grok pool). Other
-/// sources stay in `all` so their readers still compile, but they are not
-/// fetched. Do not add another ad-hoc fetch.
+/// `UsageStore.refresh()` walks `all`. Cursor and Grok Bot are not listed:
+/// they share the Grok weekly pool, so G is the only figure for that pool.
+/// Do not add another ad-hoc fetch.
 protocol UsageSource: Sendable {
     var key: LaneKey { get }
     var emptySub: String { get }
@@ -30,15 +30,8 @@ extension UsageSource {
 enum UsageSources {
     static let all: [any UsageSource] = [
         GrokUsageSource(),
-        CursorUsageSource(),
-        SandUsageSource(),
         ChatGPTUsageSource(),
         ClaudeUsageSource(),
-    ]
-
-    /// Live poll. Cursor, Grok Bot, ChatGPT, and Claude stay in `all`.
-    static let polled: [any UsageSource] = [
-        GrokUsageSource(),
     ]
 
     static func source(for key: LaneKey) -> (any UsageSource)? {
@@ -51,11 +44,11 @@ enum UsageSources {
 
     static func loadAll() async -> [Lane] {
         await withTaskGroup(of: Lane.self) { group in
-            for src in polled {
+            for src in all {
                 group.addTask { await src.load() }
             }
             var rows: [Lane] = []
-            rows.reserveCapacity(polled.count)
+            rows.reserveCapacity(all.count)
             for await lane in group { rows.append(lane) }
             return rows
         }
@@ -70,6 +63,7 @@ struct GrokUsageSource: UsageSource {
     func fetch() async -> Lane { await UsageClient.fetchGrok() }
 }
 
+/// Not in `UsageSources.all`. Cursor usage is the shared Grok pool.
 struct CursorUsageSource: UsageSource {
     var key: LaneKey { .cursor }
     var emptySub: String { "Ultra monthly  ·  not connected" }
@@ -82,6 +76,7 @@ struct CursorUsageSource: UsageSource {
     }
 }
 
+/// Not in `UsageSources.all`. Grok Bot usage is the shared Grok pool.
 struct SandUsageSource: UsageSource {
     var key: LaneKey { .bot }
     var emptySub: String { "Sand weekly  ·  needs Cursor" }
