@@ -1,6 +1,6 @@
-# QuotaBar 1.8.23
+# QuotaBar 1.8.24
 
-Mac menu bar extra for live usage. **G** is the shared weekly pool (X Subscription Super: Grok, Cursor, and Grok Bot). ChatGPT / Codex, Claude, and local and external disks stay on the bar.
+Mac menu bar extra for live usage. **G** is the shared weekly pool (X Subscription Super: Grok, Cursor, and Grok Bot). ChatGPT / Codex, Claude, local and external disks, and local RAM stay on the bar.
 
 **Do not open `QuotaBar.xcodeproj`.** That path is retired.
 
@@ -20,13 +20,14 @@ QuotaBar appears on the right of the menu bar. Unconnected services stay off the
 - **AC / AT / AF** Claude current session, this week, and Fable this week (AF hidden when that limit is absent)
 - **D** fullest visible disk used %
 - **E** each external disk
+- **M** local RAM used % (for example, `M 63%`)
 
 Cursor and Grok Bot are not separate bar, tooltip, or panel items.
 
 - **Left-click** the bar → glass panel (details, connect, hide disks)
 - **Right-click** the bar → short native menu (refresh / copy / alerts / quit)
 
-The panel header should say **v1.8.23**. If it still says an older version, quit QuotaBar and run `Start QuotaBar.command` again.
+The panel header should say **v1.8.24**. If it still says an older version, quit QuotaBar and run `Start QuotaBar.command` again.
 
 Later launches: just double-click `Start QuotaBar.command` again.
 
@@ -35,6 +36,7 @@ Later launches: just double-click `Start QuotaBar.command` again.
 - Grok: `~/.grok/auth.json` + in-app device login (writes the file itself). This percentage is the shared weekly pool, shown as **G**. Cursor and Grok Bot are not polled on their own.
 - ChatGPT: `~/.codex/auth.json` after `codex login` (refreshes the token itself)
 - Claude: Claude Desktop first. The signed-in Claude.app session lives in `~/Library/Application Support/Claude/` (`Network/Cookies` or `Cookies`, plus `config.json` when it has an oauth token cache). The cookie key is the login-keychain item **Claude Safe Storage** (read with `/usr/bin/security`, never written to a log). QuotaBar calls the same `claude.ai` usage endpoint Settings → Usage uses and shows Current session (AC), This week (AT), and Fable this week (AF) when that window is in the payload. The menu bar prints them as `AC 19  AT 82  AF 94`. A missing window, including Fable on non-Max plans, is left out. There is no plain usage-percent file to read. Claude Code oauth (`Claude Code-credentials`, `~/.claude/.credentials.json`) is only a fallback when that login already exists. A terminal `claude` login is not required.
+- Memory: local Mach VM statistics and physical RAM; no extra permission or entitlement
 - Disks: mounted local + external volumes (auto add/remove), capacity, read/write rate, status
 
 If ChatGPT shows `—`, run `codex login` once in Terminal, then click Refresh.
@@ -43,7 +45,15 @@ If Claude stays under Connect, open Claude Desktop while signed in, then click R
 
 Plug in a USB / Thunderbolt disk and it appears in the panel; eject it and it disappears. Hide Time Machine or VM disks from the panel — they stay off the bar until you Show them again.
 
-The bar only turns orange / red on a token that is actually high (85%+ services, 90%+ disks). A normal 60–80% day stays neutral.
+The bar only turns orange / red on a token that is actually high (85%+ services, 90%+ disks / RAM). A normal 60–80% day stays neutral.
+
+## 1.8.24
+
+Local RAM is shown as **M** beside the disks, with a used / total GB line in the panel, native menu, tooltip, and copied summary. RAM shares the existing disk poll (12s with the panel closed, 3s open); no extra timer, subprocess, permission, entitlement, or RAM alert is added. Failed samples show `M —` / `Unavailable`, not zero or a stale value. Colors use the disk occupancy bands (orange at 90%, red at 96%); they do **not** represent macOS memory pressure.
+
+`host_statistics64(HOST_VM_INFO64)` supplies `vm_statistics64`: used bytes = `(active_count + wire_count + compressor_page_count) * host_page_size`; total bytes = `ProcessInfo.processInfo.physicalMemory`. This follows the requested Activity Monitor-style Memory Used formula, not `total - free`. Inactive, free, and speculative pages are not added; speculative pages are already included in the kernel's free count. Purgeable pages receive no separate adjustment (in particular, no subtraction from active). The compressor contributes its actual physical footprint, not `total_uncompressed_pages_in_compressor`. GB labels use binary units (1 GB = 1,073,741,824 bytes), so 16 GiB of RAM displays as 16.0 GB.
+
+Run `bash QuotaBarTests/run.sh` for regression tests and `bash QuotaBarTests/check-memory.sh` for a live comparison using the app's RAM sampler, `vm_stat`, and read-only `memory_pressure`. The pressure tool's free percentage is a different metric, not the complement of **M**; small sampling-time differences in page counts are expected.
 
 ## 1.8.23
 
