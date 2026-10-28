@@ -14,6 +14,7 @@ final class UsageStore: ObservableObject {
     @Published var loginInProgress = false
     @Published var copiedNote: String = ""
     @Published var disks: [DiskVolume] = []
+    @Published var memory: MemoryUsage?
     @Published var hiddenDisks: [DiskVolume] = []
     @Published var ignoredIDs: Set<String>
     @Published var expandedDiskID: String?
@@ -205,6 +206,7 @@ final class UsageStore: ObservableObject {
                 lines.append(line)
             }
         }
+        lines.append("Memory: \(memory?.barLabel ?? "M —") · \(memory?.sizeLabel ?? "Unavailable")")
         for disk in disks {
             lines.append("\(disk.name): \(Int(disk.usedPct.rounded()))% — \(disk.sizeLabel) · \(disk.statusLabel) · \(disk.rateLabel)")
         }
@@ -487,6 +489,10 @@ final class UsageStore: ObservableObject {
         }
         forceDiskTick = false
         lastCapacityTick = Date()
+
+        // Share the 12s closed / 3s open disk poll, before its no-op early return.
+        let nextMemory = MemoryMonitor.snapshot()
+        if memory != nextMemory { memory = nextMemory }
 
         let previous = disks
         let previousAll = disks + hiddenDisks

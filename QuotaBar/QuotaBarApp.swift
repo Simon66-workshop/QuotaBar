@@ -53,12 +53,12 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         self.store = store
 
         rebuildStatusItem()
-        applyTitle(store.snap, disks: store.disks)
+        applyTitle(store.snap, disks: store.disks, memory: store.memory)
 
-        titleWatch = Publishers.CombineLatest(store.$snap, store.$disks)
+        titleWatch = Publishers.CombineLatest3(store.$snap, store.$disks, store.$memory)
             .receive(on: RunLoop.main)
-            .sink { [weak self] snap, disks in
-                self?.applyTitle(snap, disks: disks)
+            .sink { [weak self] snap, disks, memory in
+                self?.applyTitle(snap, disks: disks, memory: memory)
             }
 
         // Local: clicks that still land on our status-item window after action dies.
@@ -113,7 +113,7 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         statusItem = item
         rebindBar()
         if let snap = store?.snap {
-            applyTitle(snap, disks: store?.disks ?? [])
+            applyTitle(snap, disks: store?.disks ?? [], memory: store?.memory)
         }
     }
 
@@ -447,9 +447,12 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
-        let header = NSMenuItem(title: store.snap.barTitle(disks: store.disks), action: nil, keyEquivalent: "")
+        let header = NSMenuItem(title: store.snap.barTitle(disks: store.disks, memory: store.memory), action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
+        let memory = NSMenuItem(title: "Memory: \(store.memory?.sizeLabel ?? "Unavailable")", action: nil, keyEquivalent: "")
+        memory.isEnabled = false
+        menu.addItem(memory)
         menu.addItem(.separator())
         menu.addItem(makeItem("Refresh now", #selector(menuRefresh)))
         menu.addItem(makeItem("Copy summary", #selector(menuCopy)))
@@ -479,9 +482,9 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
     @objc func menuToggleLogin() { store?.toggleLaunchAtLogin() }
     @objc func menuQuit() { store?.quit() }
 
-    private func applyTitle(_ snap: Snapshot, disks: [DiskVolume]) {
+    private func applyTitle(_ snap: Snapshot, disks: [DiskVolume], memory: MemoryUsage?) {
         guard let button = statusItem?.button else { return }
-        let groups = snap.barGroups(disks: disks)
+        let groups = snap.barGroups(disks: disks, memory: memory)
         let raw = Snapshot.title(from: groups)
         if raw != lastTitle {
             lastTitle = raw
@@ -533,6 +536,7 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
                 }
             }
         }
+        tip.append("Memory \(memory?.barLabel ?? "M —") · \(memory?.sizeLabel ?? "Unavailable")")
         tip.append(contentsOf: disks.map { "\($0.name) \(Int($0.usedPct.rounded()))% · \($0.sizeLabel) · \($0.rateLabel)" })
         button.toolTip = tip.isEmpty ? "QuotaBar" : tip.joined(separator: "\n")
     }

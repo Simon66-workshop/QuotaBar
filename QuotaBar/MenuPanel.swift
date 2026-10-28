@@ -84,6 +84,7 @@ struct MenuPanel: View {
             if showConnect {
                 ConnectCell(idle: connectLanes)
             }
+            MemoryRow(usage: store.memory)
             DiskSection()
             footer
         }
@@ -102,7 +103,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.8.23")
+                Text("v1.8.24")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -704,6 +705,29 @@ private struct ClaudeConnectForm: View {
         }
         .padding(8)
         .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+struct MemoryRow: View {
+    let usage: MemoryUsage?
+
+    var body: some View {
+        HStack(spacing: Col.gap) {
+            Text("M")
+                .font(.system(size: 11, weight: .bold).monospaced())
+                .foregroundStyle(.secondary)
+                .frame(width: Col.mark, alignment: .center)
+            Text("Memory")
+                .font(.system(size: 12, weight: .medium))
+            Spacer(minLength: Col.gap)
+            Text(usage?.sizeLabel ?? "Unavailable")
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 2)
+        .padding(.vertical, PanelSpace.row)
+        .help("Active + wired + compressed physical memory; not memory pressure")
     }
 }
 

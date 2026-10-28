@@ -115,8 +115,8 @@ let groups = Snapshot.barGroups(lanes: [
     ),
 ])
 let title = Snapshot.title(from: groups)
-check(title == "G 21 · O 15 · AC 19  AT 82  AF 94 · D 70 · E 40", "bar title \(title)")
-check(groups.count == 5, "groups \(groups.count)")
+check(title == "G 21 · O 15 · AC 19  AT 82  AF 94 · D 70 · E 40 · M —", "bar title \(title)")
+check(groups.count == 6, "groups \(groups.count)")
 check(groups[2].map(\.tone) == [.ok, .ok, .warn], "bar tones \(groups[2].map(\.tone))")
 check(!title.contains("Chat"), "grok details stayed off the bar")
 check(!title.contains("C 40"), "cursor stayed off the bar")
@@ -134,7 +134,7 @@ let noFable = parse("""
 """)
 check(noFable?.details.map(\.mark) == ["AC", "AT"], "missing fable marks \(noFable?.details.map(\.mark) ?? [])")
 check(noFable?.details.contains { $0.mark == "AF" } == false, "AF hidden when seven_day_fable is null")
-check(Snapshot.title(from: Snapshot.barGroups(lanes: [noFable].compactMap { $0 }, disks: [])) == "AC 19  AT 82", "bar without AF")
+check(Snapshot.title(from: Snapshot.barGroups(lanes: [noFable].compactMap { $0 }, disks: [])) == "AC 19  AT 82 · M —", "bar without AF")
 
 let absentKey = parse("""
 {
@@ -172,7 +172,7 @@ let opusNotFable = parse("""
 """)
 check(opusNotFable?.details.map(\.mark) == ["AC", "AT", nil, nil], "opus and sonnet are not AF \(opusNotFable?.details.map(\.mark) ?? [])")
 check(opusNotFable?.details.map(\.label) == ["Current session", "This week", "Sonnet this week", "Opus this week"], "named model order")
-check(Snapshot.title(from: Snapshot.barGroups(lanes: [opusNotFable].compactMap { $0 }, disks: [])) == "AC 19  AT 82", "opus stays off the bar")
+check(Snapshot.title(from: Snapshot.barGroups(lanes: [opusNotFable].compactMap { $0 }, disks: [])) == "AC 19  AT 82 · M —", "opus stays off the bar")
 
 let limits = parse("""
 {
@@ -225,12 +225,12 @@ let opusOnly = parse("""
 """)
 check(opusOnly?.details.map(\.mark) == [nil], "opus-only has no AF mark")
 check(opusOnly?.details.first?.label == "Opus this week", "opus label")
-check(Snapshot.title(from: Snapshot.barGroups(lanes: [opusOnly].compactMap { $0 }, disks: [])) == "A 94", "opus-only stays a single A figure")
+check(Snapshot.title(from: Snapshot.barGroups(lanes: [opusOnly].compactMap { $0 }, disks: [])) == "A 94 · M —", "opus-only stays a single A figure")
 
 let broken = Lane.error(.claude, message: "Claude Desktop usage had no session or week window")
-check(Snapshot.title(from: Snapshot.barGroups(lanes: [broken], disks: [])) == "A —", "error lane stays A —")
-check(Snapshot.title(from: Snapshot.barGroups(lanes: [Lane.error(.grok, message: "billing HTTP 401")], disks: [])) == "G —", "grok error stays on the bar")
-check(Snapshot.title(from: Snapshot.barGroups(lanes: [Lane.used(.cursor, percent: 40, sub: "month"), Lane.used(.bot, percent: 9, sub: "week")], disks: [])) == "QuotaBar", "cursor and bot alone stay off the bar")
+check(Snapshot.title(from: Snapshot.barGroups(lanes: [broken], disks: [])) == "A — · M —", "error lane stays A —")
+check(Snapshot.title(from: Snapshot.barGroups(lanes: [Lane.error(.grok, message: "billing HTTP 401")], disks: [])) == "G — · M —", "grok error stays on the bar")
+check(Snapshot.title(from: Snapshot.barGroups(lanes: [Lane.used(.cursor, percent: 40, sub: "month"), Lane.used(.bot, percent: 9, sub: "week")], disks: [])) == "M —", "cursor and bot alone stay off the bar")
 
 check(parse("{}") == nil, "empty object")
 check(parse("{\"five_hour\": \"nope\", \"seven_day\": [], \"seven_day_fable\": {\"utilization\": null}, \"limits\": {\"kind\": \"session\"}, \"models\": \"fable\"}") == nil, "malformed types")
@@ -280,8 +280,9 @@ let fableTwice = parse("""
 }
 """)
 check(fableTwice?.details.filter { $0.mark == "AF" }.count == 1, "differently named Fable sources collapse to one AF \(fableTwice?.details.map(\.label) ?? [])")
-check(Snapshot.title(from: Snapshot.barGroups(lanes: [fableTwice].compactMap { $0 }, disks: [])) == "AC 19  AT 82  AF 94", "bar has a single AF")
+check(Snapshot.title(from: Snapshot.barGroups(lanes: [fableTwice].compactMap { $0 }, disks: [])) == "AC 19  AT 82  AF 94 · M —", "bar has a single AF")
 
+runMemoryChecks()
 runPanelFitChecks()
 
 if failures == 0 {
@@ -299,6 +300,32 @@ func near(_ value: TimeInterval?, _ expected: TimeInterval) -> Bool {
 func fired(_ decision: PanelRefitDecision, at expected: TimeInterval) -> Bool {
     guard case .schedule(let fireAt) = decision else { return false }
     return near(fireAt, expected)
+}
+
+func runMemoryChecks() {
+    let gb: UInt64 = 1_073_741_824
+    let memory = MemoryUsage(usedBytes: 10 * gb, totalBytes: 16 * gb)
+    check(memory.usedPct == 62.5, "RAM percentage uses physical bytes")
+    check(memory.shownPct == 63 && memory.barLabel == "M 63%", "RAM rounds with a percent suffix")
+    check(memory.sizeLabel == "10.0 / 16.0 GB used", "RAM detail uses binary GB")
+    check(memory.tone == .ok, "normal RAM is neutral")
+    for (percent, tone) in [(0, Tone.ok), (89, .ok), (90, .warn), (95, .warn), (96, .crit), (100, .crit)] {
+        let sample = MemoryUsage(usedBytes: UInt64(percent), totalBytes: 100)
+        check(sample.tone == tone, "RAM \(percent)% follows disk color bands")
+    }
+    check(MemoryUsage(usedBytes: 101, totalBytes: 100).shownPct == 100, "RAM percentage clamps to 100")
+    check(MemoryUsage(usedBytes: 0, totalBytes: 0).usedPct == 0, "zero denominator is safe")
+    let ramOnly = Snapshot.barGroups(lanes: [], disks: [], memory: memory)
+    check(ramOnly == [[Snapshot.BarToken(text: "M 63%", tone: .ok)]], "RAM appears without linked accounts or disks")
+    check(Snapshot.title(from: Snapshot.barGroups(lanes: [], disks: [])) == "M —", "failed RAM sample is unknown, not zero")
+    check(Snapshot.vacant.barTitle(disks: [], memory: memory) == "M 63%", "snapshot forwards RAM to the status title")
+    let disk = DiskVolume(
+        id: "ram-test", name: "System", path: "/", kind: .internalDrive,
+        totalBytes: 100, freeBytes: 30, usedPct: 70, readBps: 0, writeBps: 0,
+        isReadOnly: false, isRoot: true, justChanged: nil, suggestedIgnore: false, ignoreHint: nil
+    )
+    let combined = Snapshot.barGroups(lanes: [.used(.grok, percent: 21, sub: "week")], disks: [disk], memory: memory)
+    check(Snapshot.title(from: combined) == "G 21 · D 70 · M 63%", "RAM preserves provider and disk token order")
 }
 
 func runPanelFitChecks() {

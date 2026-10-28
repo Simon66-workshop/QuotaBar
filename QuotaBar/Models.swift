@@ -207,6 +207,32 @@ struct DiskVolume: Identifiable, Equatable {
     }
 }
 
+struct MemoryUsage: Equatable {
+    var usedBytes: UInt64
+    var totalBytes: UInt64
+
+    var usedPct: Double {
+        guard totalBytes > 0 else { return 0 }
+        return min(100, max(0, Double(usedBytes) / Double(totalBytes) * 100))
+    }
+
+    var shownPct: Int { Int(usedPct.rounded()) }
+    var barLabel: String { "M \(shownPct)%" }
+
+    /// Match disk usage colors; this is occupancy, not macOS memory pressure.
+    var tone: Tone {
+        if usedPct >= 96 { return .crit }
+        if usedPct >= 90 { return .warn }
+        return .ok
+    }
+
+    /// Binary GB, so a Mac with 16 GiB of physical RAM reads 16.0 GB.
+    var sizeLabel: String {
+        let gb = 1_073_741_824.0
+        return String(format: "%.1f / %.1f GB used", Double(usedBytes) / gb, Double(totalBytes) / gb)
+    }
+}
+
 struct Snapshot {
     private var byKey: [LaneKey: Lane]
     var fetchedAt: Date
@@ -243,19 +269,19 @@ struct Snapshot {
         Self.title(from: Self.barGroups(lanes: barLanes, disks: []))
     }
 
-    func barGroups(disks: [DiskVolume]) -> [[BarToken]] {
-        Self.barGroups(lanes: barLanes, disks: disks)
+    func barGroups(disks: [DiskVolume], memory: MemoryUsage? = nil) -> [[BarToken]] {
+        Self.barGroups(lanes: barLanes, disks: disks, memory: memory)
     }
 
-    func barTitle(disks: [DiskVolume]) -> String {
-        Self.title(from: barGroups(disks: disks))
+    func barTitle(disks: [DiskVolume], memory: MemoryUsage? = nil) -> String {
+        Self.title(from: barGroups(disks: disks, memory: memory))
     }
 
-    /// One group per provider or disk, joined later with ` · `.
+    /// One group per provider, disk, or RAM, joined later with ` · `.
     /// A Claude lane that has AC / AT / AF marks is one group of compact tokens
     /// (`AC 19  AT 82  AF 94`). Grok stays `G 21` (the shared pool). Cursor and
     /// Grok Bot are dropped. Every other lane stays `O 15`.
-    static func barGroups(lanes: [Lane], disks: [DiskVolume]) -> [[BarToken]] {
+    static func barGroups(lanes: [Lane], disks: [DiskVolume], memory: MemoryUsage? = nil) -> [[BarToken]] {
         var groups: [[BarToken]] = []
         for lane in lanes where !lane.key.foldedIntoGrok {
             let marked = lane.details.filter { $0.mark != nil }
@@ -274,6 +300,7 @@ struct Snapshot {
         for bit in barDiskBits(disks) {
             groups.append([BarToken(text: "\(bit.letter) \(bit.pct)", tone: bit.tone)])
         }
+        groups.append([BarToken(text: memory?.barLabel ?? "M —", tone: memory?.tone ?? .empty)])
         return groups
     }
 
