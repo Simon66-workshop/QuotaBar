@@ -32,6 +32,7 @@ enum UsageSources {
         GrokUsageSource(),
         ChatGPTUsageSource(),
         ClaudeUsageSource(),
+        GoogleUsageSource(),
     ]
 
     static func source(for key: LaneKey) -> (any UsageSource)? {
@@ -103,6 +104,15 @@ struct ClaudeUsageSource: UsageSource {
     var connectTitle: String? { "Claude" }
     func hasSession() -> Bool { ClaudeDesktop.hasLocalMaterial() || TokenReader.hasClaudeSession() }
     func fetch() async -> Lane { await UsageClient.fetchClaude() }
+}
+
+struct GoogleUsageSource: UsageSource {
+    var key: LaneKey { .google }
+    var emptySub: String { "Official Antigravity /usage · waiting for quota" }
+    var connectTitle: String? { nil }
+    // Probe the CLI, not auth files. Missing CLI/session shows unavailable GO periods, not a login form.
+    func hasSession() -> Bool { true }
+    func fetch() async -> Lane { await GoogleUsage.fetch() }
 }
 
 /// Process probe via path + argv. `pgrep -x claude` misses `node …/claude`.

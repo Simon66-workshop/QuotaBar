@@ -1,7 +1,7 @@
 import Foundation
 
 enum LaneKey: String, CaseIterable, Identifiable {
-    case grok, cursor, bot, gpt, claude
+    case grok, cursor, bot, gpt, claude, google
     var id: String { rawValue }
 
     var title: String {
@@ -11,6 +11,7 @@ enum LaneKey: String, CaseIterable, Identifiable {
         case .bot: "Grok Bot"
         case .gpt: "ChatGPT"
         case .claude: "Claude"
+        case .google: "Google / Antigravity"
         }
     }
 
@@ -21,6 +22,7 @@ enum LaneKey: String, CaseIterable, Identifiable {
         case .bot: "B"
         case .gpt: "O"
         case .claude: "A"
+        case .google: "GO"
         }
     }
 
@@ -37,6 +39,7 @@ enum LaneKey: String, CaseIterable, Identifiable {
         case .bot: "week"
         case .gpt: "cap"
         case .claude: "5h"
+        case .google: "—"
         }
     }
 }
@@ -79,6 +82,37 @@ struct Lane: Identifiable {
     var details: [LaneDetail]
     /// Window column. Defaults to the lane's short label (`5h`, `week`, …).
     var window: String
+    /// Official Antigravity groups. Kept separate from Claude's marked figures.
+    var googleGroups: [GoogleQuotaGroup] = []
+
+    var googleMenuGroup: GoogleQuotaGroup? {
+        googleGroups.first { $0.name == "Gemini Models" }
+    }
+
+    var googleDisplayGroups: [GoogleQuotaGroup] {
+        guard let primary = googleMenuGroup else { return googleGroups }
+        return [primary] + googleGroups.filter { $0.id != primary.id }
+    }
+
+    /// Shared by tooltip and Copy; every official group stays under Google, never AC/O.
+    var googleSummaryLines: [String] {
+        guard key == .google else { return [] }
+        var lines = ["GO Google / Antigravity · \(sub)"]
+        for group in googleDisplayGroups {
+            lines.append("Antigravity · \(group.name)\(group.name == "Claude and GPT models" ? " (not Claude AC/AT/AF or Codex O)" : "")")
+            for period in GoogleQuotaPeriod.allCases {
+                if let bucket = group.bucket(for: period) {
+                    lines.append("  \(period.title) · \(bucket.summary)")
+                } else {
+                    lines.append("  \(period.title) · \(group.unavailableLabel(for: period))")
+                }
+            }
+            for bucket in group.additionalBuckets {
+                lines.append("  \(bucket.summary)")
+            }
+        }
+        return lines
+    }
 
     var showsOnBar: Bool { tone != .empty }
 
@@ -104,6 +138,62 @@ struct Lane: Identifiable {
             details: details,
             window: window ?? key.windowShort
         )
+    }
+}
+
+enum GoogleQuotaPeriod: String, CaseIterable {
+    case current = "5h"
+    case weekly
+
+    var title: String { self == .current ? "Current usage (5h)" : "Weekly limit" }
+    var barMark: String { self == .current ? "5h" : "W" }
+}
+
+struct GoogleQuotaGroup: Identifiable {
+    var id: String { name }
+    var name: String
+    var description: String
+    var buckets: [GoogleQuotaBucket]
+
+    /// Only the official window field determines the period. Do not guess between duplicates.
+    func bucket(for period: GoogleQuotaPeriod) -> GoogleQuotaBucket? {
+        let matches = buckets.filter { $0.window == period.rawValue }
+        return matches.count == 1 ? matches.first : nil
+    }
+
+    func unavailableLabel(for period: GoogleQuotaPeriod) -> String {
+        buckets.contains { $0.window == period.rawValue } ? "Ambiguous window" : "Not provided"
+    }
+
+    var additionalBuckets: [GoogleQuotaBucket] {
+        let periodIDs = Set(GoogleQuotaPeriod.allCases.compactMap { bucket(for: $0)?.id })
+        return buckets.filter { !periodIDs.contains($0.id) }
+    }
+}
+
+struct GoogleQuotaBucket: Identifiable {
+    var id: String
+    var name: String
+    var window: String
+    var remainingFraction: Double
+    var resetTime: Date
+
+    var usedPct: Double { (1 - remainingFraction) * 100 }
+    var shownUsedPct: Int { Int(usedPct.rounded()) }
+    var shownRemainingPct: Int { 100 - shownUsedPct }
+    var tone: Tone { shownUsedPct >= 95 ? .crit : shownUsedPct >= 85 ? .warn : .ok }
+    var windowLabel: String { window == "weekly" ? "week" : window }
+
+    var summary: String {
+        "\(name) [\(id)] · \(shownUsedPct)% used / \(shownRemainingPct)% left · \(window) · \(resetLabel())"
+    }
+
+    func resetLabel(timeZone: TimeZone = .current) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "MMM d, h:mm a z"
+        return "resets \(formatter.string(from: resetTime))"
     }
 }
 
@@ -280,10 +370,20 @@ struct Snapshot {
     /// One group per provider, disk, or RAM, joined later with ` · `.
     /// A Claude lane that has AC / AT / AF marks is one group of compact tokens
     /// (`AC 19  AT 82  AF 94`). Grok stays `G 21` (the shared pool). Cursor and
-    /// Grok Bot are dropped. Every other lane stays `O 15`.
+    /// Grok Bot are dropped. GO has independently colored 5h and weekly figures.
     static func barGroups(lanes: [Lane], disks: [DiskVolume], memory: MemoryUsage? = nil) -> [[BarToken]] {
         var groups: [[BarToken]] = []
         for lane in lanes where !lane.key.foldedIntoGrok {
+            if lane.key == .google {
+                let group = lane.googleMenuGroup
+                groups.append(GoogleQuotaPeriod.allCases.map { period in
+                    let bucket = group?.bucket(for: period)
+                    let value = bucket.map { "\($0.shownUsedPct)%" } ?? "—"
+                    let prefix = period == .current ? "GO used " : ""
+                    return BarToken(text: "\(prefix)\(period.barMark):\(value)", tone: bucket?.tone ?? .error)
+                })
+                continue
+            }
             let marked = lane.details.filter { $0.mark != nil }
             if !marked.isEmpty {
                 groups.append(marked.map { detail in

@@ -2,7 +2,9 @@ import AppKit
 import Combine
 import SwiftUI
 
+#if !QUOTABAR_COMPONENT_CHECK
 @main
+#endif
 @MainActor
 final class QuotaBarApp: NSObject, NSApplicationDelegate {
     private static var retained: QuotaBarApp?
@@ -519,6 +521,10 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         button.attributedTitle = attr
         var tip: [String] = []
         for lane in snap.barLanes {
+            if lane.key == .google {
+                tip.append(contentsOf: lane.googleSummaryLines)
+                continue
+            }
             let marked = lane.details.filter { $0.mark != nil }
             if marked.isEmpty {
                 if lane.key == .grok {

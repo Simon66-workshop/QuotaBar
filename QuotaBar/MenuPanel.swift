@@ -103,7 +103,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.8.24")
+                Text("v1.8.25")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -313,7 +313,7 @@ private enum Col {
     static let action: CGFloat = 32
 }
 
-private struct UsageTable: View {
+struct UsageTable: View {
     let lanes: [Lane]
 
     var body: some View {
@@ -335,7 +335,10 @@ private struct UsageTable: View {
             }
             ForEach(Array(lanes.enumerated()), id: \.element.id) { index, lane in
                 let figures = lane.details.filter { $0.mark != nil }
-                if figures.isEmpty {
+                if lane.key == .google {
+                    GoogleQuotaTable(lane: lane)
+                        .gridCellColumns(7)
+                } else if figures.isEmpty {
                     GridRow {
                         Text(lane.key.letter)
                             .font(.system(size: 11, weight: .bold).monospaced())
@@ -502,6 +505,89 @@ private struct UsageTable: View {
             return "—"
         }
         return "\(Int(left))%"
+    }
+}
+
+/// Independent Used/Left labels stay visible even when the usage band scrolls.
+private struct GoogleQuotaTable: View {
+    let lane: Lane
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: Col.gap) {
+                Text("GO")
+                    .font(.system(size: 11, weight: .bold).monospaced())
+                    .foregroundStyle(lane.tone == .error ? Color.red : Color.secondary)
+                    .frame(width: Col.mark)
+                Text("Google / Antigravity")
+                    .font(.system(size: 12, weight: .medium))
+            }
+            if lane.tone == .error {
+                Text(lane.sub)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Grid(alignment: .center, horizontalSpacing: Col.gap, verticalSpacing: 0) {
+                ForEach(lane.googleDisplayGroups) { group in
+                    GridRow {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(group.name)
+                                .font(.system(size: 11, weight: .semibold))
+                            if group.name == "Claude and GPT models" {
+                                Text("Antigravity only · not Claude AC/AT/AF or Codex O")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .gridCellColumns(4)
+                        .help(group.description)
+                    }
+                    .padding(.top, 4)
+                    ForEach(GoogleQuotaPeriod.allCases, id: \.self) { period in
+                        quotaRow(period.title, bucket: group.bucket(for: period),
+                                 unavailable: group.unavailableLabel(for: period))
+                    }
+                    ForEach(group.additionalBuckets) { bucket in
+                        quotaRow("\(bucket.name) (\(bucket.window))", bucket: bucket)
+                    }
+                }
+            }
+            .padding(.leading, Col.mark + Col.gap)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, PanelSpace.row)
+    }
+
+    private func quotaRow(_ title: String, bucket: GoogleQuotaBucket?, unavailable: String = "") -> some View {
+        GridRow {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 11))
+                Text(bucket?.resetLabel() ?? unavailable)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .help(bucket.map { "\($0.name) [\($0.id)]" } ?? unavailable)
+            Text(bucket.map { "\($0.shownUsedPct)% used" } ?? "—")
+                .font(.system(size: 11, weight: .medium).monospacedDigit())
+                .foregroundStyle(bucket.map { toneColor($0.tone) } ?? Color.secondary)
+                .frame(width: 72, alignment: .trailing)
+            if let bucket {
+                Meter(value: bucket.usedPct, tone: bucket.tone)
+            } else {
+                Color.clear.frame(width: Col.bar, height: 5)
+            }
+            Text(bucket.map { "\($0.shownRemainingPct)% left" } ?? "—")
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 64, alignment: .trailing)
+        }
+        .padding(.vertical, PanelSpace.row)
     }
 }
 
