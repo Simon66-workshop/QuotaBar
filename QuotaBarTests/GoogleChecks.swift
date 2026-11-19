@@ -70,25 +70,25 @@ func runGoogleChecks() {
     check(emptyArgonSummary.hasSuffix("Gemini 4 Argon\n  Current usage (5h) · Not provided\n  Weekly limit · Not provided"),
           "empty Argon stays visible with neither figures nor resets invented")
     check(googleTokens(changingBucket("remaining_fraction", 0.15)) == [
-        .init(text: "GO used 5h:80%", tone: .ok), .init(text: "W:85%", tone: .warn)
+        .init(text: "GO used 5h:80", tone: .ok), .init(text: "W:85", tone: .warn)
     ], "5h and weekly bar figures are separate, each with its service color")
     check(googleTokens(changingBucket("remaining_fraction", 0.05)).last?.tone == .crit, "95% used service critical band")
-    check(googleTokens(changingBucket("remaining_fraction", 0)).last?.text == "W:100%", "zero remaining means fully used")
+    check(googleTokens(changingBucket("remaining_fraction", 0)).last?.text == "W:100", "zero remaining means fully used")
     let allFree = changingGroups { groups in
         var buckets = groups[0]["buckets"] as! [[String: Any]]
         for i in buckets.indices { buckets[i]["remaining_fraction"] = 1 }
         groups[0]["buckets"] = buckets
     }
-    check(googleTokens(allFree).map(\.text) == ["GO used 5h:0%", "W:0%"], "each returned free window is real zero; no Argon or third-party fallback")
+    check(googleTokens(allFree).map(\.text) == ["GO used 5h:0", "W:0"], "each returned free window is real zero; no Argon or third-party fallback")
     let weeklyOnly = changingGroups { groups in
         groups[0]["buckets"] = [(groups[0]["buckets"] as! [[String: Any]])[0]]
     }
-    check(googleTokens(weeklyOnly) == [.init(text: "GO used 5h:—", tone: .error), .init(text: "W:25%", tone: .ok)],
+    check(googleTokens(weeklyOnly) == [.init(text: "GO used 5h:—", tone: .error), .init(text: "W:25", tone: .ok)],
           "weekly-only Gemini never fills current")
     let currentOnly = changingGroups { groups in
         groups[0]["buckets"] = [(groups[0]["buckets"] as! [[String: Any]])[1]]
     }
-    check(googleTokens(currentOnly).map(\.text) == ["GO used 5h:80%", "W:—"], "current-only Gemini never fills weekly")
+    check(googleTokens(currentOnly).map(\.text) == ["GO used 5h:80", "W:—"], "current-only Gemini never fills weekly")
     let reordered = changingGroups { $0.reverse() }
     check(reordered.googleDisplayGroups.first?.name == "Gemini Models" && googleTokens(reordered) == googleTokens(lane),
           "primary group is shown first without relying on payload order")
@@ -109,7 +109,7 @@ func runGoogleChecks() {
         buckets.append(another)
         groups[0]["buckets"] = buckets
     }
-    check(googleTokens(ambiguous).map(\.text) == ["GO used 5h:80%", "W:—"]
+    check(googleTokens(ambiguous).map(\.text) == ["GO used 5h:80", "W:—"]
           && ambiguous.googleMenuGroup?.unavailableLabel(for: .weekly) == "Ambiguous window"
           && ambiguous.googleMenuGroup?.additionalBuckets.count == 2, "ambiguous periods never select a number arbitrarily; raw buckets remain separate")
     let noGemini = changingGroups { $0.removeFirst() }
@@ -161,7 +161,8 @@ func runGoogleChecks() {
             LaneDetail(label: "week", usedPct: 82, mark: "AT"),
             LaneDetail(label: "Fable", usedPct: 94, mark: "AF")]), lane
     ])
-    check(preserved.menuTitle == "G 21 · O 15 · AC 19  AT 82  AF 94 · GO used 5h:80%  W:25% · M —", "GO preserves existing G/O/AC/AT/AF/RAM ordering")
+    check(preserved.barTitle(disks: [], memory: MemoryUsage(usedBytes: 55, totalBytes: 100))
+          == "G 21 · O 15 · AC 19  AT 82  AF 94 · GO used 5h:80  W:25 · M 55%", "GO preserves existing G/O/AC/AT/AF/RAM formatting and ordering")
     check(!LaneKey.google.foldedIntoGrok, "GO never shares Grok pool")
     check(GoogleUsage.executable == "/Volumes/2T扩展盘/Agent文件/gemini-cli/antigravity/bin/agy"
           && GoogleUsage.arguments == ["-p", "/usage", "--output-format", "json"],

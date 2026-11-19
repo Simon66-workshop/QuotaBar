@@ -378,7 +378,7 @@ struct Snapshot {
                 let group = lane.googleMenuGroup
                 groups.append(GoogleQuotaPeriod.allCases.map { period in
                     let bucket = group?.bucket(for: period)
-                    let value = bucket.map { "\($0.shownUsedPct)%" } ?? "—"
+                    let value = bucket.map { "\($0.shownUsedPct)" } ?? "—"
                     let prefix = period == .current ? "GO used " : ""
                     return BarToken(text: "\(prefix)\(period.barMark):\(value)", tone: bucket?.tone ?? .error)
                 })
