@@ -284,6 +284,7 @@ check(Snapshot.title(from: Snapshot.barGroups(lanes: [fableTwice].compactMap { $
 
 runMemoryChecks()
 runPanelFitChecks()
+runGoogleChecks()
 
 if failures == 0 {
     print("ok \(checks) checks")

@@ -103,7 +103,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.8.24")
+                Text("v1.8.25")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -313,7 +313,7 @@ private enum Col {
     static let action: CGFloat = 32
 }
 
-private struct UsageTable: View {
+struct UsageTable: View {
     let lanes: [Lane]
 
     var body: some View {
@@ -335,7 +335,10 @@ private struct UsageTable: View {
             }
             ForEach(Array(lanes.enumerated()), id: \.element.id) { index, lane in
                 let figures = lane.details.filter { $0.mark != nil }
-                if figures.isEmpty {
+                if lane.key == .google {
+                    GoogleQuotaTable(lane: lane)
+                        .gridCellColumns(7)
+                } else if figures.isEmpty {
                     GridRow {
                         Text(lane.key.letter)
                             .font(.system(size: 11, weight: .bold).monospaced())
@@ -502,6 +505,100 @@ private struct UsageTable: View {
             return "—"
         }
         return "\(Int(left))%"
+    }
+}
+
+/// Uses the existing seven-track table; long official names/reset dates wrap, not clip.
+private struct GoogleQuotaTable: View {
+    let lane: Lane
+
+    var body: some View {
+        Grid(alignment: .center, horizontalSpacing: Col.gap, verticalSpacing: 0) {
+            GridRow {
+                Text("GO")
+                    .font(.system(size: 11, weight: .bold).monospaced())
+                    .foregroundStyle(toneColor(lane.tone))
+                    .frame(width: Col.mark)
+                Text("Google / Antigravity")
+                    .font(.system(size: 12, weight: .medium))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(minWidth: Col.nameMin, maxWidth: .infinity, alignment: .leading)
+                Text(lane.label)
+                    .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(toneColor(lane.tone))
+                    .frame(width: Col.used, alignment: .trailing)
+                Meter(value: lane.usedPct ?? 0, tone: lane.tone)
+                Text(lane.remainingPct.map { "\(Int($0))%" } ?? "—")
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: Col.meta, alignment: .trailing)
+                Text(lane.window)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: Col.extra, alignment: .trailing)
+                Color.clear.frame(width: Col.action, height: 1)
+            }
+            .padding(.vertical, PanelSpace.row)
+            GridRow {
+                Text(lane.sub)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .gridCellColumns(7)
+            }
+            .padding(.bottom, 4)
+            ForEach(lane.googleGroups) { group in
+                GridRow {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(group.name)
+                            .font(.system(size: 11, weight: .semibold))
+                        if group.name == "Claude and GPT models" {
+                            Text("Antigravity only · not Claude AC/AT/AF or Codex O")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .gridCellColumns(7)
+                    .help(group.description)
+                }
+                .padding(.top, 4)
+                ForEach(group.buckets) { bucket in
+                    GridRow {
+                        Color.clear.frame(width: Col.mark, height: 1)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(bucket.name)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                            Text(bucket.resetLabel())
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(minWidth: Col.nameMin, maxWidth: .infinity, alignment: .leading)
+                        .help(bucket.id)
+                        Text("\(bucket.shownUsedPct)%")
+                            .font(.system(size: 11, weight: .medium).monospacedDigit())
+                            .foregroundStyle(toneColor(bucket.tone))
+                            .frame(width: Col.used, alignment: .trailing)
+                        Meter(value: bucket.usedPct, tone: bucket.tone)
+                        Text("\(bucket.shownRemainingPct)%")
+                            .font(.system(size: 11).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: Col.meta, alignment: .trailing)
+                        Text(bucket.windowLabel)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(width: Col.extra, alignment: .trailing)
+                        Color.clear.frame(width: Col.action, height: 1)
+                    }
+                    .padding(.vertical, PanelSpace.row)
+                }
+            }
+        }
     }
 }
 

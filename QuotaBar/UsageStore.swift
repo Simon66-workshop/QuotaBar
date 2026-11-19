@@ -188,6 +188,10 @@ final class UsageStore: ObservableObject {
     func copySummary() {
         var lines: [String] = []
         for lane in snap.lanes where !lane.key.foldedIntoGrok {
+            if lane.key == .google {
+                lines.append(contentsOf: lane.googleSummaryLines)
+                continue
+            }
             let marked = lane.details.filter { $0.mark != nil }
             if marked.isEmpty {
                 if lane.key == .grok {
@@ -284,7 +288,12 @@ final class UsageStore: ObservableObject {
         let details = lane.details.map { detail in
             "\(detail.mark ?? "")|\(detail.label)|\(detail.reset ?? "")|\(detail.window ?? "")"
         }.joined(separator: "/")
-        return "\(lane.key.rawValue)|\(placement)|\(lane.sub)|\(lane.window)|\(details)"
+        let google = lane.googleGroups.map { group in
+            "\(group.name)|\(group.description)|" + group.buckets.map {
+                "\($0.id)|\($0.name)|\($0.window)|\($0.resetLabel())"
+            }.joined(separator: "/")
+        }.joined(separator: "/")
+        return "\(lane.key.rawValue)|\(placement)|\(lane.sub)|\(lane.window)|\(details)|\(google)"
     }
 
     func toggleInspect(_ disk: DiskVolume) {

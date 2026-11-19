@@ -1,7 +1,7 @@
 import Foundation
 
 enum LaneKey: String, CaseIterable, Identifiable {
-    case grok, cursor, bot, gpt, claude
+    case grok, cursor, bot, gpt, claude, google
     var id: String { rawValue }
 
     var title: String {
@@ -11,6 +11,7 @@ enum LaneKey: String, CaseIterable, Identifiable {
         case .bot: "Grok Bot"
         case .gpt: "ChatGPT"
         case .claude: "Claude"
+        case .google: "Google / Antigravity"
         }
     }
 
@@ -21,6 +22,7 @@ enum LaneKey: String, CaseIterable, Identifiable {
         case .bot: "B"
         case .gpt: "O"
         case .claude: "A"
+        case .google: "GO"
         }
     }
 
@@ -37,6 +39,7 @@ enum LaneKey: String, CaseIterable, Identifiable {
         case .bot: "week"
         case .gpt: "cap"
         case .claude: "5h"
+        case .google: "—"
         }
     }
 }
@@ -79,6 +82,22 @@ struct Lane: Identifiable {
     var details: [LaneDetail]
     /// Window column. Defaults to the lane's short label (`5h`, `week`, …).
     var window: String
+    /// Official Antigravity groups. Kept separate from Claude's marked figures.
+    var googleGroups: [GoogleQuotaGroup] = []
+
+    /// Shared by tooltip and Copy; every official group stays under Google, never AC/O.
+    var googleSummaryLines: [String] {
+        guard key == .google else { return [] }
+        let value = usedPct.map { "\(Int($0))% used" } ?? "Unavailable"
+        var lines = ["GO Google / Antigravity: \(value) — \(sub)"]
+        for group in googleGroups {
+            lines.append("Antigravity · \(group.name)\(group.name == "Claude and GPT models" ? " (not Claude AC/AT/AF or Codex O)" : "")")
+            for bucket in group.buckets {
+                lines.append("  \(bucket.name) [\(bucket.id)] · \(bucket.shownUsedPct)% used / \(bucket.shownRemainingPct)% left · \(bucket.window) · \(bucket.resetLabel())")
+            }
+        }
+        return lines
+    }
 
     var showsOnBar: Bool { tone != .empty }
 
@@ -104,6 +123,35 @@ struct Lane: Identifiable {
             details: details,
             window: window ?? key.windowShort
         )
+    }
+}
+
+struct GoogleQuotaGroup: Identifiable {
+    var id: String { name }
+    var name: String
+    var description: String
+    var buckets: [GoogleQuotaBucket]
+}
+
+struct GoogleQuotaBucket: Identifiable {
+    var id: String
+    var name: String
+    var window: String
+    var remainingFraction: Double
+    var resetTime: Date
+
+    var usedPct: Double { (1 - remainingFraction) * 100 }
+    var shownUsedPct: Int { Int(usedPct.rounded()) }
+    var shownRemainingPct: Int { 100 - shownUsedPct }
+    var tone: Tone { shownUsedPct >= 95 ? .crit : shownUsedPct >= 85 ? .warn : .ok }
+    var windowLabel: String { window == "weekly" ? "week" : window }
+
+    func resetLabel(timeZone: TimeZone = .current) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "MMM d, h:mm a z"
+        return "resets \(formatter.string(from: resetTime))"
     }
 }
 

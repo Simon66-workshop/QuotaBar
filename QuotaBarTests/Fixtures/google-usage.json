@@ -1,0 +1,37 @@
+{
+  "status": "SUCCESS",
+  "num_turns": 0,
+  "response": "Human-readable response is not a quota source: 99%",
+  "usage": { "total_tokens": 12345 },
+  "command": {
+    "name": "usage",
+    "data": {
+      "description": "Synthetic offline fixture of the official command.data schema.",
+      "groups": [
+        {
+          "name": "Gemini Models",
+          "description": "Models in this group share weekly and five-hour limits.",
+          "buckets": [
+            { "id": "gemini-weekly", "name": "Weekly Limit Remaining", "window": "weekly", "remaining_fraction": 0.75, "reset_time": "2026-11-26T06:01:14Z" },
+            { "id": "gemini-5h", "name": "Five Hour Limit Remaining", "window": "5h", "remaining_fraction": 0.2, "reset_time": "2026-11-19T11:01:14Z" }
+          ]
+        },
+        {
+          "name": "Claude and GPT models",
+          "description": "Antigravity third-party quota, not Claude Desktop or Codex.",
+          "buckets": [
+            { "id": "3p-weekly", "name": "Weekly Limit Remaining", "window": "weekly", "remaining_fraction": 0.01, "reset_time": "2026-11-26T06:01:14Z" },
+            { "id": "3p-5h", "name": "Five Hour Limit Remaining", "window": "5h", "remaining_fraction": 0.5, "reset_time": "2026-11-19T11:01:14Z" }
+          ]
+        },
+        {
+          "name": "Gemini 4 Argon",
+          "description": "For paid Pro plans, Argon quota is separate.",
+          "buckets": [
+            { "id": "gemini-argon-wtu-weekly", "name": "Gemini 4 Argon Weekly Limit", "window": "weekly", "remaining_fraction": 0.02, "reset_time": "2026-11-26T02:20:08Z" }
+          ]
+        }
+      ]
+    }
+  }
+}

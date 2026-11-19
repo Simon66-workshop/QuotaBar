@@ -2,7 +2,9 @@ Do not open QuotaBar.xcodeproj.
 
 Right-click "Start QuotaBar.command" → Open.
 First run may ask to install Command Line Tools (not Xcode).
-Then the menu bar shows only connected services, e.g. G 5 · A 40 · D 42
+Then the menu bar shows connected services, Google quota (or GO —), disks, and RAM.
 
-G Grok  ·  C Cursor  ·  B Grok Bot  ·  O ChatGPT  ·  A Claude  ·  D fullest disk  ·  M RAM
-Panel header must say v1.8.13. Empty auth.json must not pin G as —. Recover keychain or open device login. After authorize, G is a weekly percent.
+G shared Grok / Cursor / Bot weekly pool · O Codex · AC / AT / AF Claude
+GO Google / Antigravity Gemini Models used % · D fullest internal disk · E external disks · M RAM
+Panel header must say v1.8.25 (build 38). See README for GO semantics and unavailable behavior.
+Local upgrade review: use QuotaBarTests/build-candidate.sh only. Do not install or launch the candidate.

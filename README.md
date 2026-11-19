@@ -1,6 +1,6 @@
-# QuotaBar 1.8.24
+# QuotaBar 1.8.25
 
-Mac menu bar extra for live usage. **G** is the shared weekly pool (X Subscription Super: Grok, Cursor, and Grok Bot). ChatGPT / Codex, Claude, local and external disks, and local RAM stay on the bar.
+Mac menu bar extra for live usage. **G** is the shared weekly pool (X Subscription Super: Grok, Cursor, and Grok Bot). **GO** is Google Gemini model quota from the official Antigravity CLI. ChatGPT / Codex, Claude, local and external disks, and local RAM stay on the bar.
 
 **Do not open `QuotaBar.xcodeproj`.** That path is retired.
 
@@ -13,11 +13,12 @@ Mac menu bar extra for live usage. **G** is the shared weekly pool (X Subscripti
 5. First run only: if asked to install **Command Line Tools**, accept. That is a small Apple installer, not the Xcode app.
 6. After it finishes, double-click `Start QuotaBar.command` again
 
-QuotaBar appears on the right of the menu bar. Unconnected services stay off the bar.
+QuotaBar appears on the right of the menu bar. Existing unconnected services stay off the bar; unavailable Google quota stays **GO —**.
 
 - **G** shared weekly pool — Grok, Cursor, and Grok Bot (one figure, the Grok billing percentage)
 - **O** ChatGPT / Codex (5-hour + weekly)
 - **AC / AT / AF** Claude current session, this week, and Fable this week (AF hidden when that limit is absent)
+- **GO** Google / Antigravity — highest **used** % of the returned Gemini Models weekly / 5-hour windows; Argon and third-party quotas stay separate in the panel
 - **D** fullest visible disk used %
 - **E** each external disk
 - **M** local RAM used % (for example, `M 63%`)
@@ -27,7 +28,7 @@ Cursor and Grok Bot are not separate bar, tooltip, or panel items.
 - **Left-click** the bar → glass panel (details, connect, hide disks)
 - **Right-click** the bar → short native menu (refresh / copy / alerts / quit)
 
-The panel header should say **v1.8.24**. If it still says an older version, quit QuotaBar and run `Start QuotaBar.command` again.
+The panel header should say **v1.8.25** (build **38**). If it still says an older version, quit QuotaBar and run `Start QuotaBar.command` again. **For this local upgrade review, do not install or launch it; use the candidate-only build below.**
 
 Later launches: just double-click `Start QuotaBar.command` again.
 
@@ -37,6 +38,7 @@ Later launches: just double-click `Start QuotaBar.command` again.
 - ChatGPT: `~/.codex/auth.json` after `codex login` (refreshes the token itself)
 - Claude: Claude Desktop first. The signed-in Claude.app session lives in `~/Library/Application Support/Claude/` (`Network/Cookies` or `Cookies`, plus `config.json` when it has an oauth token cache). The cookie key is the login-keychain item **Claude Safe Storage** (read with `/usr/bin/security`, never written to a log). QuotaBar calls the same `claude.ai` usage endpoint Settings → Usage uses and shows Current session (AC), This week (AT), and Fable this week (AF) when that window is in the payload. The menu bar prints them as `AC 19  AT 82  AF 94`. A missing window, including Fable on non-Max plans, is left out. There is no plain usage-percent file to read. Claude Code oauth (`Claude Code-credentials`, `~/.claude/.credentials.json`) is only a fallback when that login already exists. A terminal `claude` login is not required.
 - Memory: local Mach VM statistics and physical RAM; no extra permission or entitlement
+- Google: only the already-signed-in Antigravity CLI's read-only `/usage` JSON, specifically `command.data.groups`. QuotaBar does not discover Google credentials, log in, read Google auth files or Keychain, invoke `gemini`, or call another quota endpoint. See GO below.
 - Disks: mounted local + external volumes (auto add/remove), capacity, read/write rate, status
 
 If ChatGPT shows `—`, run `codex login` once in Terminal, then click Refresh.
@@ -46,6 +48,50 @@ If Claude stays under Connect, open Claude Desktop while signed in, then click R
 Plug in a USB / Thunderbolt disk and it appears in the panel; eject it and it disappears. Hide Time Machine or VM disks from the panel — they stay off the bar until you Show them again.
 
 The bar only turns orange / red on a token that is actually high (85%+ services, 90%+ disks / RAM). A normal 60–80% day stays neutral.
+
+## 1.8.25 — GO (Google / Antigravity)
+
+The only GO source is the [official Antigravity model quota command](https://antigravity.google/docs/cli/commands/usage/) (`/quota` is its alias):
+
+```sh
+"/Volumes/2T扩展盘/Agent文件/gemini-cli/antigravity/bin/agy" -p "/usage" --output-format json --print-timeout 60s
+```
+
+This Mini1 path is intentionally absolute; no PATH search or alternate provider is used. QuotaBar invokes it without a shell, with closed stdin and discarded stderr, from `/` (not a project directory). It uses the existing CLI subscription session. API-key environment variables `GEMINI_API_KEY` and `GOOGLE_API_KEY` are removed from that child only. The existing wrapper's process-level proxy is unchanged; no system proxy, network, timezone, or login setting is changed. No extra dependencies are required.
+
+- The official value is `remaining_fraction` (0–1). Each bucket's **used % = 100 × (1 − remaining_fraction)**, rounded to the nearest whole percent for display. **Left** is its complementary remaining percentage. GO follows existing service colors: orange at 85% used, red at 95% used.
+- **GO is one actual window, not a blended pool:** the highest used percentage among returned `gemini-weekly` / `gemini-5h` buckets in **Gemini Models**, with matching `weekly` / `5h` windows. A tie selects 5h. The panel and tooltip identify the selected window. Missing windows are not fabricated.
+- The panel, tooltip, and copied summary list **every official group and bucket** with used / left percentages, window, and reset. Bucket IDs are available in the panel tooltip and copied summary. UTC `reset_time` is parsed as an instant and shown in local time with date and timezone; this does not change the machine timezone.
+- **Gemini 4 Argon** stays a separate group (weekly-only when that is all the CLI returns). **Claude and GPT models** is explicitly Antigravity-only, never Claude AC/AT/AF or Codex O. Neither group drives GO. Group descriptions are available on hover; quota for individual models is not invented.
+- `/credits`, AI Studio / API-key billing, token totals, human-readable `response`, and raw request counters are **not** used to calculate GO.
+- Missing CLI, process failure, a 65-second outer timeout, non-`SUCCESS`, missing/invalid `command.data.groups`, invalid fractions/reset times, or duplicate identities show **GO — / Unavailable**, not 0% or a cached success. If other groups are valid but Gemini Models has no recognized window, those groups remain visible while GO is unknown. No login form or automatic OAuth flow is added. Restore the existing CLI/session separately, then click **Refresh**.
+- GO shares the existing 90-second service refresh and single-flight refresh queue. Output is memory-only, capped at 1 MiB; raw stdout/stderr and credentials are never logged or persisted by this feature. Existing Claude, Codex, Grok shared-pool, disk, and RAM logic remains intact.
+
+### Local verification / candidate only (no install or launch)
+
+On this upgrade worktree, all artifacts and compiler caches go to the mounted external volume:
+
+```sh
+BASE="/Volumes/2T扩展盘/Agent文件/QuotaBar-GO-upgrade-20261119"
+CACHE="$BASE/candidate/sdk26-module-cache"
+QUOTABAR_TEST_OUT="$BASE/candidate/quotabar-tests" \
+  QUOTABAR_MODULE_CACHE="$CACHE" bash QuotaBarTests/run.sh
+QUOTABAR_MEMORY_CHECK_OUT="$BASE/candidate/quotabar-memory-check" \
+  QUOTABAR_MODULE_CACHE="$CACHE" bash QuotaBarTests/check-memory.sh
+QUOTABAR_SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk \
+  QUOTABAR_MODULE_CACHE="$CACHE" bash QuotaBarTests/build-candidate.sh
+QUOTABAR_SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk \
+  QUOTABAR_MODULE_CACHE="$CACHE" bash QuotaBarTests/check-google.sh
+# Optional: same check-google.sh command with --live runs /usage once.
+```
+
+`build-candidate.sh` is restricted to this Mini1 worktree and checks that the external volume is mounted. It compiles via `swiftc` (the current non-Xcode build path) to `$BASE/candidate/QuotaBar.app`, using canonical version metadata, without quitting, replacing, signing, or opening the installed app. **Do not open the candidate during this review.**
+
+Mini1's current default CLT 6.4 / macOS 27 SDK is missing the `SwiftUIMacros` plugin needed by existing `@State` code. The commands above explicitly select the already-installed macOS 26.5 SDK for this process only. `QUOTABAR_SDK` is also supported by the normal launcher, without changing `xcode-select`, installing tools, or weakening a check. The default SDK 27 build remains an environment blocker; successful compilation against SDK 26.5 does not prove that SDK 27 is fixed. Compiler caches use canonical absolute paths to avoid duplicate-module errors from mixing `worktree/../candidate` with `candidate`.
+
+Tests use a synthetic, non-account fixture of the official envelope, malformed/error fixtures, and local fake processes for timeout, exit, size, stdin, and environment behavior; they do not call a network or access credentials. Existing AC/AT/AF, O, G, disk, RAM, and panel-fit regression checks still run. A component-only renderer and optional live Google smoke check are described in `QuotaBarTests/check-google.sh`; neither starts a menu-bar instance. Offline render evidence does not constitute full-app interaction acceptance or independent human review.
+
+The upgrade is additive and reversible with `git revert <GO-upgrade-commit>` after review (base `d17b76a2b93e0a8c1e40675f86d3f5caf4382941`). No Google credential or quota state is migrated. Candidate files are separate from the installed 1.8.24 app; reverting the code does not require touching that running app. Commit / push / PR are not deployment or approval to replace it.
 
 ## 1.8.24
 
