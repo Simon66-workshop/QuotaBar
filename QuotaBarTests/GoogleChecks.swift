@@ -33,37 +33,76 @@ func runGoogleChecks() {
     func unknown(_ lane: Lane, _ message: String) {
         check(lane.key == .google && lane.tone == .error && lane.usedPct == nil && lane.remainingPct == nil,
               message + " fails closed, not zero/stale")
-        check(lane.showsOnBar && Snapshot.assemble([lane]).menuTitle == "GO — · M —", message + " is GO —")
+        check(lane.showsOnBar && Snapshot.assemble([lane]).menuTitle == "GO used 5h:—  W:— · M —", message + " has no GO figures")
     }
 
     let lane = GoogleUsage.parse(fixture)
     check(lane.key == .google && LaneKey.google.letter == "GO", "Google is its own GO lane")
-    check(lane.usedPct == 80 && lane.remainingPct == 20 && lane.window == "5h", "GO is max used Gemini window, not remaining or blended groups")
-    check(lane.tone == .ok && lane.details.isEmpty, "GO uses service bands and no AC/AT/AF/O marks")
-    check(lane.sub.contains("highest used window (5h)"), "GO identifies selected window and used convention")
+    check(lane.usedPct == nil && lane.remainingPct == nil && lane.tone == .ok && lane.details.isEmpty,
+          "GO has no scalar or AC/AT/AF/O marks")
     check(lane.googleGroups.map(\.name) == ["Gemini Models", "Claude and GPT models", "Gemini 4 Argon"], "all official groups retained")
     check(lane.googleGroups.map { $0.buckets.count } == [2, 2, 1], "no invented Argon 5h window")
-    check(lane.googleGroups[0].buckets.map(\.shownUsedPct) == [25, 80], "remaining fractions become used percent")
-    check(lane.googleGroups[0].buckets.map(\.shownRemainingPct) == [75, 20], "remaining stays explicit")
-    check(lane.googleGroups[0].buckets[0].resetLabel(timeZone: TimeZone(identifier: "America/New_York")!) == "resets Nov 26, 1:01 AM EST", "UTC reset is converted for display only")
-    check(lane.googleSummaryLines.joined().contains("not Claude AC/AT/AF or Codex O"), "copy/tooltip distinguish third-party quota")
-    check(lane.googleSummaryLines.joined().contains("[gemini-argon-wtu-weekly]"), "copy/tooltip retain bucket identity")
-    check(lane.googleSummaryLines.joined().contains("80% used / 20% left · 5h"), "copy/tooltip include used, left, window")
+    let currentBucket = lane.googleMenuGroup?.bucket(for: .current)
+    let weeklyBucket = lane.googleMenuGroup?.bucket(for: .weekly)
+    check(currentBucket?.shownUsedPct == 80 && currentBucket?.shownRemainingPct == 20, "5h uses its own remaining fraction")
+    check(weeklyBucket?.shownUsedPct == 25 && weeklyBucket?.shownRemainingPct == 75, "weekly uses its own remaining fraction")
+    let eastern = TimeZone(identifier: "America/New_York")!
+    check(currentBucket?.resetLabel(timeZone: eastern) == "resets Nov 19, 6:01 AM EST"
+          && weeklyBucket?.resetLabel(timeZone: eastern) == "resets Nov 26, 1:01 AM EST", "both independent UTC resets are converted for display only")
+    let summary = lane.googleSummaryLines.joined(separator: "\n")
+    check(summary.contains("not Claude AC/AT/AF or Codex O"), "copy/tooltip distinguish third-party quota")
+    check(summary.contains("Gemini 4 Argon\n  Current usage (5h) · Not provided\n  Weekly limit · Gemini 4 Argon Weekly Limit [gemini-argon-wtu-weekly]"),
+          "copy/tooltip explicitly show missing Argon current and preserve weekly identity")
+    check(summary.contains("80% used / 20% left · 5h · \(currentBucket?.resetLabel() ?? "")")
+          && summary.contains("25% used / 75% left · weekly · \(weeklyBucket?.resetLabel() ?? "")"),
+          "copy/tooltip include both used/left/reset pairs")
 
-    let weekly = changingBucket("remaining_fraction", 0.1)
-    check(weekly.usedPct == 90 && weekly.window == "week" && weekly.tone == .warn, "weekly can be primary with 85% service warning")
-    check(changingBucket("remaining_fraction", 0.05).tone == .crit, "95% used service critical band")
-    check(changingBucket("remaining_fraction", 0).usedPct == 100, "zero remaining means fully used")
+    func googleTokens(_ lane: Lane) -> [Snapshot.BarToken] {
+        Snapshot.assemble([lane]).barGroups(disks: []).first ?? []
+    }
+    check(googleTokens(changingBucket("remaining_fraction", 0.15)) == [
+        .init(text: "GO used 5h:80%", tone: .ok), .init(text: "W:85%", tone: .warn)
+    ], "5h and weekly bar figures are separate, each with its service color")
+    check(googleTokens(changingBucket("remaining_fraction", 0.05)).last?.tone == .crit, "95% used service critical band")
+    check(googleTokens(changingBucket("remaining_fraction", 0)).last?.text == "W:100%", "zero remaining means fully used")
     let allFree = changingGroups { groups in
         var buckets = groups[0]["buckets"] as! [[String: Any]]
         for i in buckets.indices { buckets[i]["remaining_fraction"] = 1 }
         groups[0]["buckets"] = buckets
     }
-    check(allFree.usedPct == 0 && allFree.window == "5h", "fresh Gemini quota is real zero; tie selects 5h, ignores high third-party/Argon")
+    check(googleTokens(allFree).map(\.text) == ["GO used 5h:0%", "W:0%"], "each returned free window is real zero; no Argon or third-party fallback")
     let weeklyOnly = changingGroups { groups in
         groups[0]["buckets"] = [(groups[0]["buckets"] as! [[String: Any]])[0]]
     }
-    check(weeklyOnly.usedPct == 25 && weeklyOnly.window == "week", "only returned Gemini windows are used")
+    check(googleTokens(weeklyOnly) == [.init(text: "GO used 5h:—", tone: .error), .init(text: "W:25%", tone: .ok)],
+          "weekly-only Gemini never fills current")
+    let currentOnly = changingGroups { groups in
+        groups[0]["buckets"] = [(groups[0]["buckets"] as! [[String: Any]])[1]]
+    }
+    check(googleTokens(currentOnly).map(\.text) == ["GO used 5h:80%", "W:—"], "current-only Gemini never fills weekly")
+    let reordered = changingGroups { $0.reverse() }
+    check(reordered.googleDisplayGroups.first?.name == "Gemini Models" && googleTokens(reordered) == googleTokens(lane),
+          "primary group is shown first without relying on payload order")
+    let newWindowID = changingBucket("id", "gemini-new-weekly-id")
+    check(googleTokens(newWindowID) == googleTokens(lane), "window, not ID spelling, defines the official period")
+    let argonCurrent = changingGroups { groups in
+        var buckets = groups[2]["buckets"] as! [[String: Any]]
+        buckets.append(["id": "argon-5h", "name": "Argon current", "window": "5h",
+                        "remaining_fraction": 0.4, "reset_time": "2026-11-19T15:30:00Z"])
+        groups[2]["buckets"] = buckets
+    }
+    check(argonCurrent.googleGroups.last?.bucket(for: .current)?.shownUsedPct == 60 && googleTokens(argonCurrent) == googleTokens(lane),
+          "an official Argon current window becomes visible only when returned, never in the GO bar")
+    let ambiguous = changingGroups { groups in
+        var buckets = groups[0]["buckets"] as! [[String: Any]]
+        var another = buckets[0]
+        another["id"] = "another-weekly-bucket"
+        buckets.append(another)
+        groups[0]["buckets"] = buckets
+    }
+    check(googleTokens(ambiguous).map(\.text) == ["GO used 5h:80%", "W:—"]
+          && ambiguous.googleMenuGroup?.unavailableLabel(for: .weekly) == "Ambiguous window"
+          && ambiguous.googleMenuGroup?.additionalBuckets.count == 2, "ambiguous periods never select a number arbitrarily; raw buckets remain separate")
     let noGemini = changingGroups { $0.removeFirst() }
     unknown(noGemini, "missing Gemini Models")
     check(noGemini.googleGroups.count == 2, "other official groups still visible when GO cannot be computed")
@@ -108,13 +147,13 @@ func runGoogleChecks() {
             LaneDetail(label: "week", usedPct: 82, mark: "AT"),
             LaneDetail(label: "Fable", usedPct: 94, mark: "AF")]), lane
     ])
-    check(preserved.menuTitle == "G 21 · O 15 · AC 19  AT 82  AF 94 · GO 80 · M —", "GO preserves existing G/O/AC/AT/AF/RAM ordering")
+    check(preserved.menuTitle == "G 21 · O 15 · AC 19  AT 82  AF 94 · GO used 5h:80%  W:25% · M —", "GO preserves existing G/O/AC/AT/AF/RAM ordering")
     check(!LaneKey.google.foldedIntoGrok, "GO never shares Grok pool")
     check(GoogleUsage.executable.hasSuffix("/antigravity/bin/agy") && GoogleUsage.arguments == ["-p", "/usage", "--output-format", "json", "--print-timeout", "60s"], "production uses only official read-only command")
 
     // Local fake executables only: no network, credential access, auth, or app launch.
     let echo = GoogleUsage.run(executablePath: "/usr/bin/printf", commandArguments: ["%s", String(decoding: fixture, as: UTF8.self)])
-    check(GoogleUsage.lane(from: echo).usedPct == 80, "process stdout parses official envelope")
+    check(googleTokens(GoogleUsage.lane(from: echo)) == googleTokens(lane), "process stdout parses both periods from official envelope")
     unknown(GoogleUsage.lane(from: GoogleUsage.run(executablePath: "/nonexistent/agy")), "CLI absent")
     unknown(GoogleUsage.lane(from: GoogleUsage.run(executablePath: "/bin/sh", commandArguments: ["-c", "printf private-diagnostic >&2; exit 7"])), "nonzero exit, stderr discarded")
     let start = ProcessInfo.processInfo.systemUptime

@@ -147,23 +147,14 @@ enum GoogleUsage {
             groups.append(GoogleQuotaGroup(name: group.name, description: group.description ?? "", buckets: buckets))
         }
 
-        // A single actual Gemini Models window, NOT a sum/average or cross-group pool.
-        // Only known IDs with matching window semantics may drive GO. Other buckets stay visible.
-        let primary = groups.first(where: { $0.name == "Gemini Models" })?.buckets.filter {
-            ($0.id == "gemini-weekly" && $0.window == "weekly") || ($0.id == "gemini-5h" && $0.window == "5h")
-        }.max {
-            if $0.usedPct != $1.usedPct { return $0.usedPct < $1.usedPct }
-            return $0.window != "5h" && $1.window == "5h"
-        }
-        var lane: Lane
-        if let primary {
-            lane = .used(.google, percent: primary.usedPct,
-                         sub: "GO = Gemini Models · highest used window (\(primary.windowLabel)); Argon / third-party separate",
-                         window: primary.windowLabel)
-        } else {
-            lane = .error(.google, message: "Unavailable · no recognized Gemini Models window; other official groups below")
-        }
+        // GO has no scalar percentage. Each displayed figure comes from its own bucket.
+        var lane = Lane.error(.google, message: "Unavailable · no unambiguous Gemini Models 5h or weekly window")
         lane.googleGroups = groups
+        if let group = lane.googleMenuGroup,
+           GoogleQuotaPeriod.allCases.contains(where: { group.bucket(for: $0) != nil }) {
+            lane.tone = .ok
+            lane.sub = "Gemini Models · 5h and weekly usage shown separately"
+        }
         return lane
     }
 

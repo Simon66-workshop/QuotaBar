@@ -13,12 +13,12 @@ Mac menu bar extra for live usage. **G** is the shared weekly pool (X Subscripti
 5. First run only: if asked to install **Command Line Tools**, accept. That is a small Apple installer, not the Xcode app.
 6. After it finishes, double-click `Start QuotaBar.command` again
 
-QuotaBar appears on the right of the menu bar. Existing unconnected services stay off the bar; unavailable Google quota stays **GO —**.
+QuotaBar appears on the right of the menu bar. Existing unconnected services stay off the bar; unavailable Google periods stay visible as dashes under **GO**.
 
 - **G** shared weekly pool — Grok, Cursor, and Grok Bot (one figure, the Grok billing percentage)
 - **O** ChatGPT / Codex (5-hour + weekly)
 - **AC / AT / AF** Claude current session, this week, and Fable this week (AF hidden when that limit is absent)
-- **GO** Google / Antigravity — highest **used** % of the returned Gemini Models weekly / 5-hour windows; Argon and third-party quotas stay separate in the panel
+- **GO** Google / Antigravity — separate **used** percentages for Gemini Models **5h** (current) and **W** (weekly); Argon and third-party quotas stay separate in the panel
 - **D** fullest visible disk used %
 - **E** each external disk
 - **M** local RAM used % (for example, `M 63%`)
@@ -60,11 +60,11 @@ The only GO source is the [official Antigravity model quota command](https://ant
 This Mini1 path is intentionally absolute; no PATH search or alternate provider is used. QuotaBar invokes it without a shell, with closed stdin and discarded stderr, from `/` (not a project directory). It uses the existing CLI subscription session. API-key environment variables `GEMINI_API_KEY` and `GOOGLE_API_KEY` are removed from that child only. The existing wrapper's process-level proxy is unchanged; no system proxy, network, timezone, or login setting is changed. No extra dependencies are required.
 
 - The official value is `remaining_fraction` (0–1). Each bucket's **used % = 100 × (1 − remaining_fraction)**, rounded to the nearest whole percent for display. **Left** is its complementary remaining percentage. GO follows existing service colors: orange at 85% used, red at 95% used.
-- **GO is one actual window, not a blended pool:** the highest used percentage among returned `gemini-weekly` / `gemini-5h` buckets in **Gemini Models**, with matching `weekly` / `5h` windows. A tie selects 5h. The panel and tooltip identify the selected window. Missing windows are not fabricated.
-- The panel, tooltip, and copied summary list **every official group and bucket** with used / left percentages, window, and reset. Bucket IDs are available in the panel tooltip and copied summary. UTC `reset_time` is parsed as an instant and shown in local time with date and timezone; this does not change the machine timezone.
-- **Gemini 4 Argon** stays a separate group (weekly-only when that is all the CLI returns). **Claude and GPT models** is explicitly Antigravity-only, never Claude AC/AT/AF or Codex O. Neither group drives GO. Group descriptions are available on hover; quota for individual models is not invented.
+- **GO used** shows distinct **5h** and **W** figures, independently colored. Each comes from the corresponding `window: "5h"` or `window: "weekly"` bucket in **Gemini Models**. GO never shows a blended value or borrows a number from any other window or group. A missing or ambiguous period shows a dash without hiding a valid other period.
+- The panel puts **Current usage (5h)** above **Weekly limit** for each group. Each supplied row has its own labeled **used** and **left** percentages and reset; a missing row says **Not provided**, without a number or reset. UTC `reset_time` is shown as local date and time with timezone; the machine timezone is unchanged. Hover a row for its official name and bucket ID. The tooltip and copied summary show the same details; additional official buckets remain separately labeled.
+- **Gemini 4 Argon** stays separate. When it returns only weekly, its current row says **Not provided**. **Claude and GPT models** is explicitly Antigravity-only, never Claude AC/AT/AF or Codex O. Neither group drives GO. Group descriptions are available on hover; quota for individual models is not invented.
 - `/credits`, AI Studio / API-key billing, token totals, human-readable `response`, and raw request counters are **not** used to calculate GO.
-- Missing CLI, process failure, a 65-second outer timeout, non-`SUCCESS`, missing/invalid `command.data.groups`, invalid fractions/reset times, or duplicate identities show **GO — / Unavailable**, not 0% or a cached success. If other groups are valid but Gemini Models has no recognized window, those groups remain visible while GO is unknown. No login form or automatic OAuth flow is added. Restore the existing CLI/session separately, then click **Refresh**.
+- Missing CLI, process failure, a 65-second outer timeout, non-`SUCCESS`, missing/invalid `command.data.groups`, invalid fractions/reset times, or duplicate identities show both GO periods as dashes and the panel as **Unavailable**, not 0% or cached success. If other groups are valid but Gemini Models has no unambiguous 5h/weekly window, the other groups remain visible. No login form or automatic OAuth flow is added. Restore the existing CLI/session separately, then click **Refresh**.
 - GO shares the existing 90-second service refresh and single-flight refresh queue. Output is memory-only, capped at 1 MiB; raw stdout/stderr and credentials are never logged or persisted by this feature. Existing Claude, Codex, Grok shared-pool, disk, and RAM logic remains intact.
 
 ### Local verification / candidate only (no install or launch)

@@ -10,18 +10,24 @@ struct GoogleCheck {
     static func main() throws {
         if CommandLine.arguments.contains("--live") {
             let lane = GoogleUsage.lane(from: GoogleUsage.run())
-            guard lane.usedPct != nil else {
+            guard lane.tone != .error, let group = lane.googleMenuGroup else {
                 // Fixed application diagnostic only, never raw CLI stdout/stderr.
                 print("LIVE_GO=UNAVAILABLE · \(lane.sub)")
                 exit(1)
             }
-            print("LIVE_GO=PASS · official groups=\(lane.googleGroups.count), buckets=\(lane.googleGroups.flatMap(\.buckets).count)")
+            let current = group.bucket(for: .current) != nil
+            let weekly = group.bucket(for: .weekly) != nil
+            let argonCurrent = lane.googleGroups.first { $0.name == "Gemini 4 Argon" }?.bucket(for: .current) != nil
+            let status = current && weekly ? "PASS" : "PARTIAL"
+            print("LIVE_GO=\(status) · Gemini 5h=\(current), weekly=\(weekly), Argon 5h=\(argonCurrent), official groups=\(lane.googleGroups.count)")
             return
         }
         let fixtureURL = URL(fileURLWithPath: CommandLine.arguments[1])
         let output = URL(fileURLWithPath: CommandLine.arguments[2], isDirectory: true)
         let lane = GoogleUsage.parse(try Data(contentsOf: fixtureURL))
-        precondition(lane.usedPct == 80)
+        precondition(lane.googleMenuGroup?.bucket(for: .current)?.shownUsedPct == 80)
+        precondition(lane.googleMenuGroup?.bucket(for: .weekly)?.shownUsedPct == 25)
+        precondition(lane.googleGroups.last?.bucket(for: .current) == nil)
         precondition(UsageSources.all.map(\.key) == [.grok, .gpt, .claude, .google])
         precondition(UsageSources.source(for: .google)?.connectTitle == nil)
         precondition(UsageSources.source(for: .google)?.hasSession() == true)
@@ -36,7 +42,14 @@ struct GoogleCheck {
                 LaneDetail(label: "This week", usedPct: 82, reset: "resets Fri 8:00 PM", mark: "AT", window: "week"),
                 LaneDetail(label: "Fable this week", usedPct: 94, reset: "resets Fri 8:00 PM", mark: "AF", window: "week")])
         ]
-        for (name, google) in [("available", lane), ("unavailable", GoogleUsage.lane(from: .unavailable("Antigravity /usage timed out; try Refresh")))] {
+        var weeklyOnly = lane
+        if let index = weeklyOnly.googleGroups.firstIndex(where: { $0.name == "Gemini Models" }) {
+            weeklyOnly.googleGroups[index].buckets.removeAll { $0.window == "5h" }
+        }
+        for (name, google) in [
+            ("available", lane), ("weekly-only", weeklyOnly),
+            ("unavailable", GoogleUsage.lane(from: .unavailable("Antigravity /usage timed out; try Refresh")))
+        ] {
             let content = VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text("QuotaBar").font(.system(size: 15, weight: .semibold))

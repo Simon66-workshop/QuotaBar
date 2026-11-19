@@ -110,7 +110,7 @@ struct GoogleUsageSource: UsageSource {
     var key: LaneKey { .google }
     var emptySub: String { "Official Antigravity /usage · waiting for quota" }
     var connectTitle: String? { nil }
-    // Probe the CLI, not auth files. Missing CLI/session stays GO —, not a login form.
+    // Probe the CLI, not auth files. Missing CLI/session shows unavailable GO periods, not a login form.
     func hasSession() -> Bool { true }
     func fetch() async -> Lane { await GoogleUsage.fetch() }
 }

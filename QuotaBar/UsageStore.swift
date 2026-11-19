@@ -452,7 +452,12 @@ final class UsageStore: ObservableObject {
     private func notifyIfNeeded(_ snap: Snapshot) {
         guard notifyEnabled else { return }
         for lane in snap.lanes where !lane.key.foldedIntoGrok {
-            guard let used = lane.usedPct else {
+            // Preserve one GO alert at the highest actual window's threshold;
+            // this is alert routing only, not a combined display value.
+            let googleAlertBucket = lane.googleMenuGroup.map { group in
+                GoogleQuotaPeriod.allCases.compactMap { group.bucket(for: $0) }
+            }?.max { $0.shownUsedPct < $1.shownUsedPct }
+            guard let used = googleAlertBucket.map({ Double($0.shownUsedPct) }) ?? lane.usedPct else {
                 lastAlert[lane.key] = nil
                 continue
             }
@@ -463,7 +468,11 @@ final class UsageStore: ObservableObject {
             lastAlert[lane.key] = bucket
             let content = UNMutableNotificationContent()
             content.title = "\(lane.key.title) usage is high"
-            content.body = "\(Int(used))% used this period. \(lane.sub)"
+            if let googleAlertBucket {
+                content.body = "\(Int(used))% used · Gemini Models · \(googleAlertBucket.windowLabel) · \(googleAlertBucket.resetLabel())"
+            } else {
+                content.body = "\(Int(used))% used this period. \(lane.sub)"
+            }
             content.sound = .default
             let req = UNNotificationRequest(
                 identifier: "quotabar.\(lane.key.rawValue).\(bucket)",
