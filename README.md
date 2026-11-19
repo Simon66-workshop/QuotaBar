@@ -1,4 +1,4 @@
-# QuotaBar 1.8.26
+# QuotaBar 1.8.27
 
 Mac menu bar extra for live usage. **G** is the shared weekly pool (X Subscription Super: Grok, Cursor, and Grok Bot). **GO** is Google Gemini model quota from the official Antigravity CLI. ChatGPT / Codex, Claude, local and external disks, and local RAM stay on the bar.
 
@@ -18,7 +18,7 @@ QuotaBar appears on the right of the menu bar. Existing unconnected services sta
 - **G** shared weekly pool — Grok, Cursor, and Grok Bot (one figure, the Grok billing percentage)
 - **O** ChatGPT / Codex (5-hour + weekly)
 - **AC / AT / AF** Claude current session, this week, and Fable this week (AF hidden when that limit is absent)
-- **GO** Google / Antigravity — separate **used** percentages for Gemini Models **5h** (current) and **W** (weekly), without `%` on the bar (e.g. `GO used 5h:80  W:25`); Argon and third-party quotas stay separate in the panel
+- **GO** Google / Antigravity — separate **used** percentages for Gemini Models **5h** (current) and **W** (weekly), without `%` on the bar (e.g. `GO 5h:80  W:25`); Argon and third-party quotas stay separate in the panel
 - **D** fullest visible disk used %
 - **E** each external disk
 - **M** local RAM used % (for example, `M 63%`)
@@ -28,7 +28,7 @@ Cursor and Grok Bot are not separate bar, tooltip, or panel items.
 - **Left-click** the bar → glass panel (details, connect, hide disks)
 - **Right-click** the bar → short native menu (refresh / copy / alerts / quit)
 
-The panel header should say **v1.8.26** (build **39**). If it still says an older version, quit QuotaBar and run `Start QuotaBar.command` again. **For this local upgrade review, do not install or launch it; use the candidate-only build below.**
+The panel header should say **v1.8.27** (build **40**). If it still says an older version, quit QuotaBar and run `Start QuotaBar.command` again. **For this local upgrade review, do not install or launch it; use the candidate-only build below.**
 
 Later launches: just double-click `Start QuotaBar.command` again.
 
@@ -60,7 +60,7 @@ The only GO source is the [official Antigravity model quota command](https://ant
 This Mini1 path is intentionally absolute; no PATH search or alternate provider is used. QuotaBar invokes it without a shell, with closed stdin and discarded stderr, from `/` (not a project directory). QuotaBar enforces the 65-second deadline in the parent without adding CLI arguments. The child inherits only allowlisted inputs for the existing local session, CLI runtime (including any existing auto-update opt-out), and proxy. API keys, the [ADC selector](https://antigravity.google/docs/enterprise/#setting-up-application-default-credentials-adc) `AGY_ADC_AUTH`, Google Cloud credential/project/location overrides, and other environment variables are not inherited. The parent environment and the wrapper's process-level proxy are unchanged; no system proxy, network, timezone, or login setting is changed. No extra dependencies are required.
 
 - The official value is `remaining_fraction` (0–1). Each bucket's **used % = 100 × (1 − remaining_fraction)**, rounded to the nearest whole percent for display. **Left** is its complementary remaining percentage. GO follows existing service colors: orange at 85% used, red at 95% used.
-- **GO used** shows distinct **5h** and **W** figures, independently colored. Each comes from the corresponding `window: "5h"` or `window: "weekly"` bucket in **Gemini Models**. GO never shows a blended value or borrows a number from any other window or group. A missing or ambiguous period shows a dash without hiding a valid other period.
+- **GO** shows distinct **5h** and **W** used figures, independently colored. Each comes from the corresponding `window: "5h"` or `window: "weekly"` bucket in **Gemini Models**. GO never shows a blended value or borrows a number from any other window or group. A missing or ambiguous period shows a dash without hiding a valid other period.
 - The panel puts **Current usage (5h)** above **Weekly limit** for each group. Each supplied row has its own labeled **used** and **left** percentages and reset; a missing row says **Not provided**, without a number or reset. UTC `reset_time` is shown as local date and time with timezone; the machine timezone is unchanged. Hover a row for its official name and bucket ID. The tooltip and copied summary show the same details; additional official buckets remain separately labeled.
 - **Gemini 4 Argon** stays separate. When it returns only weekly, its current row says **Not provided**. If a named group returns an empty bucket array, both rows say **Not provided**, without affecting valid figures from other groups. **Claude and GPT models** is explicitly Antigravity-only, never Claude AC/AT/AF or Codex O. Neither group drives GO. Group descriptions are available on hover; quota for individual models is not invented.
 - `/credits`, AI Studio / API-key billing, token totals, human-readable `response`, and raw request counters are **not** used to calculate GO.

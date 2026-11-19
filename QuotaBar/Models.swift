@@ -379,7 +379,7 @@ struct Snapshot {
                 groups.append(GoogleQuotaPeriod.allCases.map { period in
                     let bucket = group?.bucket(for: period)
                     let value = bucket.map { "\($0.shownUsedPct)" } ?? "—"
-                    let prefix = period == .current ? "GO used " : ""
+                    let prefix = period == .current ? "GO " : ""
                     return BarToken(text: "\(prefix)\(period.barMark):\(value)", tone: bucket?.tone ?? .error)
                 })
                 continue
