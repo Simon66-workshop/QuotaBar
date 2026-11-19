@@ -177,26 +177,47 @@ func runGoogleChecks() {
     check(ProcessInfo.processInfo.systemUptime - start < 2, "timeout is wall-clock bounded")
     unknown(GoogleUsage.lane(from: GoogleUsage.run(executablePath: "/usr/bin/yes", commandArguments: [], timeout: 2, outputLimit: 32_768)), "oversized stdout is bounded without deadlock")
     unknown(GoogleUsage.lane(from: GoogleUsage.run(executablePath: "/bin/sh", commandArguments: ["-c", "exit 0"])), "empty stdout")
-    let overrides = [
+    let excluded = [
         "GEMINI_API_KEY": "dummy", "GOOGLE_API_KEY": "dummy", "AGY_ADC_AUTH": "true",
         "GOOGLE_APPLICATION_CREDENTIALS": "/fake/adc.json", "GOOGLE_CLOUD_QUOTA_PROJECT": "dummy-project",
         "GOOGLE_CLOUD_LOCATION": "dummy-region", "GOOGLE_CLOUD_PROJECT": "dummy-project",
         "GCLOUD_PROJECT": "dummy-project", "gcloud_project": "dummy-project", "google_cloud_project": "dummy-project",
         "CLOUDSDK_CONFIG": "/fake/cloud-sdk", "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE": "/fake/sdk-credentials.json",
-        "CLOUDSDK_CORE_PROJECT": "dummy-project"
+        "CLOUDSDK_CORE_PROJECT": "dummy-project",
+        "CLOUDSDK_AUTH_ACCESS_TOKEN": "dummy-token", "CLOUDSDK_AUTH_ACCESS_TOKEN_FILE": "/fake/token",
+        "CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT": "dummy@example.invalid",
+        "QUOTABAR_TEST_SENTINEL": "unrelated"
     ]
-    var parentEnvironment = overrides
-    parentEnvironment["QUOTABAR_TEST_SENTINEL"] = "preserved"
-    // Test presence only; never expand or print credential values.
-    let presenceChecks = overrides.keys.sorted().map { "${\($0)+x}" }.joined()
+    let retained = [
+        "HOME": "/fake/home", "PATH": "/usr/bin:/bin", "TMPDIR": "/fake/tmp", "LANG": "C",
+        "AGY_CLI_DISABLE_AUTO_UPDATE": "true",
+        "HTTPS_PROXY": "http://upper.example.invalid:8080", "https_proxy": "http://lower.example.invalid:8080",
+        "NO_PROXY": "upper.example.invalid", "no_proxy": "lower.example.invalid"
+    ]
+    // The fake child emits assertions, not environment values. Credential overrides are tested by presence only.
+    let absenceChecks = excluded.keys.sorted().map {
+        #"if [ -z "${\#($0)+x}" ]; then printf '%s\n' 'absent:\#($0)'; fi"#
+    }.joined(separator: "\n")
+    let retainedChecks = retained.sorted(by: { $0.key < $1.key }).map {
+        #"if [ "$\#($0.key)" = '\#($0.value)' ]; then printf '%s\n' 'retained:\#($0.key)'; fi"#
+    }.joined(separator: "\n")
     let script = """
-        if read -r line; then exit 1; fi
-        test -z "\(presenceChecks)" || exit 2
-        test "$QUOTABAR_TEST_SENTINEL" = preserved || exit 3
-        printf '%s' 'safe'
+        if ! read -r line; then printf '%s\\n' stdin-eof; fi
+        \(absenceChecks)
+        \(retainedChecks)
         """
-    let safeInput = GoogleUsage.run(executablePath: "/bin/sh", commandArguments: ["-c", script], environment: parentEnvironment)
-    if case .success(let data) = safeInput {
-        check(String(decoding: data, as: UTF8.self) == "safe", "stdin is EOF and only auth overrides were removed")
-    } else { check(false, "stdin / environment isolation") }
+    let result = GoogleUsage.run(executablePath: "/bin/sh", commandArguments: ["-c", script],
+                                 environment: excluded.merging(retained) { _, value in value })
+    guard case .success(let data) = result else {
+        check(false, "fake child returned environment assertions")
+        return
+    }
+    let assertions = Set(String(decoding: data, as: UTF8.self).split(separator: "\n").map(String.init))
+    check(assertions.contains("stdin-eof"), "child stdin is EOF")
+    for key in excluded.keys.sorted() {
+        check(assertions.contains("absent:\(key)"), "child does not inherit \(key)")
+    }
+    for key in retained.keys.sorted() {
+        check(assertions.contains("retained:\(key)"), "child preserves \(key)")
+    }
 }

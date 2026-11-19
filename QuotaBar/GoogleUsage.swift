@@ -11,10 +11,11 @@ enum GoogleUsage {
     static let executable = "/Volumes/2T扩展盘/Agent文件/gemini-cli/antigravity/bin/agy"
     static let arguments = ["-p", "/usage", "--output-format", "json"]
 
-    private static let authEnvironmentOverrides: Set<String> = [
-        "GEMINI_API_KEY", "GOOGLE_API_KEY", "AGY_ADC_AUTH", "GOOGLE_APPLICATION_CREDENTIALS",
-        "GOOGLE_CLOUD_QUOTA_PROJECT", "GOOGLE_CLOUD_LOCATION", "GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT",
-        "CLOUDSDK_CONFIG", "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE", "CLOUDSDK_CORE_PROJECT"
+    private static let inheritedEnvironmentKeys = [
+        "HOME", "USER", "LOGNAME",
+        "PATH", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "AGY_CLI_DISABLE_AUTO_UPDATE",
+        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+        "http_proxy", "https_proxy", "all_proxy", "no_proxy"
     ]
 
     static func fetch() async -> Lane {
@@ -43,7 +44,7 @@ enum GoogleUsage {
         commandArguments: [String] = arguments,
         timeout: TimeInterval = 65,
         outputLimit: Int = 1_048_576,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String]? = nil
     ) -> CommandResult {
         guard FileManager.default.isExecutableFile(atPath: executablePath) else {
             return .unavailable("Antigravity CLI not found; Refresh after it is restored")
@@ -56,9 +57,17 @@ enum GoogleUsage {
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
-        // Preserve the existing CLI session; never inherit API-key/ADC selectors or cloud overrides.
-        // Match by name only, including legacy lowercase project aliases.
-        process.environment = environment.filter { !authEnvironmentOverrides.contains($0.key.uppercased()) }
+        // Read only named inputs; do not enumerate or copy the parent environment.
+        // Keep exact proxy spellings and let the wrapper apply its existing settings.
+        var childEnvironment: [String: String] = [:]
+        for name in inheritedEnvironmentKeys {
+            if let environment {
+                childEnvironment[name] = environment[name]
+            } else if let value = getenv(name) {
+                childEnvironment[name] = String(validatingCString: value)
+            }
+        }
+        process.environment = childEnvironment
 
         let reader = pipe.fileHandleForReading
         let writer = pipe.fileHandleForWriting
