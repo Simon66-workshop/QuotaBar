@@ -9,7 +9,13 @@ import Foundation
 /// No credential discovery, login, HTTP requests, credits, or request counters.
 enum GoogleUsage {
     static let executable = "/Volumes/2T扩展盘/Agent文件/gemini-cli/antigravity/bin/agy"
-    static let arguments = ["-p", "/usage", "--output-format", "json", "--print-timeout", "60s"]
+    static let arguments = ["-p", "/usage", "--output-format", "json"]
+
+    private static let authEnvironmentOverrides: Set<String> = [
+        "GEMINI_API_KEY", "GOOGLE_API_KEY", "AGY_ADC_AUTH", "GOOGLE_APPLICATION_CREDENTIALS",
+        "GOOGLE_CLOUD_QUOTA_PROJECT", "GOOGLE_CLOUD_LOCATION", "GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT",
+        "CLOUDSDK_CONFIG", "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE", "CLOUDSDK_CORE_PROJECT"
+    ]
 
     static func fetch() async -> Lane {
         await Task.detached(priority: .utility) {
@@ -36,7 +42,8 @@ enum GoogleUsage {
         executablePath: String = executable,
         commandArguments: [String] = arguments,
         timeout: TimeInterval = 65,
-        outputLimit: Int = 1_048_576
+        outputLimit: Int = 1_048_576,
+        environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> CommandResult {
         guard FileManager.default.isExecutableFile(atPath: executablePath) else {
             return .unavailable("Antigravity CLI not found; Refresh after it is restored")
@@ -49,11 +56,9 @@ enum GoogleUsage {
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
-        // A pre-existing CLI subscription session, never API-key billing.
-        var environment = ProcessInfo.processInfo.environment
-        environment.removeValue(forKey: "GEMINI_API_KEY")
-        environment.removeValue(forKey: "GOOGLE_API_KEY")
-        process.environment = environment
+        // Preserve the existing CLI session; never inherit API-key/ADC selectors or cloud overrides.
+        // Match by name only, including legacy lowercase project aliases.
+        process.environment = environment.filter { !authEnvironmentOverrides.contains($0.key.uppercased()) }
 
         let reader = pipe.fileHandleForReading
         let writer = pipe.fileHandleForWriting
@@ -132,7 +137,7 @@ enum GoogleUsage {
         var bucketIDs = Set<String>()
         for group in response.command.data.groups {
             guard !group.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  groupNames.insert(group.name).inserted, !group.buckets.isEmpty else { return unavailable }
+                  groupNames.insert(group.name).inserted else { return unavailable }
             var buckets: [GoogleQuotaBucket] = []
             for bucket in group.buckets {
                 guard !bucket.id.isEmpty, !bucket.name.isEmpty, !bucket.window.isEmpty,

@@ -60,6 +60,15 @@ func runGoogleChecks() {
     func googleTokens(_ lane: Lane) -> [Snapshot.BarToken] {
         Snapshot.assemble([lane]).barGroups(disks: []).first ?? []
     }
+    let argonEmpty = changingGroups { $0[2]["buckets"] = [] }
+    check(argonEmpty.tone == .ok && googleTokens(argonEmpty) == googleTokens(lane),
+          "empty Argon preserves both Gemini Models bar figures")
+    let emptyArgonSummary = argonEmpty.googleSummaryLines.joined(separator: "\n")
+    check(emptyArgonSummary.contains("80% used / 20% left · 5h · \(currentBucket?.resetLabel() ?? "")")
+          && emptyArgonSummary.contains("25% used / 75% left · weekly · \(weeklyBucket?.resetLabel() ?? "")"),
+          "empty Argon preserves Gemini Models used/left figures and both resets")
+    check(emptyArgonSummary.hasSuffix("Gemini 4 Argon\n  Current usage (5h) · Not provided\n  Weekly limit · Not provided"),
+          "empty Argon stays visible with neither figures nor resets invented")
     check(googleTokens(changingBucket("remaining_fraction", 0.15)) == [
         .init(text: "GO used 5h:80%", tone: .ok), .init(text: "W:85%", tone: .warn)
     ], "5h and weekly bar figures are separate, each with its service color")
@@ -119,7 +128,12 @@ func runGoogleChecks() {
     unknown(changed { $0["command"] = ["name": "usage", "data": [:]] }, "missing groups")
     unknown(changed { $0["command"] = ["name": "usage", "data": ["groups": NSNull()]] }, "null groups")
     unknown(changingGroups { $0 = [] }, "empty groups")
-    unknown(changingGroups { $0[0]["buckets"] = [] }, "empty buckets")
+    let geminiEmpty = changingGroups { $0[0]["buckets"] = [] }
+    unknown(geminiEmpty, "empty primary buckets")
+    check(geminiEmpty.googleGroups.count == 3, "empty primary buckets do not discard other official groups")
+    unknown(changingGroups { $0[2]["buckets"] = nil }, "missing buckets")
+    unknown(changingGroups { $0[2]["buckets"] = NSNull() }, "null buckets")
+    unknown(changingGroups { $0[2]["name"] = " "; $0[2]["buckets"] = [] }, "unnamed empty group")
     unknown(changingGroups { $0.append($0[0]) }, "duplicate group")
     unknown(changingGroups { groups in
         var buckets = groups[0]["buckets"] as! [[String: Any]]
@@ -149,7 +163,9 @@ func runGoogleChecks() {
     ])
     check(preserved.menuTitle == "G 21 · O 15 · AC 19  AT 82  AF 94 · GO used 5h:80%  W:25% · M —", "GO preserves existing G/O/AC/AT/AF/RAM ordering")
     check(!LaneKey.google.foldedIntoGrok, "GO never shares Grok pool")
-    check(GoogleUsage.executable.hasSuffix("/antigravity/bin/agy") && GoogleUsage.arguments == ["-p", "/usage", "--output-format", "json", "--print-timeout", "60s"], "production uses only official read-only command")
+    check(GoogleUsage.executable == "/Volumes/2T扩展盘/Agent文件/gemini-cli/antigravity/bin/agy"
+          && GoogleUsage.arguments == ["-p", "/usage", "--output-format", "json"],
+          "production uses the exact authorized path and arguments")
 
     // Local fake executables only: no network, credential access, auth, or app launch.
     let echo = GoogleUsage.run(executablePath: "/usr/bin/printf", commandArguments: ["%s", String(decoding: fixture, as: UTF8.self)])
@@ -161,8 +177,26 @@ func runGoogleChecks() {
     check(ProcessInfo.processInfo.systemUptime - start < 2, "timeout is wall-clock bounded")
     unknown(GoogleUsage.lane(from: GoogleUsage.run(executablePath: "/usr/bin/yes", commandArguments: [], timeout: 2, outputLimit: 32_768)), "oversized stdout is bounded without deadlock")
     unknown(GoogleUsage.lane(from: GoogleUsage.run(executablePath: "/bin/sh", commandArguments: ["-c", "exit 0"])), "empty stdout")
-    let safeInput = GoogleUsage.run(executablePath: "/bin/sh", commandArguments: ["-c", "if read line; then exit 1; fi; test -z \"${GEMINI_API_KEY+x}${GOOGLE_API_KEY+x}\" || exit 1; printf '%s' 'safe'"])
+    let overrides = [
+        "GEMINI_API_KEY": "dummy", "GOOGLE_API_KEY": "dummy", "AGY_ADC_AUTH": "true",
+        "GOOGLE_APPLICATION_CREDENTIALS": "/fake/adc.json", "GOOGLE_CLOUD_QUOTA_PROJECT": "dummy-project",
+        "GOOGLE_CLOUD_LOCATION": "dummy-region", "GOOGLE_CLOUD_PROJECT": "dummy-project",
+        "GCLOUD_PROJECT": "dummy-project", "gcloud_project": "dummy-project", "google_cloud_project": "dummy-project",
+        "CLOUDSDK_CONFIG": "/fake/cloud-sdk", "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE": "/fake/sdk-credentials.json",
+        "CLOUDSDK_CORE_PROJECT": "dummy-project"
+    ]
+    var parentEnvironment = overrides
+    parentEnvironment["QUOTABAR_TEST_SENTINEL"] = "preserved"
+    // Test presence only; never expand or print credential values.
+    let presenceChecks = overrides.keys.sorted().map { "${\($0)+x}" }.joined()
+    let script = """
+        if read -r line; then exit 1; fi
+        test -z "\(presenceChecks)" || exit 2
+        test "$QUOTABAR_TEST_SENTINEL" = preserved || exit 3
+        printf '%s' 'safe'
+        """
+    let safeInput = GoogleUsage.run(executablePath: "/bin/sh", commandArguments: ["-c", script], environment: parentEnvironment)
     if case .success(let data) = safeInput {
-        check(String(decoding: data, as: UTF8.self) == "safe", "stdin is EOF and API-key environment is excluded")
+        check(String(decoding: data, as: UTF8.self) == "safe", "stdin is EOF and only auth overrides were removed")
     } else { check(false, "stdin / environment isolation") }
 }
