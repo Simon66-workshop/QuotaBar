@@ -1,4 +1,4 @@
-# QuotaBar 1.8.25
+# QuotaBar 1.8.26
 
 Mac menu bar extra for live usage. **G** is the shared weekly pool (X Subscription Super: Grok, Cursor, and Grok Bot). **GO** is Google Gemini model quota from the official Antigravity CLI. ChatGPT / Codex, Claude, local and external disks, and local RAM stay on the bar.
 
@@ -18,7 +18,7 @@ QuotaBar appears on the right of the menu bar. Existing unconnected services sta
 - **G** shared weekly pool — Grok, Cursor, and Grok Bot (one figure, the Grok billing percentage)
 - **O** ChatGPT / Codex (5-hour + weekly)
 - **AC / AT / AF** Claude current session, this week, and Fable this week (AF hidden when that limit is absent)
-- **GO** Google / Antigravity — separate **used** percentages for Gemini Models **5h** (current) and **W** (weekly); Argon and third-party quotas stay separate in the panel
+- **GO** Google / Antigravity — separate **used** percentages for Gemini Models **5h** (current) and **W** (weekly), without `%` on the bar (e.g. `GO used 5h:80  W:25`); Argon and third-party quotas stay separate in the panel
 - **D** fullest visible disk used %
 - **E** each external disk
 - **M** local RAM used % (for example, `M 63%`)
@@ -28,7 +28,7 @@ Cursor and Grok Bot are not separate bar, tooltip, or panel items.
 - **Left-click** the bar → glass panel (details, connect, hide disks)
 - **Right-click** the bar → short native menu (refresh / copy / alerts / quit)
 
-The panel header should say **v1.8.25** (build **38**). If it still says an older version, quit QuotaBar and run `Start QuotaBar.command` again. **For this local upgrade review, do not install or launch it; use the candidate-only build below.**
+The panel header should say **v1.8.26** (build **39**). If it still says an older version, quit QuotaBar and run `Start QuotaBar.command` again. **For this local upgrade review, do not install or launch it; use the candidate-only build below.**
 
 Later launches: just double-click `Start QuotaBar.command` again.
 
