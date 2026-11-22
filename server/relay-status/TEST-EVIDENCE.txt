@@ -72,3 +72,30 @@ handling, real LoadCredential, cross-UID socket privileges, per-IP/aggregate
 No approval report generated; no production approval or readiness claim.
 NO_DEPLOY / NO_COMMIT / NO_PUSH. No external network, ECS, real Keychain,
 QuotaBar install/start or status-service apply, rollback or reload.
+
+== App audit APP-01 through APP-04: server compatibility rerun (2026-11-22T17:59:08Z) ==
+Server implementation unchanged by this App remediation. Tested an exact writable
+archive of server commit 3b4d5d24a2aae509dbfe9faaefa3a476f9d7088f.
+Python 3.14.6: PASS, 43 tests (0.142s), including the synthetic Unix socket round
+trip and deploy-gate checks.
+Command: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s server/relay-status/tests -v
+A preliminary run against the concurrently edited server worktree was not
+a stable candidate and also could not create fixtures there under the App sandbox;
+the result above covers the named commit only, not ongoing server changes.
+Isolated Ubuntu nginx/systemd runtime gates remain NOT RUN. No external network,
+ECS contact, install, app launch, real Keychain access, commit, push or deployment.
+
+== App audit dc5df1c APP-01--04: offline server compatibility rerun (2026-11-22T18:13Z) ==
+No server implementation changes were made by this App task. Python 3.14.6.
+  python3 -B -m unittest discover -s server/relay-status/tests -v
+Exact git archive 3b4d5d24a2aae509dbfe9faaefa3a476f9d7088f: PASS, 43 tests,
+including the synthetic Unix socket exchange.
+Separate copy of the existing dirty server worktree at that HEAD: FAIL,
+43 tests run (3 failures, 2 errors). Input manifest SHA-256 (excluding this
+evidence file): 90cb571daeb6ccb2b8e8e9ec47f3ef975fe21d2f5afb7a301946a26746d2539b.
+  - WeCom 89.9s/90s green cases and disk-snapshot HTTP 200 assertions failed.
+  - Approval fixture lacks the new systemd argument; rollback fixture's expected
+    script substring is absent.
+This FAIL covers the captured snapshot only, not later concurrent edits. Neither
+rerun exercised live nginx/systemd, ECS, external network, installation or reload.
+Linux integration and production authorization remain NOT RUN / NOT GRANTED.

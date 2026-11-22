@@ -19,8 +19,14 @@ MAIN = "/etc/nginx/nginx.conf"
 BASE = "/opt/quotabar-relay-status"
 HOST = "66workshop.cn"
 LOCATION = f"{BASE}/nginx/https/location.conf"
+LIMITS = f"{BASE}/nginx/http/limits.conf"
+PRODUCTION_UNITS = frozenset({
+    "relay-feishu.service", "relay-wecom.service", "relay-https-inbox.service",
+    "relay-direct-lease.service", "relay-health.timer", "relay.slice", "nginx.service",
+})
+SYSTEMCTL = ["/usr/bin/systemctl", "--system", "--no-pager"]
 SLOTS = {
-    f"{BASE}/nginx/http/*.conf": f"{BASE}/nginx/http/limits.conf",
+    f"{BASE}/nginx/http/*.conf": LIMITS,
     f"{BASE}/nginx/https/*.conf": LOCATION,
 }
 TEMPLATES = dict(zip(SLOTS.values(), ("limits.conf", "location.conf")))
@@ -153,7 +159,7 @@ def listen_port(value):
     return int(match[2]) if match[2] else 80
 
 
-def scope_check(files, mode, expand=glob.glob):
+def scope_check(files, snippets, expand=glob.glob):
     visited = set()
     slots = {key: [] for key in SLOTS}
 
@@ -171,7 +177,7 @@ def scope_check(files, mode, expand=glob.glob):
                 paths = sorted(expand(pattern), key=os.fsencode) if glob.has_magic(pattern) else [pattern]
                 if pattern in slots:
                     slots[pattern].append(scope)
-                    require(paths == ([SLOTS[pattern]] if mode == "active" else []))
+                    require(paths == ([SLOTS[pattern]] if SLOTS[pattern] in snippets else []))
                 else:
                     require(not any(p in TEMPLATES for p in paths))
                 for path in paths:
@@ -211,10 +217,18 @@ def scope_check(files, mode, expand=glob.glob):
 
 def verify(files, mode, approved, snippets, expand=glob.glob):
     actual = {path: files[path] for path in TEMPLATES if path in files}
-    require(actual == (snippets if mode == "active" else {}))
+    if mode == "retired":
+        # Limits can remain while the old worker generation drains; they
+        # are inert once only the tombstone is loaded.
+        expected = {LOCATION: snippets["retired"]}
+        if LIMITS in actual:
+            expected[LIMITS] = snippets[LIMITS]
+    else:
+        expected = {p: snippets[p] for p in TEMPLATES} if mode == "active" else {}
+    require(actual == expected)
     baseline = ((path, data) for path, data in files.items() if path not in TEMPLATES)
     require(fingerprint(baseline) == approved)
-    scope_check(files, mode, expand)
+    scope_check(files, expected, expand)
 
 
 def capture(command):
@@ -246,15 +260,51 @@ def runtime_sha():
     return sha(packages)
 
 
-def approved_baseline(review_raw, report, candidate, launcher, runtime):
+def systemd_sha(run=capture, read=lambda path: Path(path).read_bytes()):
+    # Discover installed and loaded relay units as well as the required
+    # known ecs13 units. Inspect manager-vs-disk drift, then bind the actual
+    # selected fragments/drop-ins to the reviewed host baseline.
+    units = set(PRODUCTION_UNITS)
+    for verb, options in (("list-unit-files", []), ("list-units", ["--all", "--plain"])):
+        rows = run([*SYSTEMCTL, verb, *options, "--no-legend", "--full", "relay-*", "relay.slice"])
+        for row in rows.decode("ascii").splitlines():
+            if row.strip():
+                name = row.split()[0]
+                require(re.fullmatch(r"relay(?:-[A-Za-z0-9_.@:-]+|\.slice)", name) is not None)
+                # Installed template definitions can have their own drop-ins
+                # but do not have a manager unit object. Require the host
+                # reviewer to handle any such topology before proceeding.
+                require("@." not in name)
+                units.add(name)
+    items = []
+    for name in sorted(units):
+        raw = run([*SYSTEMCTL, "show", "--all",
+                   "--property=LoadState,NeedDaemonReload,FragmentPath,DropInPaths", name])
+        pairs = [line.split("=", 1) for line in raw.decode("ascii").splitlines()]
+        fields = dict(pairs)
+        require(len(pairs) == 4 and exact(fields, "LoadState NeedDaemonReload FragmentPath DropInPaths")
+                and fields["LoadState"] == "loaded" and fields["NeedDaemonReload"] == "no")
+        fragment = fields["FragmentPath"]
+        require(fragment or name == "relay.slice")
+        paths = ([fragment] if fragment else []) + fields["DropInPaths"].split()
+        items.append((name, "\n".join(paths).encode("ascii")))
+        for path in paths:
+            require(re.fullmatch(r"/[A-Za-z0-9_/.@:-]+", path) is not None
+                    and os.path.normpath(path) == path)
+            items.append((path, read(path)))
+    return fingerprint(items)
+
+
+def approved_baseline(review_raw, report, candidate, launcher, runtime, systemd):
     review = decode_object(review_raw)
-    require(exact(review, "baseline_sha256 launcher_sha256 candidate_sha256 runtime_sha256 isolation_report_sha256")
+    require(exact(review, "baseline_sha256 launcher_sha256 candidate_sha256 runtime_sha256 systemd_sha256 isolation_report_sha256")
             and all(type(v) is str and HEX.fullmatch(v) for v in review.values())
             and review["launcher_sha256"] == launcher and review["candidate_sha256"] == candidate
-            and review["runtime_sha256"] == runtime)
+            and review["runtime_sha256"] == runtime and review["systemd_sha256"] == systemd)
     results = decode_object(report)
     checks = ("load_credential", "socket_identities", "http1_http2_body", "rate_per_ip_global",
-              "install_interrupt", "rollback_before_confirmation", "rollback_live_and_cleanup")
+              "install_interrupt", "rollback_before_confirmation", "rollback_live_and_cleanup",
+              "systemd_change_freeze")
     require(sha(report) == review["isolation_report_sha256"]
             and exact(results, "candidate_sha256 runtime_sha256 platform " + " ".join(checks))
             and results["platform"] == "Ubuntu 22.04"
@@ -264,11 +314,18 @@ def approved_baseline(review_raw, report, candidate, launcher, runtime):
 
 
 def main(mode):
-    require(mode in {"inspect", "inactive", "active"})
+    require(mode in {"inspect", "inactive", "active", "retired", "systemd"})
     candidate = candidate_sha()
     runtime = runtime_sha()
     launcher = launcher_sha(capture(["/usr/bin/systemctl", "show", "nginx.service",
                                      "--property=FragmentPath,DropInPaths,ExecStart,ExecReload"]))
+    systemd = systemd_sha()
+    if mode != "inspect":
+        review_raw, _ = read_regular(REVIEW, 2048, mode=0o600, root_only_parents=True)
+        report, _ = read_regular(CONFIG / "isolation-pass.json", 8192, mode=0o600, root_only_parents=True)
+        baseline = approved_baseline(review_raw, report, candidate, launcher, runtime, systemd)
+    if mode == "systemd":
+        return
     raw = capture(["/usr/sbin/nginx", "-T", "-c", MAIN, "-g", "daemon on; master_process on;"])
     files = dump_files(raw)
     # Also reject spoofed dump delimiters or files edited while generating it.
@@ -277,12 +334,11 @@ def main(mode):
         baseline = fingerprint(files.items())
         verify(files, "inactive", baseline, {})
         print(json.dumps({"baseline_sha256": baseline, "launcher_sha256": launcher,
-                          "candidate_sha256": candidate, "runtime_sha256": runtime}, indent=2))
+                          "candidate_sha256": candidate, "runtime_sha256": runtime,
+                          "systemd_sha256": systemd}, indent=2))
         return
-    review_raw, _ = read_regular(REVIEW, 2048, mode=0o600, root_only_parents=True)
-    report, _ = read_regular(CONFIG / "isolation-pass.json", 8192, mode=0o600, root_only_parents=True)
-    baseline = approved_baseline(review_raw, report, candidate, launcher, runtime)
     snippets = {p: (HERE / "nginx" / n).read_bytes() for p, n in TEMPLATES.items()}
+    snippets["retired"] = (HERE / "nginx/retired.conf").read_bytes()
     verify(files, mode, baseline, snippets)
 
 
@@ -291,4 +347,4 @@ if __name__ == "__main__":
         require(len(sys.argv) == 2)
         main(sys.argv[1])
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
-        sys.exit("nginx gate: configuration, include context or approval mismatch; no reload authorized")
+        sys.exit("nginx gate: nginx/systemd configuration, include context or approval mismatch; no reload authorized")

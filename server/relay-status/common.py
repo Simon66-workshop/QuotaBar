@@ -58,7 +58,7 @@ def checked_directory(path, owners, root_only_parents=False):
 
 
 def read_regular(path, limit, owners=(0,), *, parent_owners=None,
-                 root_only_parents=False, mode=None, missing_ok=False):
+                 root_only_parents=False, mode=None, missing_ok=False, check_fd=None):
     path = Path(path)
     parent = checked_directory(path.parent, parent_owners if parent_owners is not None else owners,
                                root_only_parents)
@@ -77,6 +77,8 @@ def read_regular(path, limit, owners=(0,), *, parent_owners=None,
                     or (mode is not None and stat.S_IMODE(before.st_mode) != mode)
                     or before.st_size > limit):
                 raise ValueError("untrusted file")
+            if check_fd is not None:
+                check_fd(stream.fileno(), before)
             data = stream.read(limit + 1)
             after = os.fstat(stream.fileno())
             if (len(data) > limit or (before.st_size, before.st_mtime_ns)
@@ -183,9 +185,11 @@ def project_snapshot(doc, current_boot, current_mono):
     if not 0 <= age <= SNAPSHOT_MAX_AGE:
         raise ValueError("stale snapshot")
     observed = parse_date(doc["observed_at"])
-    for name, max_green_age in (("feishu", FEISHU_OK_AGE), ("wecom", WECOM_HEARTBEAT_OK_AGE)):
+    public_connections = {}
+    for name, max_green_age in (("feishu", FEISHU_OK_AGE), ("wecom", WECOM_PONG_OK_AGE)):
         status = doc[name]
-        if not exact(status, "state reason last_heartbeat_at"):
+        keys = "state reason last_heartbeat_at"
+        if not exact(status, keys + (" effective_pong_age_s" if name == "wecom" else "")):
             raise ValueError("invalid connection")
         state, reason = status["state"], status["reason"]
         if type(state) is not str or type(reason) is not str or reason not in REASONS.get(state, ()):
@@ -196,6 +200,13 @@ def project_snapshot(doc, current_boot, current_mono):
         # Compare at collection, not at request time; snapshot TTL is separate.
         if state == "ok" and (heartbeat is None or observed - heartbeat > max_green_age):
             raise ValueError("contradictory green heartbeat evidence")
+        if name == "wecom":
+            pong = status["effective_pong_age_s"]
+            if (pong is not None and (not number(pong) or pong < 0)
+                    or state == "ok" and (pong is None or not observed - heartbeat <= pong + 1
+                                          or pong > WECOM_PONG_OK_AGE)):
+                raise ValueError("contradictory pong evidence")
+        public_connections[name] = {key: status[key] for key in keys.split()}
     cert = doc["certificate"]
     if not exact(cert, "state expires_at days_remaining"):
         raise ValueError("invalid certificate")
@@ -216,6 +227,5 @@ def project_snapshot(doc, current_boot, current_mono):
         raise ValueError("invalid certificate state")
     return {
         "schema_version": 1, "observed_at": doc["observed_at"],
-        "snapshot_age_s": math.floor(age), "feishu": doc["feishu"],
-        "wecom": doc["wecom"], "certificate": cert,
+        "snapshot_age_s": math.floor(age), **public_connections, "certificate": cert,
     }

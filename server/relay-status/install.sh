@@ -6,12 +6,12 @@ source "$HERE/deploy-common.sh"
 [[ $# -le 1 ]] || die "Usage: install.sh [--dry-run|--apply]"
 case "${1:---dry-run}" in
     --dry-run)
-        say "DRY RUN: no files, users, nginx or units changed."
+        say "DRY RUN: no environment preflight; no files, users, nginx or units changed."
         say "After approval: validate current nginx, credentials, account and empty include slots."
         say "Install the isolated collector, timer, API and tmpfiles; start only these new status units."
         say "Verify snapshot and socket; activate only the dedicated 443 location and http limits."
-        say "Require the approved complete nginx baseline and candidate-bound isolation report."
-        say "Recheck the complete nginx config, include contexts and exact feature-only delta before reload."
+        say "Require the shared change freeze, approved nginx/systemd baselines and candidate-bound isolation report."
+        say "Check the complete candidate in a private mount namespace before one atomic activation."
         exit 0 ;;
     --apply) ;;
     *) die "Usage: install.sh [--dry-run|--apply]" ;;
@@ -20,7 +20,7 @@ esac
 [[ $(uname -s) == Linux && $(id -u) == 0 ]] || die "--apply requires Linux root."
 begin_apply
 nginx_gate inactive || die "Initial nginx review gate failed; nothing installed or reloaded."
-for exe in /usr/bin/python3 /usr/bin/systemctl /usr/bin/openssl; do
+for exe in /usr/bin/python3 /usr/bin/systemctl /usr/bin/openssl /usr/bin/unshare /usr/bin/mount; do
     [[ -x "$exe" ]] || die "Required existing system executable is missing."
 done
 [[ -f "$CONFIG/verify.json" && ! -L "$CONFIG/verify.json" &&
@@ -56,29 +56,23 @@ done
 
 # Reserve the private installation tree before copying anything into it.
 mkdir -m 0755 -- "$BASE"
-reload_attempted=no
+stage=
 install_exit() {
     local rc=$?
+    discard_nginx_stage
     if (( rc != 0 )); then
-        if [[ "$reload_attempted" == no ]]; then
-            # Do not leave failed fragments eligible for a future shared reload.
-            if [[ -f "$VHOST" ]]; then mv -- "$VHOST" "$BASE/staged-location.conf"; fi
-            if [[ -f "$HTTP" ]]; then mv -- "$HTTP" "$BASE/staged-limits.conf"; fi
-            say "Install incomplete; nginx was not reloaded. Review the two-phase rollback procedure."
-        else
-            say "Reload outcome unknown; keep the status service available and use verified rollback."
-        fi
+        say "Install incomplete; check live workers and use the two-phase rollback. Do not remove the backend first."
     fi
 }
 trap install_exit EXIT
-install -d -m 0755 "$BASE/templates" "$BASE/nginx/http" "$BASE/nginx/https"
+install -d -m 0755 "$BASE/templates" "$NGINX_TREE"
 for file in "${PY_FILES[@]}"; do
     install -m 0644 "$HERE/$file" "$BASE/$file"
 done
 for file in "${UNITS[@]}" quotabar-status.conf; do
     install -m 0644 "$HERE/systemd/$file" "$BASE/templates/$file"
 done
-for file in limits.conf location.conf; do
+for file in limits.conf location.conf retired.conf; do
     install -m 0644 "$HERE/nginx/$file" "$BASE/templates/$file"
 done
 for unit in "${UNITS[@]}"; do
@@ -88,7 +82,7 @@ install -m 0644 "$BASE/templates/quotabar-status.conf" "$TMPFILES"
 systemd-tmpfiles --create "$TMPFILES"
 [[ $(stat -c '%U %G %a' "$RUN/api") == 'quotabar-status www-data 2750' ]] ||
     die "Unexpected Unix socket directory ownership or mode."
-systemctl daemon-reload
+systemd_reload
 systemctl start "$COLLECTOR"
 [[ $(stat -c '%U %G %a' "$RUN/snapshot.json") == 'root quotabar-status 640' ]] ||
     die "Unexpected snapshot ownership or mode."
@@ -99,11 +93,13 @@ for ((i=0; i<25; i++)); do
 done
 [[ -S "$RUN/api/status.sock" && $(stat -c '%U %G %a' "$RUN/api/status.sock") == 'quotabar-status www-data 660' ]] ||
     die "API did not create the expected Unix socket."
-install -m 0644 "$BASE/templates/limits.conf" "$BASE/staged-limits.conf"
-install -m 0644 "$BASE/templates/location.conf" "$BASE/staged-location.conf"
-mv -- "$BASE/staged-limits.conf" "$HTTP"
-mv -- "$BASE/staged-location.conf" "$VHOST"
-nginx_gate active || die "Approved nginx baseline, feature-only delta or include context did not match."
-reload_attempted=yes
+new_nginx_stage
+install -m 0644 "$BASE/templates/limits.conf" "$stage/http/limits.conf"
+install -m 0644 "$BASE/templates/location.conf" "$stage/https/location.conf"
+nginx_gate_staged "$stage" active || die "Complete isolated nginx candidate failed; no activation."
+# Both fragments become eligible together, and only after full validation.
+publish_nginx "$stage" "$NGINX_TREE"
+stage=
+nginx_gate active || die "Activated files no longer match approved config; no reload."
 nginx_reload || die "nginx reload failed; confirm live configuration before further changes."
 say "Status components installed; verify nginx TLS, routing, privacy and response gates separately."

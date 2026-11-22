@@ -1,6 +1,7 @@
 """Private, bounded Unix HTTP endpoint. No request or authorization logging."""
 import base64
 from dataclasses import dataclass
+import errno
 import hashlib
 import hmac
 import json
@@ -10,6 +11,7 @@ import re
 import signal
 import socketserver
 import stat
+import struct
 import sys
 import threading
 import time
@@ -74,13 +76,37 @@ class Credentials:
         return current or (previous and self.has_previous and self.rotated_at <= now < self.previous_until)
 
 
+def credential_access(fd, st):
+    # systemd can deliver an owner-only file or grant this specific UID a
+    # read ACL. On Linux the group mode bits then describe the ACL mask,
+    # not the owning group's actual permission. Inspect the ACL on this fd.
+    mode = stat.S_IMODE(st.st_mode)
+    if mode not in (0o400, 0o600, 0o440, 0o640):
+        raise ValueError("credential permissions")
+    try:
+        acl = os.getxattr(fd, "system.posix_acl_access")
+    except OSError as exc:
+        if exc.errno not in (errno.ENODATA, errno.ENOTSUP) or mode & 0o070:
+            raise ValueError("credential ACL unavailable") from exc
+        return
+    undefined = 0xFFFFFFFF
+    expected = [
+        (0x01, mode >> 6, undefined),       # owner (root or API UID)
+        (0x02, 4, os.getuid()),             # named API UID, read only
+        (0x04, 0, undefined),              # owning group: no access
+        (0x10, 4, undefined),              # mask
+        (0x20, 0, undefined),              # others: no access
+    ]
+    if (not mode & 0o040 or len(acl) != 4 + 8 * len(expected)
+            or acl[:4] != struct.pack("<I", 2)
+            or list(struct.iter_unpack("<HHI", acl[4:])) != expected):
+        raise ValueError("credential ACL permissions")
+
+
 def load_credentials():
     path = Path(os.environ["CREDENTIALS_DIRECTORY"]) / "verify.json"
-    raw, st = read_regular(path, 1024, owners=(0, os.getuid()))
-    if st.st_mode & 0o077:
-        raise ValueError("credential permissions")
+    raw, _ = read_regular(path, 1024, owners=(0, os.getuid()), check_fd=credential_access)
     return Credentials.from_document(decode_object(raw))
-
 
 def snapshot():
     raw, _ = read_regular(SNAPSHOT, SNAPSHOT_LIMIT, mode=0o640)
@@ -116,7 +142,8 @@ def dispatch(raw, trailing, credentials, read_snapshot, now):
                 or any(c != 9 and not 32 <= c <= 126 for c in value)):
             return response(400, head=head)
         values.setdefault(name.lower(), []).append(value.strip(b" \t"))
-    if b"transfer-encoding" in values or values.get(b"content-length", [b"0"]) != [b"0"]:
+    if (b"transfer-encoding" in values or values.get(b"content-length", [b"0"]) != [b"0"]
+            or values.get(b"x-quotabar-body", [b"0"]) != [b"0"]):
         return response(400, head=head)
     if parts[0] != b"GET":
         return response(405, head=head)

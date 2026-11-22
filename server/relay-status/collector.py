@@ -123,8 +123,13 @@ def connection(name, unit, sample, lease, now, mono, policy):
     history = (rfc3339(timestamp)
                if number(timestamp) and 0 <= timestamp <= now + CLOCK_SKEW else None)
 
+    pong = None
+
     def status(state, reason):
-        return {"state": state, "reason": reason, "last_heartbeat_at": history}
+        result = {"state": state, "reason": reason, "last_heartbeat_at": history}
+        if name == "wecom":
+            result["effective_pong_age_s"] = pong
+        return result
 
     def unknown():
         return status("unknown", "source_unavailable")
@@ -165,7 +170,8 @@ def connection(name, unit, sample, lease, now, mono, policy):
         if (not number(pong_age) or pong_age < 0
                 or source_mono - pong_age < unit.started):
             return unknown()
-        pong = pong_age + age
+        # Skew tolerance admits consistent samples; it must not add green time.
+        pong = pong_age + max(age, mono - source_mono)
     if age > CONNECTION_DOWN_AGE:
         return status("down", "heartbeat_stale")
     if name == "wecom":
