@@ -1,15 +1,79 @@
 import Foundation
 import Security
 
-enum RelayStatusKeychain {
-    private static let queue = DispatchQueue(label: "app.quotabar.mac.relay-status.keychain", qos: .utility)
+enum RelayStatusHelper {
+    static let argument = "--relay-status-helper"
 
-    static func read() async throws -> String {
+    private enum Reply: Codable {
+        case snapshot(Data)
+        case failure(RelayIssue)
+    }
+
+    static func load() async throws -> RelaySnapshot {
         try await withCheckedThrowingContinuation { continuation in
-            queue.async {
-                continuation.resume(with: Result { try readLoginItem() })
+            DispatchQueue.global(qos: .utility).async {
+                continuation.resume(with: Result { try requestFromChild() })
             }
         }
+    }
+
+    private static func requestFromChild() throws -> RelaySnapshot {
+        guard let executable = Bundle.main.executableURL else { throw RelayIssue.keychainUnavailable }
+        let output = Pipe()
+        let child = Process()
+        child.executableURL = executable
+        child.arguments = [argument]
+        child.currentDirectoryURL = URL(fileURLWithPath: "/", isDirectory: true)
+        child.environment = [:]
+        child.standardInput = FileHandle.nullDevice
+        child.standardError = FileHandle.nullDevice
+        child.standardOutput = output
+        do { try child.run() }
+        catch { throw RelayIssue.keychainUnavailable }
+        // The child has its own 5s HTTP budget. Bound its total lifetime as well,
+        // including startup and potentially stalled native Keychain calls.
+        let watchdog = DispatchWorkItem { if child.isRunning { child.terminate() } }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 10, execute: watchdog)
+        defer { watchdog.cancel() }
+        let data = try? output.fileHandleForReading.readToEnd()
+        child.waitUntilExit()
+        guard child.terminationReason == .exit else { throw RelayIssue.timeout }
+        guard child.terminationStatus == 0, let data,
+              let reply = try? JSONDecoder().decode(Reply.self, from: data) else {
+            throw RelayIssue.keychainUnavailable
+        }
+        switch reply {
+        case .snapshot(let body): return try RelaySnapshot.parse(body)
+        case .failure(let issue): throw issue
+        }
+    }
+
+    // Called only in the dedicated process, before AppKit or any quota provider.
+    // An ACL granted to this executable must never turn it into a token exporter:
+    // the child makes the fixed request and returns only v1 status or a typed error.
+    static func runAndExit(
+        readToken: @escaping () throws -> String = readLoginItem,
+        fetch: @escaping (String) async throws -> Data = RelayStatusClient.fetchPayload
+    ) -> Never {
+        Task.detached(priority: .utility) {
+            let reply: Reply
+            do {
+                guard SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else {
+                    throw RelayIssue.keychainUnavailable
+                }
+                let token = try readToken()
+                reply = .snapshot(try await fetch(token))
+            } catch {
+                reply = .failure((error as? RelayIssue) ?? .network)
+            }
+            do {
+                try FileHandle.standardOutput.write(contentsOf: JSONEncoder().encode(reply))
+                exit(EXIT_SUCCESS)
+            } catch {
+                exit(EXIT_FAILURE)
+            }
+        }
+        dispatchMain()
     }
 
     private static func readLoginItem() throws -> String {
@@ -30,20 +94,8 @@ enum RelayStatusKeychain {
             kSecReturnData as String: true
         ]
 
-        // The file-based login keychain does not honor LAContext's no-UI flag.
-        // Temporarily suppress optional UI, restoring the previous setting
-        // immediately after this synchronous Security call. ACL enforcement stays on.
-        var previous = DarwinBoolean(false)
-        guard SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess,
-              SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else {
-            throw RelayIssue.keychainUnavailable
-        }
-        let status: OSStatus
         var item: CFTypeRef?
-        do {
-            defer { SecKeychainSetUserInteractionAllowed(previous.boolValue) }
-            status = SecItemCopyMatching(query as CFDictionary, &item)
-        }
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
 
         if status == errSecItemNotFound { throw RelayIssue.notConfigured }
         guard status == errSecSuccess else { throw RelayIssue.keychainUnavailable }

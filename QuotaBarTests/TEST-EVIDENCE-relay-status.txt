@@ -575,3 +575,46 @@ days_remaining from fractional seconds, an inconsistent exact-day boundary is
 intentionally shown as unknown until a consistent observation arrives.
 No external network, ECS access, real Keychain read, installation, QuotaBar launch,
 restart, commit, push or deploy.
+
+== Independent rerun accompanying server P0/P1 remediation (2026-11-22 UTC) ==
+App source: af5335052cc29829650adb464789aaa56d1b0e58; tested in an exact
+git archive in the writable external-volume workspace, not by launching App.
+Apple Swift 6.4, macOS 26.5 SDK; optimized arm64 macOS 14 compile/link PASS.
+PASS: QuotaBarTests/run.sh (278 checks), check-memory.sh, check-relay-status.sh
+(APP-01/02, strict v1 parsing, no-I/O HTTP policy, injected polling, version,
+New York/UTC Shanghai equivalence, 17 offscreen PNGs).
+PASS: plist/project lint and launcher/component shell syntax.
+All 17 offscreen PNGs byte-identical to the existing tracked previews;
+no App source or preview changed in this rerun. GO-only check scripts not
+run from this checkout; their dedicated worktree boundary was preserved.
+No real Keychain, external network, App install/start or deployment.
+Live menu bar/VoiceOver/glass and ECS are not covered by this rerun.
+
+== Independent App audit APP-01 through APP-04 remediation (2026-11-22T18:02:16Z) ==
+Tested this working-tree change over af5335052cc29829650adb464789aaa56d1b0e58
+in an isolated writable copy; changed source files matched the working tree.
+Apple Swift 6.4, macOS 26.5 SDK on Darwin arm64.
+PASS: QUOTABAR_SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk
+      bash QuotaBarTests/check-relay-status.sh
+  APP-01: same observation replayed every 30s, still gray at 90s and 120s;
+          exact expiry, later observation recovery, shortening, reconnect,
+          and rejection of an older observation.
+  APP-02: 12 duplicate-key order/level cases, including escaped names and
+          identical values; HTTP decode returns badResponse and Store clears green.
+  APP-03: invalid month ends/non-leap dates and invalid time rejected in all
+          four timestamp fields; leap day with fraction and +00:00 accepted.
+  APP-04: actual subprocess and anonymous pipe with synthetic providers;
+          child's Security interaction policy disabled, parent's unchanged.
+          No real Keychain file/item read or network request in this test.
+  Also PASS: polling, HTTP policy, v1 parsing and existing heartbeat/certificate
+  regressions, version, New York/UTC Shanghai equivalence, 17 offscreen PNGs.
+  All 17 regenerated PNGs were byte-identical; no tracked previews changed.
+PASS: QuotaBarTests/run.sh (278 checks), check-memory.sh, optimized app
+      arm64 macOS 14 compile/link (binary not run), plist/project lint,
+      launcher/component shell syntax and git diff --check.
+Toolchain note: default SDK 27.0 attempt hit missing SwiftUIMacros.StateMacro;
+the complete rerun used the documented, locally installed macOS 26.5 SDK.
+Not run: GO-only scripts (separate restricted worktree), actual signed-app
+Keychain ACL/authorization, desktop menu bar/VoiceOver/glass, live ECS/nginx.
+No network, ECS contact, installation, QuotaBar launch, restart, deployment,
+commit or push. APP-05 through APP-07 not changed or claimed fixed.

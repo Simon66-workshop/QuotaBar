@@ -19,8 +19,7 @@ enum RelayPollTiming {
 final class RelayStatusStore: ObservableObject {
     @Published private(set) var display = RelayDisplay.unavailable(.waiting)
 
-    private let readToken: () async throws -> String
-    private let fetch: (String) async throws -> RelaySnapshot
+    private let loadSnapshot: () async throws -> RelaySnapshot
     private let now: () -> TimeInterval
     private let jitter: () -> Double
     private var monitor: NWPathMonitor?
@@ -36,10 +35,12 @@ final class RelayStatusStore: ObservableObject {
     private var retryNotBefore: TimeInterval = 0
     private var retryIssue: RelayIssue?
     private var expires: TimeInterval?
+    // Keep the high-water mark even after errors/expiry. Refusing older observations
+    // is fail-closed and avoids retaining an unbounded history of deadlines.
+    private var latest: (observedAt: Date, deadline: TimeInterval)?
 
     init(
-        readToken: @escaping () async throws -> String = RelayStatusKeychain.read,
-        fetch: @escaping (String) async throws -> RelaySnapshot = RelayStatusClient.fetch,
+        loadSnapshot: @escaping () async throws -> RelaySnapshot = RelayStatusHelper.load,
         now: @escaping () -> TimeInterval = {
             let clock = ContinuousClock()
             let origin = clock.now
@@ -50,8 +51,7 @@ final class RelayStatusStore: ObservableObject {
         }(),
         jitter: @escaping () -> Double = { .random(in: -3...3) }
     ) {
-        self.readToken = readToken
-        self.fetch = fetch
+        self.loadSnapshot = loadSnapshot
         self.now = now
         self.jitter = jitter
     }
@@ -145,16 +145,15 @@ final class RelayStatusStore: ObservableObject {
         lastAttempt = now()
         flight = Task { [weak self] in
             guard let self else { return }
-            var requestStarted = now()
+            guard started, online, epoch == networkEpoch, !Task.isCancelled else {
+                finish(nil, epoch: epoch, requestStarted: now())
+                return
+            }
+            // Conservatively charge helper startup and the local credential read too.
+            let requestStarted = now()
             let result: Result<RelaySnapshot, RelayIssue>
             do {
-                let token = try await readToken()
-                guard started, online, epoch == networkEpoch, !Task.isCancelled else {
-                    finish(nil, epoch: epoch, requestStarted: requestStarted)
-                    return
-                }
-                requestStarted = now()
-                result = .success(try await fetch(token))
+                result = .success(try await loadSnapshot())
             } catch {
                 result = .failure((error as? RelayIssue) ?? .network)
             }
@@ -169,7 +168,15 @@ final class RelayStatusStore: ObservableObject {
         if let result {
             switch result {
             case .success(let snapshot) where online && epoch == networkEpoch:
-                let deadline = snapshot.expiresAt(requestStartedAt: requestStarted)
+                if let latest, snapshot.observedAt < latest.observedAt {
+                    fail(.expired, at: time)
+                    break
+                }
+                var deadline = snapshot.expiresAt(requestStartedAt: requestStarted)
+                if let latest, snapshot.observedAt == latest.observedAt {
+                    deadline = min(deadline, latest.deadline)
+                }
+                latest = (snapshot.observedAt, deadline)
                 if time < deadline {
                     failures = 0
                     retryNotBefore = 0

@@ -154,13 +154,29 @@ struct RelaySnapshot: Decodable, Equatable {
 
     static func parse(_ data: Data) throws -> Self {
         let decoder = JSONDecoder()
+        try RelayJSONMembers.check(data, decoder: decoder)
         decoder.dateDecodingStrategy = .custom { decoder in
             let value = try decoder.singleValueContainer().decode(String.self)
-            guard value.range(of: #"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|\+00:00)$"#,
+            guard value.range(of: #"\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|\+00:00)\z"#,
                               options: .regularExpression) != nil else { throw RelayIssue.badResponse }
+            // ISO8601DateFormatter normalizes some invalid dates. Check the
+            // proleptic Gregorian fields before asking Foundation to parse.
+            let bytes = Array(value.utf8.prefix(19))
+            func number(_ range: Range<Int>) -> Int {
+                range.reduce(0) { $0 * 10 + Int(bytes[$1] - 48) }
+            }
+            let year = number(0..<4), month = number(5..<7), day = number(8..<10)
+            let leap = year.isMultiple(of: 4) && (!year.isMultiple(of: 100) || year.isMultiple(of: 400))
+            let days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+            guard year > 0, (1...12).contains(month), (1...days[month - 1]).contains(day),
+                  number(11..<13) < 24, number(14..<16) < 60, number(17..<19) < 60 else {
+                throw RelayIssue.badResponse
+            }
             let formatter = ISO8601DateFormatter()
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
             if value.contains(".") { formatter.formatOptions.insert(.withFractionalSeconds) }
-            guard let date = formatter.date(from: value) else { throw RelayIssue.badResponse }
+            guard let date = formatter.date(from: value),
+                  formatter.string(from: date).prefix(19) == value.prefix(19) else { throw RelayIssue.badResponse }
             return date
         }
         do { return try decoder.decode(Self.self, from: data) }
@@ -175,6 +191,54 @@ struct RelaySnapshot: Decodable, Equatable {
         formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")!
         formatter.dateFormat = "MM-dd HH:mm:ss"
         return formatter.string(from: date)
+    }
+}
+
+// JSONDecoder may collapse duplicate keys before allKeys is available. Scan
+// UTF-8 member names first; Foundation still decodes strings and validates values.
+private enum RelayJSONMembers {
+    static func check(_ data: Data, decoder: JSONDecoder) throws {
+        let bytes = Array(data)
+        func afterSpace(_ i: Int) -> Int {
+            var i = i
+            while i < bytes.count, [0x20, 0x09, 0x0a, 0x0d].contains(bytes[i]) { i += 1 }
+            return i
+        }
+        var i = afterSpace(0)
+        guard i < bytes.count, bytes[i] == 0x7b, !bytes.contains(0) else { throw RelayIssue.badResponse }
+        var seen: [Set<String>] = []
+        while i < bytes.count {
+            switch bytes[i] {
+            case 0x7b: // {
+                guard seen.count < 2 else { throw RelayIssue.badResponse } // v1 root and children only
+                seen.append([])
+            case 0x7d: // }
+                guard !seen.isEmpty else { throw RelayIssue.badResponse }
+                seen.removeLast()
+                if seen.isEmpty {
+                    guard afterSpace(i + 1) == bytes.count else { throw RelayIssue.badResponse }
+                    return
+                }
+            case 0x5b, 0x5d: // v1 has no arrays
+                throw RelayIssue.badResponse
+            case 0x22: // "
+                let start = i
+                i += 1
+                while i < bytes.count, bytes[i] != 0x22 {
+                    if bytes[i] == 0x5c { i += 1 } // skip escaped byte
+                    i += 1
+                }
+                guard i < bytes.count else { throw RelayIssue.badResponse }
+                let next = afterSpace(i + 1)
+                if next < bytes.count, bytes[next] == 0x3a {
+                    guard let key = try? decoder.decode(String.self, from: Data(bytes[start...i])),
+                          seen[seen.count - 1].insert(key).inserted else { throw RelayIssue.badResponse }
+                }
+            default: break
+            }
+            i += 1
+        }
+        throw RelayIssue.badResponse
     }
 }
 
@@ -195,7 +259,7 @@ private extension Decoder {
     }
 }
 
-enum RelayIssue: Error, Equatable {
+enum RelayIssue: Error, Equatable, Codable {
     case waiting, notConfigured, keychainUnavailable, invalidCredential
     case offline, timeout, tls, network, unauthorized, rateLimited(TimeInterval)
     case unavailable, httpError, badResponse, unsupportedSchema, expired

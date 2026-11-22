@@ -1,4 +1,5 @@
 import AppKit
+import Security
 import SwiftUI
 
 @main
@@ -15,6 +16,16 @@ struct RelayStatusCheck {
     @MainActor
     static func main() async throws {
         let args = CommandLine.arguments
+        if args.dropFirst().elementsEqual([RelayStatusHelper.argument]) {
+            RelayStatusHelper.runAndExit(readToken: {
+                // Exercise the actual child's Security policy, never SecItemCopyMatching.
+                precondition(!interactionAllowed())
+                return String(repeating: "A", count: 43)
+            }, fetch: { token in
+                precondition(token == String(repeating: "A", count: 43))
+                return Data(good.utf8)
+            })
+        }
         let snapshot = try parse(good)
         if args[1] == "time" {
             let first = RelaySnapshot.shanghaiTime(snapshot.feishu.lastHeartbeat!)
@@ -26,6 +37,9 @@ struct RelayStatusCheck {
         try models(snapshot)
         try client(snapshot)
         try await store(snapshot)
+        try await replay(snapshot)
+        await duplicates(snapshot)
+        try await helper(snapshot)
         let root = URL(fileURLWithPath: args[2], isDirectory: true)
         let version = try Data(contentsOf: root.appendingPathComponent("QuotaBar/Info.plist"))
         let plist = try PropertyListSerialization.propertyList(from: version, format: nil) as? [String: Any]
@@ -84,6 +98,7 @@ struct RelayStatusCheck {
             }
         }
         try certificateLifetime(snapshot)
+        try dates()
         print("V1_PARSE=PASS · schema, strict keys, malformed data, enum mapping, all 16 priority pairs, certificate independence")
     }
 
@@ -114,7 +129,7 @@ struct RelayStatusCheck {
             .replacingOccurrences(of: "2026-11-22T17:14:47Z", with: "2026-11-23T17:15:00Z"))
         precondition(auditCase.age == 2 && auditCase.feishu.state == .unknown &&
                      auditCase.wecom.state == .unknown && auditCase.summary == .unknown)
-        print("APP_01=PASS · both paths: 89/90/91s old, +4/+5/+6s future, and audit repro")
+        print("HEARTBEAT_BOUNDARIES=PASS · both paths: 89/90/91s old, +4/+5/+6s future")
     }
 
     private static func certificateLifetime(_ snapshot: RelaySnapshot) throws {
@@ -148,7 +163,30 @@ struct RelayStatusCheck {
             precondition((cert.expiresAt == nil) == (expected == .unknown))
             precondition(parsed.feishu == snapshot.feishu && parsed.wecom == snapshot.wecom && parsed.summary == snapshot.summary)
         }
-        print("APP_02=PASS · \(cases.count) certificate cases: 14-day/expiry boundaries, full days, audit repro and unchanged links")
+        print("CERTIFICATE_BOUNDARIES=PASS · \(cases.count) cases: 14-day/expiry boundaries, full days and unchanged links")
+    }
+
+    private static func dates() throws {
+        let originals = ["2026-11-22T17:15:00Z", "2026-11-22T17:14:51Z",
+                         "2026-11-22T17:14:47Z", "2027-02-20T17:15:00Z"]
+        for bad in ["2026-02-30T17:15:00Z", "2026-02-29T17:15:00Z",
+                    "1900-02-29T17:15:00Z", "2026-04-31T17:15:00Z",
+                    "2026-11-22T24:00:00Z", "2026-11-22T17:15:00Z\n"] {
+            let wire = bad.replacingOccurrences(of: "\n", with: #"\n"#)
+            for original in originals {
+                reject(.badResponse) { try parse(good.replacingOccurrences(of: original, with: wire)) }
+            }
+            let allInvalid = originals.reduce(good) { $0.replacingOccurrences(of: $1, with: wire) }
+            reject(.badResponse) { try parse(allInvalid) }
+        }
+        let leap = try parse(good.replacingOccurrences(of: "2026-11-22T17:15:00Z", with: "2028-02-29T17:15:00.5+00:00")
+            .replacingOccurrences(of: "2026-11-22", with: "2028-02-29")
+            .replacingOccurrences(of: "2027-02-20T17:15:00Z", with: "2028-02-29T17:15:01Z")
+            .replacingOccurrences(of: #""state":"ok","expires_at""#, with: #""state":"expiring","expires_at""#)
+            .replacingOccurrences(of: #""days_remaining":90"#, with: #""days_remaining":0"#))
+        precondition(leap.summary == .ok && leap.certificate.state == .expiring)
+        precondition(leap.observedAt.timeIntervalSince(leap.feishu.lastHeartbeat!) == 9.5)
+        print("APP-03=PASS · invalid calendar/time values rejected in all four fields; valid leap day, fraction and +00:00 accepted")
     }
 
     private static func client(_ snapshot: RelaySnapshot) throws {
@@ -205,11 +243,9 @@ struct RelayStatusCheck {
         var response: Result<RelaySnapshot, RelayIssue> = .success(snapshot)
         var stall = false
         var resume: CheckedContinuation<Void, Never>?
-        let status = RelayStatusStore(readToken: {
+        let status = RelayStatusStore(loadSnapshot: {
             keyReads += 1
             if missing { throw RelayIssue.notConfigured }
-            return "synthetic-fixture"
-        }, fetch: { _ in
             calls += 1
             if stall { await withCheckedContinuation { resume = $0 } }
             return try response.get()
@@ -256,7 +292,7 @@ struct RelayStatusCheck {
         await status.waitForAttempt()
         precondition(calls == 3 && status.display == .unavailable(.rateLimited(95)),
                      "Retry-After survives wake, manual refresh, and restore")
-        response = .success(snapshot)
+        response = .success(try parse(good.replacingOccurrences(of: "T17:15:00Z", with: "T17:15:30Z")))
         now = 1095
         status.clockAdvanced()
         await status.waitForAttempt()
@@ -272,7 +308,8 @@ struct RelayStatusCheck {
         status.woke()
         await status.waitForAttempt()
         precondition(calls == 5)
-        let nearlyOld = try parse(good.replacingOccurrences(of: #""snapshot_age_s": 2"#, with: #""snapshot_age_s": 70"#))
+        let nearlyOld = try parse(good.replacingOccurrences(of: "T17:15:00Z", with: "T17:16:00Z")
+            .replacingOccurrences(of: #""snapshot_age_s": 2"#, with: #""snapshot_age_s": 70"#))
         response = .success(nearlyOld)
         stall = true
         resume = nil
@@ -308,6 +345,106 @@ struct RelayStatusCheck {
         await status.waitForAttempt()
         precondition(calls == 9)
         print("POLLING=PASS · injected clock/credentials/transport; single flight, panel gate, wake, offline, 401, 429, expiry, backoff")
+    }
+
+    @MainActor
+    private static func replay(_ snapshot: RelaySnapshot) async throws {
+        var now: TimeInterval = 0
+        var calls = 0
+        var response = snapshot
+        let status = RelayStatusStore(loadSnapshot: {
+            calls += 1
+            return response
+        }, now: { now }, jitter: { 0 })
+        status.start(monitorNetwork: false)
+        defer { status.stop() }
+        await status.waitForAttempt()
+        for time in [30.0, 60, 72.999, 73, 90, 120] {
+            now = time
+            status.clockAdvanced()
+            await status.waitForAttempt()
+            if time < 73 { precondition(status.display == .live(snapshot)) }
+            else { precondition(status.display == .unavailable(.expired) && status.display.summary == .unknown) }
+        }
+        precondition(calls == 5, "the identical observation was actually replayed at 90 and 120s")
+        let newerWire = good.replacingOccurrences(of: "T17:15:00Z", with: "T17:15:30Z")
+        let newer = try parse(newerWire)
+        response = newer
+        now = 180
+        status.clockAdvanced()
+        await status.waitForAttempt()
+        precondition(status.display == .live(newer))
+        // Same timestamp shrinks to 200, then a smaller advertised age and a
+        // connectivity bounce must not extend it.
+        response = try parse(newerWire.replacingOccurrences(of: #""snapshot_age_s": 2"#, with: #""snapshot_age_s": 70"#))
+        now = 195
+        status.manualRefresh()
+        await status.waitForAttempt()
+        precondition(status.display.summary == .ok)
+        response = newer
+        now = 198
+        status.networkChanged(false)
+        status.networkChanged(true)
+        await status.waitForAttempt()
+        precondition(status.display.summary == .ok)
+        now = 200
+        status.clockAdvanced()
+        precondition(status.display == .unavailable(.expired))
+        response = snapshot
+        now = 201
+        status.manualRefresh()
+        await status.waitForAttempt()
+        precondition(status.display == .unavailable(.expired), "older observation cannot bypass the high-water mark")
+        print("APP-01=PASS · replay at 30/60/90/120s, exact deadline, recovery with newer data, shortening, reconnect and rollback")
+    }
+
+    @MainActor
+    private static func duplicates(_ snapshot: RelaySnapshot) async {
+        let fixtures = [
+            (#""snapshot_age_s": 2"#, #""snapshot_age_s": 200"#),
+            (#""snapshot_age_s": 2"#, #""snapshot_age_\u0073": 200"#),
+            (#""feishu": {"state":"ok""#, #""state":"down""#),
+            (#""wecom": {"state":"ok""#, #""st\u0061te":"down""#),
+            (#""certificate":{"state":"ok""#, #""state":"expired""#),
+            (#""days_remaining":90"#, #""days_remaining":90"#),
+        ]
+        let http = HTTPURLResponse(url: RelayStatusClient.endpoint, statusCode: 200, httpVersion: nil,
+                                   headerFields: ["Content-Type": "application/json"])!
+        for (target, duplicate) in fixtures {
+            let split = target.lastIndex(of: "{").map { target.index(after: $0) } ?? target.startIndex
+            let key = target[split...]
+            for pair in ["\(key),\(duplicate)", "\(duplicate),\(key)"] {
+                let wire = good.replacingOccurrences(of: target, with: target[..<split] + pair)
+                let body = Data(wire.utf8)
+                reject(.badResponse) { try RelayStatusClient.decode(body, response: http) }
+                var first = true
+                let store = RelayStatusStore(loadSnapshot: {
+                    if first { first = false; return snapshot }
+                    return try RelayStatusClient.decode(body, response: http)
+                }, now: { 0 }, jitter: { 0 })
+                store.start(monitorNetwork: false)
+                await store.waitForAttempt()
+                precondition(store.display.summary == .ok)
+                store.manualRefresh()
+                await store.waitForAttempt()
+                precondition(store.display == .unavailable(.badResponse) && store.display.summary == .unknown)
+                store.stop()
+            }
+        }
+        print("APP-02=PASS · 12 order/level cases including escaped and identical keys; HTTP badResponse clears green")
+    }
+
+    private static func interactionAllowed() -> Bool {
+        var allowed = DarwinBoolean(false)
+        precondition(SecKeychainGetUserInteractionAllowed(&allowed) == errSecSuccess)
+        return allowed.boolValue
+    }
+
+    private static func helper(_ snapshot: RelaySnapshot) async throws {
+        let before = interactionAllowed()
+        let result = try await RelayStatusHelper.load()
+        precondition(result == snapshot && interactionAllowed() == before)
+        print("APP-04=PASS · actual child/pipe with synthetic providers; child interaction disabled, parent policy unchanged")
     }
 
     @MainActor

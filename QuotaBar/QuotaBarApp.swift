@@ -32,6 +32,9 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
     private static let panelWidth: CGFloat = CGFloat(PanelFitMetrics.panelWidth)
 
     static func main() {
+        if CommandLine.arguments.dropFirst().elementsEqual([RelayStatusHelper.argument]) {
+            RelayStatusHelper.runAndExit()
+        }
         let app = NSApplication.shared
         let delegate = QuotaBarApp()
         retained = delegate

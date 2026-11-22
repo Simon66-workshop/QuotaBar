@@ -3,6 +3,7 @@ import Foundation
 enum RelayStatusClient {
     static let endpoint = URL(string: "https://66workshop.cn/api/relay-status/v1")!
     static let timeout: TimeInterval = 5
+    static let maxPayloadBytes = 16_384
 
     static func configuration() -> URLSessionConfiguration {
         let config = URLSessionConfiguration.ephemeral
@@ -18,7 +19,7 @@ enum RelayStatusClient {
         return config
     }
 
-    static func fetch(token: String) async throws -> RelaySnapshot {
+    static func fetchPayload(token: String) async throws -> Data {
         var request = URLRequest(url: endpoint, timeoutInterval: timeout)
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -29,7 +30,8 @@ enum RelayStatusClient {
         do {
             let (data, response) = try await session.data(for: request)
             guard let response = response as? HTTPURLResponse else { throw RelayIssue.badResponse }
-            return try decode(data, response: response)
+            _ = try decode(data, response: response)
+            return data
         } catch let issue as RelayIssue {
             throw issue
         } catch let error as URLError {
@@ -42,7 +44,7 @@ enum RelayStatusClient {
     static func decode(_ data: Data, response: HTTPURLResponse, now: Date = Date()) throws -> RelaySnapshot {
         switch response.statusCode {
         case 200:
-            guard response.mimeType?.lowercased() == "application/json", data.count <= 16_384 else {
+            guard response.mimeType?.lowercased() == "application/json", data.count <= maxPayloadBytes else {
                 throw RelayIssue.badResponse
             }
             return try RelaySnapshot.parse(data)

@@ -76,7 +76,10 @@ keychain using Keychain Access. Trust only the verified QuotaBar executable, not
 Control in Keychain Access. An unavailable/locked keychain or an ACL denial prevents a
 fetch; never relax the ACL to all apps. Rebuilt or re-signed candidates may need a new
 ACL check. After changing credentials use **Refresh** (or **Refresh now**); HTTP 401
-pauses automatic polling until then. The relay only sends the token as a Bearer header to
+pauses automatic polling until then. A dedicated child mode of the same QuotaBar
+executable suppresses Keychain prompts without changing the main process's
+interaction policy. The child returns status or a fixed error, never the credential.
+The relay only sends the token as a Bearer header to
 `https://66workshop.cn/api/relay-status/v1`; redirects are refused. QuotaBar does not
 log, export, or save the token outside the login keychain.
 
