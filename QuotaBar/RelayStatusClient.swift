@@ -44,6 +44,15 @@ enum RelayStatusClient {
     static func decode(_ data: Data, response: HTTPURLResponse, now: Date = Date()) throws -> RelaySnapshot {
         switch response.statusCode {
         case 200:
+            // This endpoint is no-store. Fail closed if an intermediary says
+            // it served an aged response, even on the first observation.
+            if let age = response.value(forHTTPHeaderField: "Age")?
+                .trimmingCharacters(in: .whitespacesAndNewlines) {
+                guard !age.isEmpty, age.utf8.allSatisfy({ (48...57).contains($0) }) else {
+                    throw RelayIssue.badResponse
+                }
+                guard age.utf8.allSatisfy({ $0 == 48 }) else { throw RelayIssue.expired }
+            }
             guard response.mimeType?.lowercased() == "application/json", data.count <= maxPayloadBytes else {
                 throw RelayIssue.badResponse
             }

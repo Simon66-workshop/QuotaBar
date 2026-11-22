@@ -618,3 +618,39 @@ Not run: GO-only scripts (separate restricted worktree), actual signed-app
 Keychain ACL/authorization, desktop menu bar/VoiceOver/glass, live ECS/nginx.
 No network, ECS contact, installation, QuotaBar launch, restart, deployment,
 commit or push. APP-05 through APP-07 not changed or claimed fixed.
+
+== Audit dc5df1c APP-01--04 remediation (2026-11-22T18:14:41Z) ==
+Tested working-tree Swift changes over dc5df1cf2282aa007178039b6b07557378a7b7a4.
+Swift 6.4 (driver 1.168.6), macOS 27.2 arm64, local MacOSX26.5 SDK.
+Three unmodified App scripts were rerun in a writable same-volume copy. Plain
+swiftc worked in this run (SDKROOT and QUOTABAR_SDK selected the 26.5 SDK):
+  run.sh: compile/link PASS; assertions PASS (278 usage/menu-bar/PanelFit checks).
+  check-memory.sh: compile/link PASS; native page-counter comparison PASS.
+  check-relay-status.sh: compile/link PASS; assertions and rendering PASS:
+    APP-01: all 23 malformed bodies rejected by production HTTP/model decoding;
+      root/child trailing commas, precise fractional version/age/days, integer
+      lexeme/overflow cases and duplicate keys. Every case cleared prior green.
+    APP-02: a cold-start HTTP 200 with Age: 120 and snapshot_age_s: 2 stayed gray
+      (.expired). Absent/zero Age accepted; positive or malformed Age rejected.
+    APP-04: Feishu pong_stale/pong_late -> unknown; the same WeCom pairs
+      -> down/degraded. The other channel and priority rule remain independent.
+    Prior replay, strict date, heartbeat, certificate, polling, synthetic
+      helper/IPC, HTTP policy, version and Shanghai time regressions also PASS.
+    17 generated offscreen PNGs matched tracked Previews byte for byte. No PNG
+      changes. These are component/fragment renders, not production MenuPanel
+      measurement, real menu bar, VoiceOver, or glass/visual acceptance.
+APP-03: check-relay-signature.sh PASS using disposable, unlaunched fixtures:
+  hardened ad-hoc allowed only for ordinary local use; missing runtime,
+  ad-hoc ACL, tampered sealed resource and disable-library-validation rejected.
+  Optimized app compile/link with launcher file list and flags: PASS; signed
+  arm64 bundle using the launcher's plist and ad-hoc runtime signing flags:
+  local verification PASS / relay ACL verification DENIED as expected.
+  Trusted Apple signing identity / actual Keychain ACL authorization NOT RUN.
+  Real Keychain, launcher execution and application startup NOT RUN.
+Static: shell syntax, plist/project lint and git diff --check PASS.
+GO-only scripts/candidate packaging NOT RUN; existing worktree guard preserved.
+Server evidence recorded separately: committed server baseline PASS (43);
+separate dirty snapshot FAIL (3 failures, 2 errors), not a verified candidate.
+No external network, ECS contact, install, QuotaBar launch, real Keychain read,
+restart, commit, push or deploy. APP-05--08 not in remediation scope; the three
+script reruns above record current evidence, not a rerun of untouched audit HEAD.

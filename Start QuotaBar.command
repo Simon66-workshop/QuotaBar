@@ -26,7 +26,10 @@ if need_tools; then
 fi
 
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+SHA="$(cat "$SRC"/*.swift "$HERE/Start QuotaBar.command" "$HERE/verify-relay-signature.sh" | shasum -a 256 | awk '{print $1}')"
+OLD="$(cat "$STAMP" 2>/dev/null || true)"
+if [[ ! -x "$BIN" || "$SHA" != "$OLD" ]] || ! /bin/bash "$HERE/verify-relay-signature.sh" "$APP"; then
+  cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -54,11 +57,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
-echo -n 'APPL????' > "$APP/Contents/PkgInfo"
+  echo -n 'APPL????' > "$APP/Contents/PkgInfo"
 
-SHA="$(cat "$SRC"/*.swift | shasum -a 256 | awk '{print $1}')"
-OLD="$(cat "$STAMP" 2>/dev/null || true)"
-if [[ ! -x "$BIN" || "$SHA" != "$OLD" ]]; then
   osascript -e 'display notification "正在编译 QuotaBar 1.8.28…" with title "QuotaBar"'
   pkill -x QuotaBar 2>/dev/null || true
   sleep 0.3
@@ -95,7 +95,11 @@ if [[ ! -x "$BIN" || "$SHA" != "$OLD" ]]; then
     -lsqlite3
   chmod +x "$BIN"
   echo "$SHA" > "$STAMP"
+  # Local builds are hardened but ad-hoc. The separate relay ACL gate
+  # requires an approved Apple signing identity before trusting the binary.
+  /usr/bin/codesign --force --sign - --options runtime "$APP"
 fi
+/bin/bash "$HERE/verify-relay-signature.sh" "$APP"
 
 xattr -dr com.apple.quarantine "$APP" "$HERE" 2>/dev/null || true
 pkill -x QuotaBar 2>/dev/null || true

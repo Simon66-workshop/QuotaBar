@@ -51,6 +51,8 @@ enum RelayReason: String {
 }
 
 struct RelayLink: Equatable {
+    enum Channel { case feishu, wecom }
+
     let state: RelayLinkState
     let reason: RelayReason
     let lastHeartbeat: Date?
@@ -59,7 +61,7 @@ struct RelayLink: Equatable {
         case state, reason, lastHeartbeat = "last_heartbeat_at"
     }
 
-    init(from decoder: Decoder, observedAt: Date) throws {
+    init(from decoder: Decoder, observedAt: Date, channel: Channel) throws {
         let values = try decoder.relayFields(Keys.self)
         let wireState = RelayLinkState(rawValue: try values.decode(String.self, forKey: .state))
         let wireReason = RelayReason(rawValue: try values.decode(String.self, forKey: .reason))
@@ -67,6 +69,7 @@ struct RelayLink: Equatable {
         // Check evidence at collection time; snapshot freshness is a separate gate.
         let heartbeatAge = lastHeartbeat.map { observedAt.timeIntervalSince($0) }
         if let wireState, let wireReason, wireReason.state == wireState,
+           channel == .wecom || (wireReason != .pongStale && wireReason != .pongLate),
            wireState != .ok || heartbeatAge.map({ (-5...90).contains($0) }) == true {
             state = wireState
             reason = wireReason
@@ -141,8 +144,8 @@ struct RelaySnapshot: Decodable, Equatable {
         observedAt = try values.decode(Date.self, forKey: .observedAt)
         age = try values.decode(Int.self, forKey: .age)
         guard age >= 0 else { throw RelayIssue.badResponse }
-        feishu = try RelayLink(from: values.superDecoder(forKey: .feishu), observedAt: observedAt)
-        wecom = try RelayLink(from: values.superDecoder(forKey: .wecom), observedAt: observedAt)
+        feishu = try RelayLink(from: values.superDecoder(forKey: .feishu), observedAt: observedAt, channel: .feishu)
+        wecom = try RelayLink(from: values.superDecoder(forKey: .wecom), observedAt: observedAt, channel: .wecom)
         certificate = try RelayCertificate(from: values.superDecoder(forKey: .certificate), observedAt: observedAt)
     }
 
@@ -154,7 +157,8 @@ struct RelaySnapshot: Decodable, Equatable {
 
     static func parse(_ data: Data) throws -> Self {
         let decoder = JSONDecoder()
-        try RelayJSONMembers.check(data, decoder: decoder)
+        var syntax = RelayV1JSON(bytes: Array(data))
+        try syntax.check(decoder: decoder)
         decoder.dateDecodingStrategy = .custom { decoder in
             let value = try decoder.singleValueContainer().decode(String.self)
             guard value.range(of: #"\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|\+00:00)\z"#,
@@ -194,51 +198,94 @@ struct RelaySnapshot: Decodable, Equatable {
     }
 }
 
-// JSONDecoder may collapse duplicate keys before allKeys is available. Scan
-// UTF-8 member names first; Foundation still decodes strings and validates values.
-private enum RelayJSONMembers {
-    static func check(_ data: Data, decoder: JSONDecoder) throws {
-        let bytes = Array(data)
-        func afterSpace(_ i: Int) -> Int {
-            var i = i
-            while i < bytes.count, [0x20, 0x09, 0x0a, 0x0d].contains(bytes[i]) { i += 1 }
-            return i
-        }
-        var i = afterSpace(0)
-        guard i < bytes.count, bytes[i] == 0x7b, !bytes.contains(0) else { throw RelayIssue.badResponse }
-        var seen: [Set<String>] = []
-        while i < bytes.count {
-            switch bytes[i] {
-            case 0x7b: // {
-                guard seen.count < 2 else { throw RelayIssue.badResponse } // v1 root and children only
-                seen.append([])
-            case 0x7d: // }
-                guard !seen.isEmpty else { throw RelayIssue.badResponse }
-                seen.removeLast()
-                if seen.isEmpty {
-                    guard afterSpace(i + 1) == bytes.count else { throw RelayIssue.badResponse }
-                    return
+// v1 has only objects (root + one child level), strings, null, and integers.
+// Check delimiters and integer lexemes before JSONDecoder can accept trailing
+// commas, round a fractional number, or collapse duplicate member names.
+private struct RelayV1JSON {
+    let bytes: [UInt8]
+    private var i = 0
+
+    init(bytes: [UInt8]) { self.bytes = bytes }
+
+    private var next: UInt8? { i < bytes.count ? bytes[i] : nil }
+
+    private mutating func take(_ byte: UInt8) -> Bool {
+        guard next == byte else { return false }
+        i += 1
+        return true
+    }
+
+    private mutating func space() {
+        while let next, [0x20, 0x09, 0x0a, 0x0d].contains(next) { i += 1 }
+    }
+
+    mutating func check(decoder: JSONDecoder) throws {
+        space()
+        try object(allowsChild: true, decoder: decoder)
+        space()
+        guard i == bytes.count else { throw RelayIssue.badResponse }
+    }
+
+    private mutating func object(allowsChild: Bool, decoder: JSONDecoder) throws {
+        guard take(0x7b) else { throw RelayIssue.badResponse } // {
+        space()
+        if take(0x7d) { return } // }
+        var seen = Set<String>()
+        repeat {
+            space()
+            let name = try string(decoder: decoder)
+            guard seen.insert(name).inserted else { throw RelayIssue.badResponse }
+            space()
+            guard take(0x3a) else { throw RelayIssue.badResponse } // :
+            space()
+            switch next {
+            case 0x7b where allowsChild: try object(allowsChild: false, decoder: decoder)
+            case 0x22: _ = try string(decoder: decoder)
+            case 0x6e: // null
+                for byte: UInt8 in [0x6e, 0x75, 0x6c, 0x6c] {
+                    guard take(byte) else { throw RelayIssue.badResponse }
                 }
-            case 0x5b, 0x5d: // v1 has no arrays
-                throw RelayIssue.badResponse
-            case 0x22: // "
-                let start = i
-                i += 1
-                while i < bytes.count, bytes[i] != 0x22 {
-                    if bytes[i] == 0x5c { i += 1 } // skip escaped byte
-                    i += 1
-                }
-                guard i < bytes.count else { throw RelayIssue.badResponse }
-                let next = afterSpace(i + 1)
-                if next < bytes.count, bytes[next] == 0x3a {
-                    guard let key = try? decoder.decode(String.self, from: Data(bytes[start...i])),
-                          seen[seen.count - 1].insert(key).inserted else { throw RelayIssue.badResponse }
-                }
-            default: break
+            default: try integer()
             }
+            space()
+        } while take(0x2c) // A comma must be followed by another member.
+        guard take(0x7d) else { throw RelayIssue.badResponse }
+    }
+
+    private mutating func string(decoder: JSONDecoder) throws -> String {
+        let start = i
+        guard take(0x22) else { throw RelayIssue.badResponse } // "
+        while let next {
             i += 1
+            if next == 0x22 {
+                // Foundation validates UTF-8, controls and the complete escape
+                // syntax; decoded names also catch duplicates using escapes.
+                guard let value = try? decoder.decode(String.self, from: Data(bytes[start..<i])) else {
+                    throw RelayIssue.badResponse
+                }
+                return value
+            }
+            if next == 0x5c, i < bytes.count { i += 1 } // skip escaped byte
         }
         throw RelayIssue.badResponse
+    }
+
+    private mutating func integer() throws {
+        let start = i
+        _ = take(0x2d) // -
+        if !take(0x30) { // A leading zero cannot be followed by another digit.
+            guard let next, (0x31...0x39).contains(next) else { throw RelayIssue.badResponse }
+            repeat { i += 1 } while nextIsDigit
+        }
+        // The enclosing object requires a delimiter after this token, so a
+        // decimal point, exponent or second digit after zero fails the check.
+        guard Int(String(decoding: bytes[start..<i], as: UTF8.self)) != nil else {
+            throw RelayIssue.badResponse
+        }
+    }
+
+    private var nextIsDigit: Bool {
+        next.map { (0x30...0x39).contains($0) } == true
     }
 }
 

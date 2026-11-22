@@ -58,20 +58,36 @@ Asia/Shanghai and the website certificate separately. A green dot does **not** p
 end-to-end message delivery. Certificate expiry does not change the relay dot.
 
 The feature is opt-in. Without a matching generic password in the **login** keychain it
-shows **未配置** and does not call the endpoint. Once the service owner provides the scoped
-v1 token and the approved QuotaBar binary is installed, confirm the **default** keychain
-is **login** in Keychain Access before using this command (it writes to the default
-keychain). Keep `-w` as the last option: macOS prompts for the token, so it is not an
-argument or a shell history entry.
+shows **未配置** and does not call the endpoint. The launcher signs local builds ad hoc
+with Hardened Runtime; **do not grant Keychain access to an ad-hoc build**. Leave the
+relay unconfigured until the operator has approved the final installed bundle and it
+has been signed with the approved Apple signing identity, with Hardened Runtime and
+no entitlements. Signing an approved local build is a separate operator step; builds
+that are replaced by the launcher must be approved and signed again before ACL use.
+
+Run the verifier from the trusted checkout against the **final installed** bundle, using
+the Team ID recorded by the operator (not a value copied from an untrusted binary). It
+checks the bundle signature, the helper executable, Hardened Runtime, absence of
+entitlements that could disable library validation, and the approved signer. If any
+check fails, **do not add or retain an ACL for that executable**. This check does not
+test real Keychain authorization or approve a release.
+
+Once the service owner provides the scoped v1 token, confirm the **default** keychain
+is **login** in Keychain Access before using the following (it writes to the default
+keychain). Set `APPROVED_TEAM_ID` to the approved Team ID first. Keep `-w` last so
+macOS prompts for the token rather than receiving it on the command line.
 
 ```sh
+APP="$HOME/Applications/QuotaBar.app"
+bash ./verify-relay-signature.sh "$APP" "${APPROVED_TEAM_ID:?Approved Team ID required}" &&
 security add-generic-password -U \
   -s app.quotabar.mac.relay-status -a 66workshop.cn/relay-status-v1 \
-  -T "" -T "$HOME/Applications/QuotaBar.app/Contents/MacOS/QuotaBar" -w
+  -T "" -T "$APP/Contents/MacOS/QuotaBar" -w
 ```
 
-If the login keychain is not the default, provision the item directly in the **login**
-keychain using Keychain Access. Trust only the verified QuotaBar executable, not all apps
+If the login keychain is not the default, run the same signature verifier and only after
+it passes provision the item directly in the **login** keychain using Keychain Access.
+Trust only the verified QuotaBar executable, not all apps
 (`-A`). If an update via `-U` preserves an old ACL, check that specific item's Access
 Control in Keychain Access. An unavailable/locked keychain or an ACL denial prevents a
 fetch; never relax the ACL to all apps. Rebuilt or re-signed candidates may need a new

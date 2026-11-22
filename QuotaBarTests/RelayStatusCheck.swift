@@ -38,7 +38,8 @@ struct RelayStatusCheck {
         try client(snapshot)
         try await store(snapshot)
         try await replay(snapshot)
-        await duplicates(snapshot)
+        await malformedAfterGreen()
+        await cachedAtStartup()
         try await helper(snapshot)
         let root = URL(fileURLWithPath: args[2], isDirectory: true)
         let version = try Data(contentsOf: root.appendingPathComponent("QuotaBar/Info.plist"))
@@ -78,9 +79,9 @@ struct RelayStatusCheck {
         reject(.badResponse) { try parse(good.replacingOccurrences(of: #""snapshot_age_s": 2"#, with: #""snapshot_age_s": -2"#)) }
         let cases: [(String, String, RelayLinkState)] = [
             ("ok", "ready", .ok), ("down", "unit_down", .down), ("down", "paused_by_lease", .down),
-            ("down", "heartbeat_stale", .down), ("down", "pong_stale", .down),
+            ("down", "heartbeat_stale", .down), ("down", "pong_stale", .unknown),
             ("degraded", "transitioning", .degraded), ("degraded", "heartbeat_late", .degraded),
-            ("degraded", "reconnecting", .degraded), ("degraded", "pong_late", .degraded),
+            ("degraded", "reconnecting", .degraded), ("degraded", "pong_late", .unknown),
             ("degraded", "lease_conflict", .degraded), ("unknown", "source_unavailable", .unknown),
             ("future", "ready", .unknown), ("ok", "future", .unknown), ("ok", "pong_late", .unknown),
         ]
@@ -88,6 +89,20 @@ struct RelayStatusCheck {
             let link = try variant(state, reason).feishu
             precondition(link.state == expected && (expected == .ok || !link.reason.label.isEmpty))
         }
+        for (state, reason, expected) in [
+            (RelayLinkState.down, RelayReason.pongStale, RelayLinkState.down),
+            (.degraded, .pongLate, .degraded),
+        ] {
+            let feishu = try variant(state.rawValue, reason.rawValue)
+            precondition(feishu.feishu.reason == .sourceUnavailable && feishu.summary == .unknown &&
+                         feishu.wecom == snapshot.wecom)
+            let wecom = try parse(good.replacingOccurrences(
+                of: #""state":"ok","reason":"ready","last_heartbeat_at":"2026-11-22T17:14:47Z""#,
+                with: #""state":"\#(state.rawValue)","reason":"\#(reason.rawValue)","last_heartbeat_at":"2026-11-22T17:14:47Z""#))
+            precondition(wecom.wecom.state == expected && wecom.wecom.reason == reason &&
+                         wecom.summary == expected && wecom.feishu == snapshot.feishu)
+        }
+        print("AUDIT_APP_04=PASS · Feishu pong_late/pong_stale gray; WeCom remains amber/red")
         let noHeartbeat = try parse(good.replacingOccurrences(of: #""2026-11-22T17:14:51Z""#, with: "null"))
         precondition(noHeartbeat.feishu.lastHeartbeat == nil && noHeartbeat.summary == .unknown)
         try heartbeatBoundaries(snapshot)
@@ -186,7 +201,7 @@ struct RelayStatusCheck {
             .replacingOccurrences(of: #""days_remaining":90"#, with: #""days_remaining":0"#))
         precondition(leap.summary == .ok && leap.certificate.state == .expiring)
         precondition(leap.observedAt.timeIntervalSince(leap.feishu.lastHeartbeat!) == 9.5)
-        print("APP-03=PASS · invalid calendar/time values rejected in all four fields; valid leap day, fraction and +00:00 accepted")
+        print("STRICT_DATES=PASS · invalid calendar/time values rejected in all four fields; valid leap day, fraction and +00:00 accepted")
     }
 
     private static func client(_ snapshot: RelaySnapshot) throws {
@@ -214,6 +229,16 @@ struct RelayStatusCheck {
         }
         let valid = try send(200)
         precondition(valid == snapshot)
+        for zero in ["0", "000", " 0 "] {
+            let zeroAge = try send(200, ["Content-Type": "application/json", "Age": zero])
+            precondition(zeroAge == snapshot)
+        }
+        for age in ["1", "120", "99999999999999999999999999999"] {
+            reject(.expired) { try send(200, ["Content-Type": "application/json", "aGe": age]) }
+        }
+        for age in ["", "-1", "+0", "0.0", "0, 0", "0, 120"] {
+            reject(.badResponse) { try send(200, ["Content-Type": "application/json", "Age": age]) }
+        }
         reject(.badResponse) { try send(200, ["Content-Type": "text/html"]) }
         reject(.unauthorized) { try send(401) }
         reject(.httpError) { try send(302) }
@@ -395,11 +420,11 @@ struct RelayStatusCheck {
         status.manualRefresh()
         await status.waitForAttempt()
         precondition(status.display == .unavailable(.expired), "older observation cannot bypass the high-water mark")
-        print("APP-01=PASS · replay at 30/60/90/120s, exact deadline, recovery with newer data, shortening, reconnect and rollback")
+        print("REPLAY=PASS · replay at 30/60/90/120s, exact deadline, recovery with newer data, shortening, reconnect and rollback")
     }
 
     @MainActor
-    private static func duplicates(_ snapshot: RelaySnapshot) async {
+    private static func malformedAfterGreen() async {
         let fixtures = [
             (#""snapshot_age_s": 2"#, #""snapshot_age_s": 200"#),
             (#""snapshot_age_s": 2"#, #""snapshot_age_\u0073": 200"#),
@@ -410,28 +435,59 @@ struct RelayStatusCheck {
         ]
         let http = HTTPURLResponse(url: RelayStatusClient.endpoint, statusCode: 200, httpVersion: nil,
                                    headerFields: ["Content-Type": "application/json"])!
+        var malformed = [
+            good.replacingOccurrences(of: "}\n}", with: "},\n}"),
+            good.replacingOccurrences(of: #""2026-11-22T17:14:51Z"}"#, with: #""2026-11-22T17:14:51Z",}"#),
+            good.replacingOccurrences(of: #""days_remaining":90}"#, with: #""days_remaining":90,}"#),
+            good.replacingOccurrences(of: #""snapshot_age_s": 2"#, with: #""snapshot_age_s": 2.00000000000000000001"#),
+            good.replacingOccurrences(of: #""days_remaining":90"#, with: #""days_remaining":90.00000000000000000001"#),
+        ]
+        for version in ["1.00000000000000000001", "1.0", "1e0", "01", "+1", "9223372036854775808"] {
+            malformed.append(good.replacingOccurrences(of: #""schema_version": 1"#, with: #""schema_version": \#(version)"#))
+        }
+        precondition(malformed.allSatisfy { $0 != good }, "malformed fixtures must differ from the green baseline")
         for (target, duplicate) in fixtures {
             let split = target.lastIndex(of: "{").map { target.index(after: $0) } ?? target.startIndex
             let key = target[split...]
             for pair in ["\(key),\(duplicate)", "\(duplicate),\(key)"] {
-                let wire = good.replacingOccurrences(of: target, with: target[..<split] + pair)
-                let body = Data(wire.utf8)
-                reject(.badResponse) { try RelayStatusClient.decode(body, response: http) }
-                var first = true
-                let store = RelayStatusStore(loadSnapshot: {
-                    if first { first = false; return snapshot }
-                    return try RelayStatusClient.decode(body, response: http)
-                }, now: { 0 }, jitter: { 0 })
-                store.start(monitorNetwork: false)
-                await store.waitForAttempt()
-                precondition(store.display.summary == .ok)
-                store.manualRefresh()
-                await store.waitForAttempt()
-                precondition(store.display == .unavailable(.badResponse) && store.display.summary == .unknown)
-                store.stop()
+                malformed.append(good.replacingOccurrences(of: target, with: target[..<split] + pair))
             }
         }
-        print("APP-02=PASS · 12 order/level cases including escaped and identical keys; HTTP badResponse clears green")
+        for wire in malformed {
+            let body = Data(wire.utf8)
+            reject(.badResponse) { try RelayStatusClient.decode(body, response: http) }
+            var first = true
+            let store = RelayStatusStore(loadSnapshot: {
+                let payload = first ? Data(good.utf8) : body
+                first = false
+                return try RelayStatusClient.decode(payload, response: http)
+            }, now: { 0 }, jitter: { 0 })
+            store.start(monitorNetwork: false)
+            await store.waitForAttempt()
+            precondition(store.display.summary == .ok)
+            store.manualRefresh()
+            await store.waitForAttempt()
+            precondition(store.display == .unavailable(.badResponse) && store.display.summary == .unknown)
+            store.stop()
+        }
+        print("AUDIT_APP_01=PASS · \(malformed.count) malformed responses, including trailing commas, non-integer lexemes and duplicates; green immediately clears")
+    }
+
+    @MainActor
+    private static func cachedAtStartup() async {
+        let response = HTTPURLResponse(url: RelayStatusClient.endpoint, statusCode: 200, httpVersion: nil,
+                                       headerFields: ["Content-Type": "application/json", "Age": "120"])!
+        var calls = 0
+        let store = RelayStatusStore(loadSnapshot: {
+            calls += 1
+            return try RelayStatusClient.decode(Data(good.utf8), response: response)
+        }, now: { 0 }, jitter: { 0 })
+        defer { store.stop() }
+        precondition(store.display.summary == .unknown)
+        store.start(monitorNetwork: false)
+        await store.waitForAttempt()
+        precondition(calls == 1 && store.display == .unavailable(.expired) && store.display.summary == .unknown)
+        print("AUDIT_APP_02=PASS · cold start HTTP 200/Age: 120/snapshot_age_s: 2 never becomes green")
     }
 
     private static func interactionAllowed() -> Bool {
@@ -444,7 +500,7 @@ struct RelayStatusCheck {
         let before = interactionAllowed()
         let result = try await RelayStatusHelper.load()
         precondition(result == snapshot && interactionAllowed() == before)
-        print("APP-04=PASS · actual child/pipe with synthetic providers; child interaction disabled, parent policy unchanged")
+        print("HELPER=PASS · actual child/pipe with synthetic providers; child interaction disabled, parent policy unchanged")
     }
 
     @MainActor
