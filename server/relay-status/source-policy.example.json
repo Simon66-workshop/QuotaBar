@@ -1,0 +1,7 @@
+{
+  "feishu_ack_confirmed": false,
+  "wecom_clock_confirmed": false,
+  "wecom_reconnect_states": [],
+  "absent_lease_is_clear": false,
+  "expired_lease_is_clear": false
+}

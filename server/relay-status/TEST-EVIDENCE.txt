@@ -1,0 +1,35 @@
+Date (UTC): 2026-11-22T17:31:24Z
+Python 3.14.6
+Command: python3 -m unittest discover -s server/relay-status/tests -v
+
+test_fixed_429_contract_and_nginx_mapping (test_relay_status.APITests.test_fixed_429_contract_and_nginx_mapping) ... ok
+test_http_400_and_405 (test_relay_status.APITests.test_http_400_and_405) ... ok
+test_http_401_and_200 (test_relay_status.APITests.test_http_401_and_200) ... ok
+test_http_503_missing_bad_or_stale_snapshot (test_relay_status.APITests.test_http_503_missing_bad_or_stale_snapshot) ... ok
+test_invalid_credentials (test_relay_status.APITests.test_invalid_credentials) ... ok
+test_tokens_and_constant_two_comparisons (test_relay_status.APITests.test_tokens_and_constant_two_comparisons) ... ok
+test_unix_socket_roundtrip_and_header_limit_without_tcp (test_relay_status.APITests.test_unix_socket_roundtrip_and_header_limit_without_tcp) ... ok
+test_certificate_threshold_and_full_days (test_relay_status.CertificateTests.test_certificate_threshold_and_full_days) ... ok
+test_leaf_probe_pins_loopback_and_sni_and_uses_public_der_only (test_relay_status.CertificateTests.test_leaf_probe_pins_loopback_and_sni_and_uses_public_der_only) ... ok
+test_atomic_replace_preserves_open_old_inode_and_mode (test_relay_status.ReadAndContractTests.test_atomic_replace_preserves_open_old_inode_and_mode) ... ok
+test_disk_snapshot_through_api_uses_mode_and_monotonic_freshness (test_relay_status.ReadAndContractTests.test_disk_snapshot_through_api_uses_mode_and_monotonic_freshness) ... ok
+test_file_missing_truncated_bad_oversized_and_duplicate (test_relay_status.ReadAndContractTests.test_file_missing_truncated_bad_oversized_and_duplicate) ... ok
+test_fstat_mtime_ignores_embedded_time (test_relay_status.ReadAndContractTests.test_fstat_mtime_ignores_embedded_time) ... ok
+test_generator_writes_only_private_bundle_and_refuses_overwrite (test_relay_status.ReadAndContractTests.test_generator_writes_only_private_bundle_and_refuses_overwrite) ... ok
+test_public_whitelist_and_injected_data_rejection (test_relay_status.ReadAndContractTests.test_public_whitelist_and_injected_data_rejection) ... ok
+test_snapshot_freshness_edges_and_boot_id (test_relay_status.ReadAndContractTests.test_snapshot_freshness_edges_and_boot_id) ... ok
+test_symlinks_hardlinks_writable_directory_and_fifo_are_rejected (test_relay_status.ReadAndContractTests.test_symlinks_hardlinks_writable_directory_and_fifo_are_rejected) ... ok
+test_current_instance_and_clock_validation (test_relay_status.StateTests.test_current_instance_and_clock_validation) ... ok
+test_feishu_threshold_edges (test_relay_status.StateTests.test_feishu_threshold_edges) ... ok
+test_lease_expiry_and_ambiguity (test_relay_status.StateTests.test_lease_expiry_and_ambiguity) ... ok
+test_unconfirmed_missing_and_unrecognized_evidence_is_not_green (test_relay_status.StateTests.test_unconfirmed_missing_and_unrecognized_evidence_is_not_green) ... ok
+test_unit_instance_changed_during_collect (test_relay_status.StateTests.test_unit_instance_changed_during_collect) ... ok
+test_unit_precedence_and_lease (test_relay_status.StateTests.test_unit_precedence_and_lease) ... ok
+test_unit_show_does_not_lose_known_down_when_other_unit_missing (test_relay_status.StateTests.test_unit_show_does_not_lose_known_down_when_other_unit_missing) ... ok
+test_wecom_heartbeat_threshold_edges (test_relay_status.StateTests.test_wecom_heartbeat_threshold_edges) ... ok
+test_wecom_pong_uses_mtime_and_threshold_edges (test_relay_status.StateTests.test_wecom_pong_uses_mtime_and_threshold_edges) ... ok
+
+----------------------------------------------------------------------
+Ran 26 tests in 0.043s
+
+OK
