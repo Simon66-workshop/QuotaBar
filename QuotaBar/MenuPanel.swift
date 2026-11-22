@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MenuPanel: View {
     var probeEpoch: Int
+    var onRelayRefresh: () -> Void
     @EnvironmentObject private var store: UsageStore
     @EnvironmentObject private var fit: PanelFitModel
 
@@ -19,12 +20,9 @@ struct MenuPanel: View {
     private var fitted: some View {
         switch fit.plan.scroll {
         case .body:
-            ScrollView(.vertical) {
+            PanelBodyScroll(height: fit.plan.height) {
                 stack(usageViewport: nil)
-                    .frame(width: CGFloat(PanelFitMetrics.panelWidth), alignment: .topLeading)
-                    .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(width: CGFloat(PanelFitMetrics.panelWidth), height: CGFloat(max(fit.plan.height, 1)))
         case .usage(let viewport):
             stack(usageViewport: viewport)
                 .frame(
@@ -40,7 +38,7 @@ struct MenuPanel: View {
     }
 
     /// Header, usage, and the account / disk / footer chrome keep the 1.8.22 gaps.
-    /// Usage is the only band that scrolls; the others stay intrinsic.
+    /// Usage can scroll independently; on short screens the whole body scrolls.
     private func stack(usageViewport: Double?) -> some View {
         VStack(alignment: .leading, spacing: PanelSpace.section) {
             header
@@ -84,6 +82,7 @@ struct MenuPanel: View {
             if showConnect {
                 ConnectCell(idle: connectLanes)
             }
+            LiveRelayStatusSection()
             MemoryRow(usage: store.memory)
             DiskSection()
             footer
@@ -103,7 +102,7 @@ struct MenuPanel: View {
                 Text("QuotaBar")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text("v1.8.27")
+                Text("v1.8.28")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -129,8 +128,11 @@ struct MenuPanel: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            Button("Refresh") { Task { await store.refresh(userInitiated: true) } }
-                .buttonStyle(.bordered)
+            Button("Refresh") {
+                onRelayRefresh()
+                Task { await store.refresh(userInitiated: true) }
+            }
+            .buttonStyle(.bordered)
             Button("Copy") { store.copySummary() }
                 .buttonStyle(.borderless)
             Spacer()
@@ -168,6 +170,21 @@ struct MenuPanel: View {
 
     private var showConnect: Bool {
         store.loginInProgress || !connectLanes.isEmpty
+    }
+}
+
+/// Shared with the offline component renderer; the real PanelFit plan supplies height.
+struct PanelBodyScroll<Content: View>: View {
+    let height: Double
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        ScrollView(.vertical) {
+            content()
+                .frame(width: CGFloat(PanelFitMetrics.panelWidth), alignment: .topLeading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(width: CGFloat(PanelFitMetrics.panelWidth), height: CGFloat(max(height, 1)))
     }
 }
 

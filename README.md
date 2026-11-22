@@ -1,4 +1,4 @@
-# QuotaBar 1.8.27
+# QuotaBar 1.8.28
 
 Mac menu bar extra for live usage. **G** is the shared weekly pool (X Subscription Super: Grok, Cursor, and Grok Bot). **GO** is Google Gemini model quota from the official Antigravity CLI. ChatGPT / Codex, Claude, local and external disks, and local RAM stay on the bar.
 
@@ -28,7 +28,7 @@ Cursor and Grok Bot are not separate bar, tooltip, or panel items.
 - **Left-click** the bar → glass panel (details, connect, hide disks)
 - **Right-click** the bar → short native menu (refresh / copy / alerts / quit)
 
-The panel header should say **v1.8.27** (build **40**). If it still says an older version, quit QuotaBar and run `Start QuotaBar.command` again. **For this local upgrade review, do not install or launch it; use the candidate-only build below.**
+The panel header should say **v1.8.28** (build **41**). If it still says an older version, quit QuotaBar and run `Start QuotaBar.command` again. **For this local upgrade review, do not install or launch it; use the candidate-only build below.**
 
 Later launches: just double-click `Start QuotaBar.command` again.
 
@@ -47,7 +47,41 @@ If Claude stays under Connect, open Claude Desktop while signed in, then click R
 
 Plug in a USB / Thunderbolt disk and it appears in the panel; eject it and it disappears. Hide Time Machine or VM disks from the panel — they stay off the bar until you Show them again.
 
-The bar only turns orange / red on a token that is actually high (85%+ services, 90%+ disks / RAM). A normal 60–80% day stays neutral.
+Quota figures only turn orange / red on a token that is actually high (85%+ services, 90%+ disks / RAM). A normal 60–80% day stays neutral.
+
+## 1.8.28 — 转发器连接
+
+The dot before the existing quota tokens reports the two relay connections: green only when
+both are healthy; red for a confirmed outage; amber for degradation; hollow gray for
+unknown, missing, or stale status. The panel shows Feishu and WeCom heartbeat times in
+Asia/Shanghai and the website certificate separately. A green dot does **not** prove
+end-to-end message delivery. Certificate expiry does not change the relay dot.
+
+The feature is opt-in. Without a matching generic password in the **login** keychain it
+shows **未配置** and does not call the endpoint. Once the service owner provides the scoped
+v1 token and the approved QuotaBar binary is installed, confirm the **default** keychain
+is **login** in Keychain Access before using this command (it writes to the default
+keychain). Keep `-w` as the last option: macOS prompts for the token, so it is not an
+argument or a shell history entry.
+
+```sh
+security add-generic-password -U \
+  -s app.quotabar.mac.relay-status -a 66workshop.cn/relay-status-v1 \
+  -T "" -T "$HOME/Applications/QuotaBar.app/Contents/MacOS/QuotaBar" -w
+```
+
+If the login keychain is not the default, provision the item directly in the **login**
+keychain using Keychain Access. Trust only the verified QuotaBar executable, not all apps
+(`-A`). If an update via `-U` preserves an old ACL, check that specific item's Access
+Control in Keychain Access. An unavailable/locked keychain or an ACL denial prevents a
+fetch; never relax the ACL to all apps. Rebuilt or re-signed candidates may need a new
+ACL check. After changing credentials use **Refresh** (or **Refresh now**); HTTP 401
+pauses automatic polling until then. The relay only sends the token as a Bearer header to
+`https://66workshop.cn/api/relay-status/v1`; redirects are refused. QuotaBar does not
+log, export, or save the token outside the login keychain.
+
+Offline verification (synthetic responses, no real Keychain access or QuotaBar launch):
+`QUOTABAR_SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk bash QuotaBarTests/check-relay-status.sh`.
 
 ## 1.8.25 — GO (Google / Antigravity)
 

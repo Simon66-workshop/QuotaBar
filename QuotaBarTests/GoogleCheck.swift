@@ -54,7 +54,7 @@ struct GoogleCheck {
                 HStack {
                     Text("QuotaBar").font(.system(size: 15, weight: .semibold))
                     Spacer()
-                    Text("v1.8.25").font(.system(size: 10))
+                    Text("v1.8.28").font(.system(size: 10))
                 }
                 Text("Offline component check · synthetic data").font(.system(size: 11)).foregroundStyle(.secondary)
                 UsageTable(lanes: existing + [google])

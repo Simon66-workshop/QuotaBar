@@ -1,0 +1,549 @@
+QuotaBar 1.8.28 / 41 — Relay Status App-only test evidence
+Synthetic relay credentials, transport, and snapshots; no network, real Keychain,
+installation, launch/restart of QuotaBar, server change, commit, push, or deploy.
+The Google component script and candidate packaging script stopped at their
+existing GO-only worktree guards. Neither guard was edited or bypassed. The
+unguarded standalone swiftc app link below validates the full app executable,
+not bundle assembly, installed-app behavior, signing, or any server.
+Existing UsageClient Swift-concurrency warnings and legacy file-based Keychain
+deprecation warnings are retained verbatim. Cache and linked test executables
+used temporary directories on the mounted external volume.
+
+== Initial App link (failed: DarwinBoolean conversion, fixed) ==
++zsh:7> date '+%Y-%m-%d %H:%M:%S %Z %z'
+2026-11-22 12:25:04 EST -0500
++zsh:8> swiftc --version
+swift-driver version: 1.168.6 Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)
+Target: arm64-apple-macosx27.2.0
++zsh:9> sw_vers
+ProductName:		macOS
+ProductVersion:		27.2
+BuildVersion:		26B123
++zsh:10> swiftc -parse-as-library -O -target arm64-apple-macos14.0 -sdk /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk -module-cache-path /Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/cache QuotaBar/ClaudeDesktop.swift QuotaBar/ClaudeUsage.swift QuotaBar/DiskMonitor.swift QuotaBar/GoogleUsage.swift QuotaBar/GrokDeviceAuth.swift QuotaBar/MemoryMonitor.swift QuotaBar/MenuPanel.swift QuotaBar/Models.swift QuotaBar/PanelFit.swift QuotaBar/QuotaBarApp.swift QuotaBar/RelayStatusClient.swift QuotaBar/RelayStatusKeychain.swift QuotaBar/RelayStatusModels.swift QuotaBar/RelayStatusSection.swift QuotaBar/RelayStatusStore.swift QuotaBar/TokenReader.swift QuotaBar/UsageClient.swift QuotaBar/UsageSource.swift QuotaBar/UsageStore.swift -o /Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/QuotaBar -framework AppKit -framework SwiftUI -framework Combine -framework UserNotifications -framework Security -framework CryptoKit -framework IOKit -framework DiskArbitration -lsqlite3
+QuotaBar/RelayStatusKeychain.swift:20:15: warning: 'SecKeychainOpen' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+18 |             .appendingPathComponent("Library/Keychains/login.keychain-db").path
+19 |         var login: SecKeychain?
+20 |         guard SecKeychainOpen(path, &login) == errSecSuccess, let login else {
+   |               `- warning: 'SecKeychainOpen' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+21 |             throw RelayIssue.keychainUnavailable
+22 |         }
+
+QuotaBar/RelayStatusKeychain.swift:41:15: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+39 |         // immediately after this synchronous Security call. ACL enforcement stays on.
+40 |         var previous = DarwinBoolean(false)
+41 |         guard SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess,
+   |               `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+42 |               SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else {
+43 |             throw RelayIssue.keychainUnavailable
+
+QuotaBar/RelayStatusKeychain.swift:42:15: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+40 |         var previous = DarwinBoolean(false)
+41 |         guard SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess,
+42 |               SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else {
+   |               `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+43 |             throw RelayIssue.keychainUnavailable
+44 |         }
+
+QuotaBar/RelayStatusKeychain.swift:48:58: error: cannot convert value of type 'DarwinBoolean' to expected argument type 'Bool'
+46 |         var item: CFTypeRef?
+47 |         do {
+48 |             defer { SecKeychainSetUserInteractionAllowed(previous) }
+   |                                                          `- error: cannot convert value of type 'DarwinBoolean' to expected argument type 'Bool'
+49 |             status = SecItemCopyMatching(query as CFDictionary, &item)
+50 |         }
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+
+== Initial Relay check (failed: atomic PNG save denied, fixed with same-volume staging) ==
++zsh:5> QUOTABAR_SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk bash QuotaBarTests/check-relay-status.sh
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/RelayStatusKeychain.swift:19:15: warning: 'SecKeychainOpen' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+17 |             .appendingPathComponent("Library/Keychains/login.keychain-db").path
+18 |         var login: SecKeychain?
+19 |         guard SecKeychainOpen(path, &login) == errSecSuccess, let login else {
+   |               `- warning: 'SecKeychainOpen' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+20 |             throw RelayIssue.keychainUnavailable
+21 |         }
+
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/RelayStatusKeychain.swift:37:15: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+35 |         // immediately after this synchronous Security call. ACL enforcement stays on.
+36 |         var previous = DarwinBoolean(false)
+37 |         guard SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess,
+   |               `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+38 |               SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else {
+39 |             throw RelayIssue.keychainUnavailable
+
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/RelayStatusKeychain.swift:38:15: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+36 |         var previous = DarwinBoolean(false)
+37 |         guard SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess,
+38 |               SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else {
+   |               `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+39 |             throw RelayIssue.keychainUnavailable
+40 |         }
+
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/RelayStatusKeychain.swift:44:21: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+42 |         var item: CFTypeRef?
+43 |         do {
+44 |             defer { SecKeychainSetUserInteractionAllowed(previous.boolValue) }
+   |                     `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+45 |             status = SecItemCopyMatching(query as CFDictionary, &item)
+46 |         }
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/UsageClient.swift:299:29: warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 297 | 
+ 298 |     private static func desktopIdentity(cookie: String, hint: String?) async -> DesktopIdentity? {
+ 299 |         desktopIdentityLock.lock()
+     |                             `- warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 300 |         if let cached = desktopIdentityCache,
+ 301 |            cached.hint == hint,
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:13:1: note: 'lock()' declared here
+11 | @protocol NSLocking
+12 | 
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'lock()' declared here
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/UsageClient.swift:305:33: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 303 |         {
+ 304 |             let identity = cached.identity
+ 305 |             desktopIdentityLock.unlock()
+     |                                 `- warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 306 |             return identity
+ 307 |         }
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:15:1: note: 'unlock()' declared here
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'unlock()' declared here
+16 | 
+17 | @end
+
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/UsageClient.swift:308:29: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 306 |             return identity
+ 307 |         }
+ 308 |         desktopIdentityLock.unlock()
+     |                             `- warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 309 |         if let found = await bootstrapIdentity(cookie: cookie, hint: hint) {
+ 310 |             rememberDesktopIdentity(found, hint: hint)
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:15:1: note: 'unlock()' declared here
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'unlock()' declared here
+16 | 
+17 | @end
+SHANGHAI_TIME=PASS · TZ=America/New_York and TZ=UTC: Feishu=11-23 01:14:51; WeCom=11-23 01:14:47
+Swift/ErrorType.swift:254: Fatal error: Error raised at top level: Error Domain=NSCocoaErrorDomain Code=513 "You don’t have permission to save the file “relay-light-green.png” in the folder “Previews”." UserInfo={NSURL=file:///Volumes/2T%E6%89%A9%E5%B1%95%E7%9B%98/Agent%E6%96%87%E4%BB%B6/QuotaBar-relay-status-20261122/repo-app/QuotaBarTests/Previews/relay-light-green.png, NSUserStringVariant=Folder, NSUnderlyingError=0x7726025e60 {Error Domain=NSPOSIXErrorDomain Code=1 "Operation not permitted"}}
+QuotaBarTests/check-relay-status.sh: line 26: 49907 Trace/BPT trap: 5       "$WORK/relay-check" check "$ROOT" "$OUT"
++zsh:6> r=133 
++zsh:7> set +x
+EXIT=133
+
+== Existing regression script attempts and complete output ==
++zsh:24> QUOTABAR_TEST_OUT=/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/quotabar-tests QUOTABAR_MODULE_CACHE=/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/reg-cache bash QuotaBarTests/run.sh
+ok 278 checks
++zsh:24> echo 'RUN_EXIT=0'
+RUN_EXIT=0
++zsh:25> QUOTABAR_MEMORY_CHECK_OUT=/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/quotabar-memory-check QUOTABAR_MODULE_CACHE=/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/reg-cache bash QuotaBarTests/check-memory.sh
+RAM check at 2026-11-22T17:27:57Z
+Formula: (active + wired + compressor physical pages) * page size / physicalMemory * 100
+Speculative/inactive/free excluded; no separate purgeable adjustment; GB = 2^30 bytes.
+App sampler: 73.2032%; M 73%; 23.4 / 32.0 GB used; usedBytes=25152438272; totalBytes=34359738368
+
+$ /usr/bin/vm_stat
+Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                                    62259.
+Pages active:                                 466918.
+Pages inactive:                               464003.
+Pages speculative:                              2117.
+Pages throttled:                                   0.
+Pages wired down:                             236047.
+Pages purgeable:                                  96.
+"Translation faults":                     4477390624.
+Pages copy-on-write:                       181642391.
+Pages zero filled:                        3197477030.
+Pages reactivated:                         220695753.
+Pages purged:                               25541098.
+File-backed pages:                            305829.
+Anonymous pages:                              627209.
+Pages stored in compressor:                  1229090.
+Pages occupied by compressor:                 832341.
+Decompressions:                            157215956.
+Compressions:                              223198035.
+Pageins:                                   398795607.
+Pageouts:                                     362226.
+Swapins:                                     3498897.
+Swapouts:                                    7615201.
+
+Recomputed: active=466918 wired=236047 compressor=832341 pageSize=16384 usedBytes=25154453504; 73.2091%; delta=0.0059 percentage points
+
+$ /usr/bin/memory_pressure
+The system has 34359738368 (2097152 pages with a page size of 16384).
+
+Stats: 
+Pages free: 62424 
+Pages purgeable: 96 
+Pages purged: 25541098 
+
+Swap I/O:
+Swapins: 3498897 
+Swapouts: 7615201 
+
+Page Q counts:
+Pages active: 466752 
+Pages inactive: 463954 
+Pages speculative: 2118 
+Pages throttled: 0 
+Pages wired down: 236096 
+
+Compressor Stats:
+Pages used by compressor: 832341 
+Pages decompressed: 157215956 
+Pages compressed: 223198035 
+
+File I/O:
+Pageins: 398795609 
+Pageouts: 362226 
+
+System-wide memory free percentage: 48%
+
+Recomputed: active=466752 wired=236096 compressor=832341 pageSize=16384 usedBytes=25152536576; 73.2035%; delta=0.0003 percentage points
+Physical total matches ProcessInfo: true
+The tool's system-wide free percentage is memory-pressure availability, NOT 100 - M.
+App sampler after: 73.2312%; 23.4 / 32.0 GB used
+Comparison tolerance: < 1 percentage point for sequential live samples.
+PASS: app sampler agrees with both tools' page counters.
++zsh:25> echo 'MEMORY_EXIT=0'
+MEMORY_EXIT=0
++zsh:26> QUOTABAR_SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk QUOTABAR_MODULE_CACHE=/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/reg-cache bash QuotaBarTests/check-google.sh
+Requires the GO upgrade worktree and mounted external volume.
++zsh:26> echo 'GOOGLE_EXIT=1'
+GOOGLE_EXIT=1
++zsh:27> QUOTABAR_SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk QUOTABAR_MODULE_CACHE=/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/reg-cache bash QuotaBarTests/build-candidate.sh
+Candidate build is restricted to the GO upgrade worktree.
++zsh:27> echo 'CANDIDATE_EXIT=1'
+CANDIDATE_EXIT=1
+
+== Intermediate App link after compiler fix ==
++zsh:14> swiftc -parse-as-library -O -target arm64-apple-macos14.0 -sdk /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk -module-cache-path /Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/cache QuotaBar/ClaudeDesktop.swift QuotaBar/ClaudeUsage.swift QuotaBar/DiskMonitor.swift QuotaBar/GoogleUsage.swift QuotaBar/GrokDeviceAuth.swift QuotaBar/MemoryMonitor.swift QuotaBar/MenuPanel.swift QuotaBar/Models.swift QuotaBar/PanelFit.swift QuotaBar/QuotaBarApp.swift QuotaBar/RelayStatusClient.swift QuotaBar/RelayStatusKeychain.swift QuotaBar/RelayStatusModels.swift QuotaBar/RelayStatusSection.swift QuotaBar/RelayStatusStore.swift QuotaBar/TokenReader.swift QuotaBar/UsageClient.swift QuotaBar/UsageSource.swift QuotaBar/UsageStore.swift -o /Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/QuotaBar -framework AppKit -framework SwiftUI -framework Combine -framework UserNotifications -framework Security -framework CryptoKit -framework IOKit -framework DiskArbitration -lsqlite3
+QuotaBar/RelayStatusKeychain.swift:19:15: warning: 'SecKeychainOpen' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+17 |             .appendingPathComponent("Library/Keychains/login.keychain-db").path
+18 |         var login: SecKeychain?
+19 |         guard SecKeychainOpen(path, &login) == errSecSuccess, let login else {
+   |               `- warning: 'SecKeychainOpen' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+20 |             throw RelayIssue.keychainUnavailable
+21 |         }
+
+QuotaBar/RelayStatusKeychain.swift:37:15: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+35 |         // immediately after this synchronous Security call. ACL enforcement stays on.
+36 |         var previous = DarwinBoolean(false)
+37 |         guard SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess,
+   |               `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+38 |               SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else {
+39 |             throw RelayIssue.keychainUnavailable
+
+QuotaBar/RelayStatusKeychain.swift:38:15: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+36 |         var previous = DarwinBoolean(false)
+37 |         guard SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess,
+38 |               SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else {
+   |               `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+39 |             throw RelayIssue.keychainUnavailable
+40 |         }
+
+QuotaBar/RelayStatusKeychain.swift:44:21: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+42 |         var item: CFTypeRef?
+43 |         do {
+44 |             defer { SecKeychainSetUserInteractionAllowed(previous.boolValue) }
+   |                     `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+45 |             status = SecItemCopyMatching(query as CFDictionary, &item)
+46 |         }
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+QuotaBar/UsageClient.swift:299:29: warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 297 | 
+ 298 |     private static func desktopIdentity(cookie: String, hint: String?) async -> DesktopIdentity? {
+ 299 |         desktopIdentityLock.lock()
+     |                             `- warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 300 |         if let cached = desktopIdentityCache,
+ 301 |            cached.hint == hint,
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:13:1: note: 'lock()' declared here
+11 | @protocol NSLocking
+12 | 
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'lock()' declared here
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+
+QuotaBar/UsageClient.swift:305:33: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 303 |         {
+ 304 |             let identity = cached.identity
+ 305 |             desktopIdentityLock.unlock()
+     |                                 `- warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 306 |             return identity
+ 307 |         }
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:15:1: note: 'unlock()' declared here
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'unlock()' declared here
+16 | 
+17 | @end
+
+QuotaBar/UsageClient.swift:308:29: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 306 |             return identity
+ 307 |         }
+ 308 |         desktopIdentityLock.unlock()
+     |                             `- warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 309 |         if let found = await bootstrapIdentity(cookie: cookie, hint: hint) {
+ 310 |             rememberDesktopIdentity(found, hint: hint)
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:15:1: note: 'unlock()' declared here
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'unlock()' declared here
+16 | 
+17 | @end
++zsh:15> r=0 
++zsh:16> set +x
+EXIT=0
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/QuotaBar: Mach-O 64-bit executable arm64
+
+== Final Relay check and complete output ==
++ QUOTABAR_SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk
++ bash QuotaBarTests/check-relay-status.sh
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/RelayStatusKeychain.swift:19:15: warning: 'SecKeychainOpen' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+17 |             .appendingPathComponent("Library/Keychains/login.keychain-db").path
+18 |         var login: SecKeychain?
+19 |         guard SecKeychainOpen(path, &login) == errSecSuccess, let login else {
+   |               `- warning: 'SecKeychainOpen' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+20 |             throw RelayIssue.keychainUnavailable
+21 |         }
+
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/RelayStatusKeychain.swift:37:15: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+35 |         // immediately after this synchronous Security call. ACL enforcement stays on.
+36 |         var previous = DarwinBoolean(false)
+37 |         guard SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess,
+   |               `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+38 |               SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else {
+39 |             throw RelayIssue.keychainUnavailable
+
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/RelayStatusKeychain.swift:38:15: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+36 |         var previous = DarwinBoolean(false)
+37 |         guard SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess,
+38 |               SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else {
+   |               `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+39 |             throw RelayIssue.keychainUnavailable
+40 |         }
+
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/RelayStatusKeychain.swift:44:21: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+42 |         var item: CFTypeRef?
+43 |         do {
+44 |             defer { SecKeychainSetUserInteractionAllowed(previous.boolValue) }
+   |                     `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+45 |             status = SecItemCopyMatching(query as CFDictionary, &item)
+46 |         }
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/UsageClient.swift:299:29: warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 297 | 
+ 298 |     private static func desktopIdentity(cookie: String, hint: String?) async -> DesktopIdentity? {
+ 299 |         desktopIdentityLock.lock()
+     |                             `- warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 300 |         if let cached = desktopIdentityCache,
+ 301 |            cached.hint == hint,
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:13:1: note: 'lock()' declared here
+11 | @protocol NSLocking
+12 | 
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'lock()' declared here
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/UsageClient.swift:305:33: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 303 |         {
+ 304 |             let identity = cached.identity
+ 305 |             desktopIdentityLock.unlock()
+     |                                 `- warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 306 |             return identity
+ 307 |         }
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:15:1: note: 'unlock()' declared here
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'unlock()' declared here
+16 | 
+17 | @end
+
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/UsageClient.swift:308:29: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 306 |             return identity
+ 307 |         }
+ 308 |         desktopIdentityLock.unlock()
+     |                             `- warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 309 |         if let found = await bootstrapIdentity(cookie: cookie, hint: hint) {
+ 310 |             rememberDesktopIdentity(found, hint: hint)
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:15:1: note: 'unlock()' declared here
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'unlock()' declared here
+16 | 
+17 | @end
+SHANGHAI_TIME=PASS · TZ=America/New_York and TZ=UTC: Feishu=11-23 01:14:51; WeCom=11-23 01:14:47
+V1_PARSE=PASS · schema, strict keys, malformed data, enum mapping, all 16 priority pairs, certificate independence
+HTTP_POLICY=PASS · no I/O; cache/cookies/credential storage disabled, 5s, refused redirect, error labels and Retry-After
+POLLING=PASS · injected clock/credentials/transport; single flight, panel gate, wake, offline, 401, 429, expiry, backoff
+VERSION=PASS · 1.8.28/41
+relay-light-green.png · 448×123 pt · 721 contrasting samples
+relay-panel-light-green.png · 448×255 pt · 1353 contrasting samples
+relay-light-yellow.png · 448×123 pt · 791 contrasting samples
+relay-panel-light-yellow.png · 448×255 pt · 1420 contrasting samples
+relay-light-red.png · 448×123 pt · 839 contrasting samples
+relay-panel-light-red.png · 448×255 pt · 1484 contrasting samples
+relay-light-gray.png · 448×123 pt · 589 contrasting samples
+relay-panel-light-gray.png · 448×255 pt · 1171 contrasting samples
+relay-dark-green.png · 448×123 pt · 848 contrasting samples
+relay-panel-dark-green.png · 448×255 pt · 1724 contrasting samples
+relay-dark-yellow.png · 448×123 pt · 936 contrasting samples
+relay-panel-dark-yellow.png · 448×255 pt · 1811 contrasting samples
+relay-dark-red.png · 448×123 pt · 996 contrasting samples
+relay-panel-dark-red.png · 448×255 pt · 1875 contrasting samples
+relay-dark-gray.png · 448×123 pt · 688 contrasting samples
+relay-panel-dark-gray.png · 448×255 pt · 1537 contrasting samples
+relay-panel-dark-short-scrolled.png · 448×110 pt · 615 contrasting samples
+RENDER=PASS · 17 offscreen PNGs; stable section height, drawable foreground and short native scroll
+PREVIEWS=/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBarTests/Previews
++ r=0
++ set +x
+RELAY_EXIT=0
+
+== Final optimized App compile/link and complete output ==
++ swiftc -parse-as-library -O -target arm64-apple-macos14.0 -sdk /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk -module-cache-path $'/Volumes/2T�\211��\225�\233\230/Agent�\226\207件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/cache' QuotaBar/ClaudeDesktop.swift QuotaBar/ClaudeUsage.swift QuotaBar/DiskMonitor.swift QuotaBar/GoogleUsage.swift QuotaBar/GrokDeviceAuth.swift QuotaBar/MemoryMonitor.swift QuotaBar/MenuPanel.swift QuotaBar/Models.swift QuotaBar/PanelFit.swift QuotaBar/QuotaBarApp.swift QuotaBar/RelayStatusClient.swift QuotaBar/RelayStatusKeychain.swift QuotaBar/RelayStatusModels.swift QuotaBar/RelayStatusSection.swift QuotaBar/RelayStatusStore.swift QuotaBar/TokenReader.swift QuotaBar/UsageClient.swift QuotaBar/UsageSource.swift QuotaBar/UsageStore.swift -o $'/Volumes/2T�\211��\225�\233\230/Agent�\226\207件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/QuotaBar' -framework AppKit -framework SwiftUI -framework Combine -framework UserNotifications -framework Security -framework CryptoKit -framework IOKit -framework DiskArbitration -lsqlite3
+QuotaBar/RelayStatusKeychain.swift:19:15: warning: 'SecKeychainOpen' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+17 |             .appendingPathComponent("Library/Keychains/login.keychain-db").path
+18 |         var login: SecKeychain?
+19 |         guard SecKeychainOpen(path, &login) == errSecSuccess, let login else {
+   |               `- warning: 'SecKeychainOpen' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+20 |             throw RelayIssue.keychainUnavailable
+21 |         }
+
+QuotaBar/RelayStatusKeychain.swift:37:15: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+35 |         // immediately after this synchronous Security call. ACL enforcement stays on.
+36 |         var previous = DarwinBoolean(false)
+37 |         guard SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess,
+   |               `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+38 |               SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else {
+39 |             throw RelayIssue.keychainUnavailable
+
+QuotaBar/RelayStatusKeychain.swift:38:15: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+36 |         var previous = DarwinBoolean(false)
+37 |         guard SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess,
+38 |               SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else {
+   |               `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+39 |             throw RelayIssue.keychainUnavailable
+40 |         }
+
+QuotaBar/RelayStatusKeychain.swift:44:21: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+42 |         var item: CFTypeRef?
+43 |         do {
+44 |             defer { SecKeychainSetUserInteractionAllowed(previous.boolValue) }
+   |                     `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+45 |             status = SecItemCopyMatching(query as CFDictionary, &item)
+46 |         }
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+QuotaBar/UsageClient.swift:299:29: warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 297 | 
+ 298 |     private static func desktopIdentity(cookie: String, hint: String?) async -> DesktopIdentity? {
+ 299 |         desktopIdentityLock.lock()
+     |                             `- warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 300 |         if let cached = desktopIdentityCache,
+ 301 |            cached.hint == hint,
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:13:1: note: 'lock()' declared here
+11 | @protocol NSLocking
+12 | 
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'lock()' declared here
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+
+QuotaBar/UsageClient.swift:305:33: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 303 |         {
+ 304 |             let identity = cached.identity
+ 305 |             desktopIdentityLock.unlock()
+     |                                 `- warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 306 |             return identity
+ 307 |         }
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:15:1: note: 'unlock()' declared here
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'unlock()' declared here
+16 | 
+17 | @end
+
+QuotaBar/UsageClient.swift:308:29: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 306 |             return identity
+ 307 |         }
+ 308 |         desktopIdentityLock.unlock()
+     |                             `- warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 309 |         if let found = await bootstrapIdentity(cookie: cookie, hint: hint) {
+ 310 |             rememberDesktopIdentity(found, hint: hint)
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:15:1: note: 'unlock()' declared here
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'unlock()' declared here
+16 | 
+17 | @end
++ r=0
++ set +x
+APP_LINK_EXIT=0
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/QuotaBar: Mach-O 64-bit executable arm64
+
+== Final static sanity checks and complete output ==
++ date '+%Y-%m-%d %H:%M:%S %Z %z'
+2026-11-22 12:30:44 EST -0500
++ swiftc --version
+swift-driver version: 1.168.6 Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)
+Target: arm64-apple-macosx27.2.0
++ plutil -lint QuotaBar/Info.plist QuotaBar.xcodeproj/project.pbxproj
+QuotaBar/Info.plist: OK
+QuotaBar.xcodeproj/project.pbxproj: OK
++ bash -n 'Start QuotaBar.command'
++ bash -n QuotaBarTests/check-relay-status.sh
++ git diff --check
++ python3 -
+QuotaBarTests/Previews/relay-dark-gray.png
+QuotaBarTests/Previews/relay-dark-green.png
+QuotaBarTests/Previews/relay-dark-red.png
+QuotaBarTests/Previews/relay-dark-yellow.png
+QuotaBarTests/Previews/relay-light-gray.png
+QuotaBarTests/Previews/relay-light-green.png
+QuotaBarTests/Previews/relay-light-red.png
+QuotaBarTests/Previews/relay-light-yellow.png
+QuotaBarTests/Previews/relay-panel-dark-gray.png
+QuotaBarTests/Previews/relay-panel-dark-green.png
+QuotaBarTests/Previews/relay-panel-dark-red.png
+QuotaBarTests/Previews/relay-panel-dark-short-scrolled.png
+QuotaBarTests/Previews/relay-panel-dark-yellow.png
+QuotaBarTests/Previews/relay-panel-light-gray.png
+QuotaBarTests/Previews/relay-panel-light-green.png
+QuotaBarTests/Previews/relay-panel-light-red.png
+QuotaBarTests/Previews/relay-panel-light-yellow.png
+STATIC=PASS · launcher source list, plist and Xcode versions, 17 PNG signatures, no server directory
+
+== Visual inspection scope ==
+Inspected relay-panel-light-yellow.png, relay-panel-dark-gray.png and relay-panel-dark-short-scrolled.png; no live menu-bar, VoiceOver or glass-material acceptance was performed.

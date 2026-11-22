@@ -40,9 +40,9 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleVersion</key>
-  <string>40</string>
+  <string>41</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.8.27</string>
+  <string>1.8.28</string>
   <key>LSUIElement</key>
   <true/>
   <key>LSMinimumSystemVersion</key>
@@ -59,7 +59,7 @@ echo -n 'APPL????' > "$APP/Contents/PkgInfo"
 SHA="$(cat "$SRC"/*.swift | shasum -a 256 | awk '{print $1}')"
 OLD="$(cat "$STAMP" 2>/dev/null || true)"
 if [[ ! -x "$BIN" || "$SHA" != "$OLD" ]]; then
-  osascript -e 'display notification "正在编译 QuotaBar 1.8.27…" with title "QuotaBar"'
+  osascript -e 'display notification "正在编译 QuotaBar 1.8.28…" with title "QuotaBar"'
   pkill -x QuotaBar 2>/dev/null || true
   sleep 0.3
   SDK="${QUOTABAR_SDK:-$(xcrun --sdk macosx --show-sdk-path)}"
@@ -74,6 +74,11 @@ if [[ ! -x "$BIN" || "$SHA" != "$OLD" ]]; then
     "$SRC/UsageStore.swift" \
     "$SRC/UsageSource.swift" \
     "$SRC/PanelFit.swift" \
+    "$SRC/RelayStatusModels.swift" \
+    "$SRC/RelayStatusClient.swift" \
+    "$SRC/RelayStatusKeychain.swift" \
+    "$SRC/RelayStatusStore.swift" \
+    "$SRC/RelayStatusSection.swift" \
     "$SRC/MenuPanel.swift" \
     "$SRC/GrokDeviceAuth.swift" \
     "$SRC/DiskMonitor.swift" \
@@ -97,7 +102,7 @@ pkill -x QuotaBar 2>/dev/null || true
 sleep 0.2
 open "$APP"
 
-osascript -e 'display notification "已出现在屏幕右上角 · G 为共享池 · Claude / Codex / 磁盘照常" with title "QuotaBar 1.8.27"' || true
+osascript -e 'display notification "已出现在屏幕右上角 · G 为共享池 · Claude / Codex / 磁盘照常" with title "QuotaBar 1.8.28"' || true
 
 tty -s && osascript <<'EOF' || true
 tell application "Terminal"
