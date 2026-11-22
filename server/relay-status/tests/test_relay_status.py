@@ -139,6 +139,21 @@ class StateTests(unittest.TestCase):
         self.assertEqual(connection("feishu", feishu(age=-5))["state"], "ok")
         self.assertEqual(connection("wecom", wecom(age=501))["state"], "unknown")
 
+    def test_wecom_pong_must_belong_to_current_invocation(self):
+        unit = collector.Unit("active", FAKE_PID, MONO - 1, "b" * 32)
+        for age, pong, expected in ((0, 0.999, "ready"), (0, 1, "ready"),
+                                    (0, 1.001, "source_unavailable"), (0, 5, "source_unavailable"),
+                                    (0.5, 0.5, "ready"), (0.5, 0.501, "source_unavailable")):
+            with self.subTest(age=age, pong=pong):
+                self.assertEqual(connection("wecom", wecom(age, pong), unit)["reason"], expected)
+        self.assertEqual(connection("wecom", wecom(pong=5, state="reconnecting"), unit)["state"], "unknown")
+
+    def test_feishu_timestamp_and_mtime_have_independent_future_bounds(self):
+        for ts, mtime, expected in ((4, 8, "unknown"), (6, 4, "unknown"), (5, 5, "ok"),
+                                    (4, 5.001, "unknown"), (4, 5, "ok"), (-10, -4, "unknown")):
+            with self.subTest(ts=ts, mtime=mtime):
+                self.assertEqual(connection("feishu", (feishu(-ts)[0], NOW + mtime))["state"], expected)
+
     def test_unit_precedence_and_lease(self):
         for state in ("inactive", "failed"):
             with self.subTest(state=state):
@@ -443,6 +458,23 @@ class APITests(unittest.TestCase):
                      lambda: common.decode_object(b"{invalid")):
             self.assert_response(self.send(request(), snapshot=read), 503,
                                  {"error": "service_unavailable"})
+
+    def test_api_rejects_green_incompatible_with_observation_not_response_age(self):
+        for name in ("feishu", "wecom"):
+            for age, code in ((89.9, 200), (90, 200), (90.001, 503), (181, 503), (-5, 200), (-6, 503)):
+                with self.subTest(name=name, age=age):
+                    doc = private_snapshot()
+                    doc[name]["last_heartbeat_at"] = common.rfc3339(NOW - age)
+                    # Green at collection remains valid while this immutable
+                    # snapshot is served, up to the separate 75s snapshot TTL.
+                    def read():
+                        return common.project_snapshot(doc, BOOT, MONO + 75)
+                    self.assert_response(self.send(request(), snapshot=read), code)
+        # Equal serialized age is valid regardless of observation fraction.
+        doc = private_snapshot()
+        doc["observed_at"] = common.rfc3339(NOW + 0.999)
+        doc["feishu"]["last_heartbeat_at"] = common.rfc3339(NOW - 90 + 0.999)
+        self.assertEqual(common.project_snapshot(doc, BOOT, MONO)["feishu"]["state"], "ok")
 
     def test_fixed_429_contract_and_nginx_mapping(self):
         header, _ = self.assert_response(api.response(429), 429, {"error": "rate_limited"})

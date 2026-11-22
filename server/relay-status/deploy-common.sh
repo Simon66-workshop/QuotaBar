@@ -19,8 +19,8 @@ die() { printf '%s\n' "$*" >&2; exit 1; }
 say() { printf '%s\n' "$*"; }
 absent() { [[ ! -e "$1" && ! -L "$1" ]]; }
 regular_match() { [[ -f "$1" && ! -L "$1" ]] && cmp -s -- "$1" "$2"; }
-nginx_check() { nginx -t >/dev/null 2>&1; }
-nginx_reload() { systemctl reload nginx.service >/dev/null 2>&1; }
+nginx_gate() { /usr/bin/python3 -IB "$HERE/nginx-gate.py" "$1"; }
+nginx_reload() { /usr/bin/systemctl reload nginx.service >/dev/null 2>&1; }
 
 begin_apply() {
     [[ $(uname -s) == Linux && $(id -u) == 0 ]] || die "--apply requires Linux root."
@@ -31,12 +31,4 @@ begin_apply() {
     flock -n 9 || die "Another status deploy or rollback is running."
 }
 
-snippets_visible() {
-    # Keep the rest of the shared nginx configuration out of command output.
-    # This proves files were loaded, not which vhost(s) included them.
-    nginx -T 2>/dev/null | awk -v a="# configuration file $HTTP:" -v b="# configuration file $VHOST:" '
-        $0 == a { x++ }
-        $0 == b { y++ }
-        END { exit !(x == 1 && y == 1) }
-    '
-}
+nginx_workers() { /usr/bin/python3 -IB "$HERE/nginx-workers.py" "$@"; }

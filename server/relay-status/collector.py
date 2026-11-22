@@ -148,7 +148,8 @@ def connection(name, unit, sample, lease, now, mono, policy):
     heartbeat_ok = FEISHU_OK_AGE if name == "feishu" else WECOM_HEARTBEAT_OK_AGE
     if name == "feishu":
         # A copied, clock-shifted or pre-start sample is not current evidence.
-        if not number(mtime) or mtime < wall_start or abs(mtime - timestamp) > CLOCK_SKEW:
+        if (not number(mtime) or not wall_start <= mtime <= now + CLOCK_SKEW
+                or abs(mtime - timestamp) > CLOCK_SKEW):
             return unknown()
     else:
         source_mono = doc.get("monotonic")
@@ -157,20 +158,22 @@ def connection(name, unit, sample, lease, now, mono, policy):
                 or abs((mono - source_mono) - (now - timestamp)) > CLOCK_SKEW):
             return unknown()
 
+    if name == "wecom":
+        pong_age = doc.get("last_pong_age")
+        # Both timestamps use the same monotonic clock. A pre-start or
+        # unprovable pong is missing evidence, not a reconnect/lease signal.
+        if (not number(pong_age) or pong_age < 0
+                or source_mono - pong_age < unit.started):
+            return unknown()
+        pong = pong_age + age
     if age > CONNECTION_DOWN_AGE:
         return status("down", "heartbeat_stale")
     if name == "wecom":
-        pong_age = doc.get("last_pong_age")
-        if (not number(pong_age) or pong_age < 0
-                or pong_age > source_mono - unit.started + CLOCK_SKEW):
-            pong = None
-        else:
-            pong = pong_age + age
-            if pong > CONNECTION_DOWN_AGE:
-                return status("down", "pong_stale")
+        if pong > CONNECTION_DOWN_AGE:
+            return status("down", "pong_stale")
         value = doc.get("state")
         reconnecting = type(value) is str and value in policy.reconnect_states
-        ready = value == "subscribed" and pong is not None
+        ready = value == "subscribed"
     else:
         value = doc.get("connection_ready")
         reconnecting = value is False
@@ -179,7 +182,7 @@ def connection(name, unit, sample, lease, now, mono, policy):
         return status("degraded", "heartbeat_late")
     if reconnecting:
         return status("degraded", "reconnecting")
-    if name == "wecom" and pong is not None and pong > WECOM_PONG_OK_AGE:
+    if name == "wecom" and pong > WECOM_PONG_OK_AGE:
         return status("degraded", "pong_late")
     if lease == "stopped":
         return status("degraded", "lease_conflict")

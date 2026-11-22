@@ -166,8 +166,10 @@ def exact(obj, keys):
 
 
 def validate_timestamp(value, observed):
-    if value is not None and not 0 <= parse_date(value) <= observed + CLOCK_SKEW:
+    stamp = parse_date(value) if value is not None else None
+    if stamp is not None and not 0 <= stamp <= observed + CLOCK_SKEW:
         raise ValueError("invalid heartbeat timestamp")
+    return stamp
 
 
 def project_snapshot(doc, current_boot, current_mono):
@@ -181,16 +183,19 @@ def project_snapshot(doc, current_boot, current_mono):
     if not 0 <= age <= SNAPSHOT_MAX_AGE:
         raise ValueError("stale snapshot")
     observed = parse_date(doc["observed_at"])
-    for name in ("feishu", "wecom"):
+    for name, max_green_age in (("feishu", FEISHU_OK_AGE), ("wecom", WECOM_HEARTBEAT_OK_AGE)):
         status = doc[name]
         if not exact(status, "state reason last_heartbeat_at"):
             raise ValueError("invalid connection")
         state, reason = status["state"], status["reason"]
         if type(state) is not str or type(reason) is not str or reason not in REASONS.get(state, ()):
             raise ValueError("invalid connection enum")
-        validate_timestamp(status["last_heartbeat_at"], observed)
-        if state == "ok" and status["last_heartbeat_at"] is None:
-            raise ValueError("missing heartbeat evidence")
+        heartbeat = validate_timestamp(status["last_heartbeat_at"], observed)
+        # Both times are floored to UTC seconds. The true difference can
+        # differ by less than one second, so a displayed 91s cannot be <=90s.
+        # Compare at collection, not at request time; snapshot TTL is separate.
+        if state == "ok" and (heartbeat is None or observed - heartbeat > max_green_age):
+            raise ValueError("contradictory green heartbeat evidence")
     cert = doc["certificate"]
     if not exact(cert, "state expires_at days_remaining"):
         raise ValueError("invalid certificate")

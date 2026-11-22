@@ -33,3 +33,42 @@ test_wecom_pong_uses_mtime_and_threshold_edges (test_relay_status.StateTests.tes
 Ran 26 tests in 0.043s
 
 OK
+
+== App APP-01 / APP-02 audit follow-up (2026-11-22T17:45:22Z) ==
+Server compatibility baseline: isolated archive of server HEAD a181197.
+Command: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s server/relay-status/tests -v
+Python 3.14.6: PASS, 26 tests (0.052s), including synthetic Unix socket
+round-trip and wire-contract checks; bash -n for top-level server scripts: PASS.
+The App-only changes did not modify server implementation. This baseline does
+not cover concurrent uncommitted server changes, ECS, nginx or systemd runtime.
+No external network, server script execution, deployment, restart, commit or push.
+
+== Server independent-audit remediation (2026-11-22T17:50:17Z) ==
+Base HEAD: a181197ce76ac701b530d0885ed645a6c126720c
+Scope: this uncommitted server/relay-status candidate (app note above is separate).
+Candidate SHA-256 (nginx-gate.py candidate_sha, excludes this evidence):
+89aa1194296e6da2fa3e8f5d1338abdd83df2996aa4da4917e6c3c1c807b40cc
+Host: Darwin arm64; Python 3.14.6.
+PASS: python3 -B -m unittest discover -s server/relay-status/tests -v
+  43 tests (0.128s), including synthetic disk and Unix socket round trips.
+  P0-01: pre-start pong, exactly at current start, and fractional sides.
+  P0-02: future timestamp and mtime checked independently, inclusive +5.
+  P0-03: both green heartbeat ages at 90/91 serialized seconds and 181s,
+         fixed 503 for contradictions, independent of response-time TTL.
+  P1-01: unrelated config change, multiply referenced include, wrong
+         context/port/host, wrong launcher and stale/incomplete approval.
+  P1-02: process generation identity, unchanged/old workers and stage ordering.
+  P1-04: candidate/runtime-bound approval rejects missing/non-PASS isolation results.
+PASS: bash -n separately on deploy-common.sh, install.sh, rollback.sh;
+      install/rollback --dry-run; legacy single-phase --apply and malformed
+      confirmation rejected by rollback argument parser; git diff --check.
+PASS (guard only): isolated HTTPS probe rejected this non-VM host before
+      making a connection. This is not execution of its protocol cases.
+
+BLOCKED / NOT RUN (P1-03, P1-04): no matching disposable Ubuntu 22.04
+nginx+systemd runtime available in the offline workspace. Real H1/H2 DATA
+handling, real LoadCredential, cross-UID socket privileges, per-IP/aggregate
+429 and interrupted install/rollback remain unproven. See tests/ISOLATED-LINUX.md.
+No approval report generated; no production approval or readiness claim.
+NO_DEPLOY / NO_COMMIT / NO_PUSH. No external network, ECS, real Keychain,
+QuotaBar install/start or status-service apply, rollback or reload.

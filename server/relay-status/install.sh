@@ -10,15 +10,16 @@ case "${1:---dry-run}" in
         say "After approval: validate current nginx, credentials, account and empty include slots."
         say "Install the isolated collector, timer, API and tmpfiles; start only these new status units."
         say "Verify snapshot and socket; activate only the dedicated 443 location and http limits."
-        say "Verify both includes and nginx -t, then gracefully reload nginx."
+        say "Require the approved complete nginx baseline and candidate-bound isolation report."
+        say "Recheck the complete nginx config, include contexts and exact feature-only delta before reload."
         exit 0 ;;
     --apply) ;;
     *) die "Usage: install.sh [--dry-run|--apply]" ;;
 esac
 
 [[ $(uname -s) == Linux && $(id -u) == 0 ]] || die "--apply requires Linux root."
-nginx_check || die "Initial nginx -t failed; nothing installed or reloaded."
 begin_apply
+nginx_gate inactive || die "Initial nginx review gate failed; nothing installed or reloaded."
 for exe in /usr/bin/python3 /usr/bin/systemctl /usr/bin/openssl; do
     [[ -x "$exe" ]] || die "Required existing system executable is missing."
 done
@@ -63,7 +64,7 @@ install_exit() {
             # Do not leave failed fragments eligible for a future shared reload.
             if [[ -f "$VHOST" ]]; then mv -- "$VHOST" "$BASE/staged-location.conf"; fi
             if [[ -f "$HTTP" ]]; then mv -- "$HTTP" "$BASE/staged-limits.conf"; fi
-            say "Install incomplete; nginx was not reloaded. Review and use rollback.sh --apply."
+            say "Install incomplete; nginx was not reloaded. Review the two-phase rollback procedure."
         else
             say "Reload outcome unknown; keep the status service available and use verified rollback."
         fi
@@ -102,7 +103,7 @@ install -m 0644 "$BASE/templates/limits.conf" "$BASE/staged-limits.conf"
 install -m 0644 "$BASE/templates/location.conf" "$BASE/staged-location.conf"
 mv -- "$BASE/staged-limits.conf" "$HTTP"
 mv -- "$BASE/staged-location.conf" "$VHOST"
-nginx_check && snippets_visible || die "nginx configuration or dedicated include slots failed validation."
+nginx_gate active || die "Approved nginx baseline, feature-only delta or include context did not match."
 reload_attempted=yes
 nginx_reload || die "nginx reload failed; confirm live configuration before further changes."
 say "Status components installed; verify nginx TLS, routing, privacy and response gates separately."

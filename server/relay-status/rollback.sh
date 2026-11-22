@@ -3,17 +3,19 @@ set -euo pipefail
 HERE=$(cd -- "$(dirname -- "$0")" && pwd -P)
 source "$HERE/deploy-common.sh"
 
-[[ $# -le 1 ]] || die "Usage: rollback.sh [--dry-run|--apply]"
+usage="Usage: rollback.sh [--dry-run|--remove-route|--remove-backend --confirmed-live RECEIPT]"
 case "${1:---dry-run}" in
     --dry-run)
+        [[ $# -le 1 ]] || die "$usage"
         say "DRY RUN: no files, nginx or units changed."
-        say "Disable only this feature's nginx snippets; nginx -t, then graceful reload."
-        say "If the check or reload fails, restore snippets and do not stop status units."
-        say "After reload, stop/disable only the new status units; remove their files and digest."
+        say "Phase 1 (--remove-route): verify the approved baseline, withdraw only this route and request reload."
+        say "Independently verify new nginx workers, website health and that the old URL no longer reaches the upstream."
+        say "Phase 2 (--remove-backend --confirmed-live RECEIPT): recheck baseline and worker turnover, then remove the status backend."
         say "Preserve the dedicated identity, source policy and inert shared-vhost include slots."
         exit 0 ;;
-    --apply) ;;
-    *) die "Usage: rollback.sh [--dry-run|--apply]" ;;
+    --remove-route) [[ $# == 1 ]] || die "$usage" ;;
+    --remove-backend) [[ $# == 3 && "$2" == --confirmed-live && "$3" =~ ^[0-9a-f]{32}$ ]] || die "$usage" ;;
+    *) die "$usage" ;;
 esac
 
 begin_apply
@@ -25,23 +27,47 @@ for unit in "${UNITS[@]}"; do
 done
 absent "$TMPFILES" || regular_match "$TMPFILES" "$BASE/templates/quotabar-status.conf" ||
     die "The tmpfiles definition was modified; review it before rollback."
-absent "$HTTP" || regular_match "$HTTP" "$BASE/templates/limits.conf" || die "HTTP snippet changed."
-absent "$VHOST" || regular_match "$VHOST" "$BASE/templates/location.conf" || die "HTTPS snippet changed."
-for file in "$BASE"/rollback-{limits,location}.conf; do
-    absent "$file" || die "Interrupted rollback; inspect staged fragments before continuing."
-done
+absent "$HTTP" || regular_match "$HTTP" "$HERE/nginx/limits.conf" || die "HTTP snippet changed."
+absent "$VHOST" || regular_match "$VHOST" "$HERE/nginx/location.conf" || die "HTTPS snippet changed."
+pending="$BASE/rollback-awaiting-live.json"
+saved_limits="$BASE/rollback-limits.conf"
+saved_location="$BASE/rollback-location.conf"
+absent "$saved_limits" || { absent "$HTTP" && regular_match "$saved_limits" "$HERE/nginx/limits.conf"; } ||
+    die "Unexpected staged HTTP fragment."
+absent "$saved_location" || { absent "$VHOST" && regular_match "$saved_location" "$HERE/nginx/location.conf"; } ||
+    die "Unexpected staged HTTPS fragment."
 
-restore_snippets() {
-    if [[ -f "$BASE/rollback-limits.conf" ]]; then mv -- "$BASE/rollback-limits.conf" "$HTTP"; fi
-    if [[ -f "$BASE/rollback-location.conf" ]]; then mv -- "$BASE/rollback-location.conf" "$VHOST"; fi
-}
-# Staging is reversible until nginx has accepted and reloaded the new config.
-trap 'restore_snippets' EXIT
-if [[ -f "$VHOST" ]]; then mv -- "$VHOST" "$BASE/rollback-location.conf"; fi
-if [[ -f "$HTTP" ]]; then mv -- "$HTTP" "$BASE/rollback-limits.conf"; fi
-nginx_check || die "nginx -t failed; restoring snippets without reload."
-nginx_reload || die "nginx reload failed; restoring snippets; status units left alone."
-trap - EXIT
+if [[ "$1" == --remove-route ]]; then
+    checkfile=$(mktemp -d "$BASE/.rollback.XXXXXX")
+    moved_location=no moved_limits=no reload_attempted=no
+    route_exit() {
+        if [[ "$reload_attempted" == no ]]; then
+            if [[ "$moved_limits" == yes ]]; then mv -- "$saved_limits" "$HTTP"; fi
+            if [[ "$moved_location" == yes ]]; then mv -- "$saved_location" "$VHOST"; fi
+        fi
+        rm -f -- "$checkfile/witness"
+        rmdir -- "$checkfile"
+    }
+    trap route_exit EXIT
+    rm -f -- "$pending"
+    if ! absent "$VHOST"; then mv -- "$VHOST" "$saved_location"; moved_location=yes; fi
+    if ! absent "$HTTP"; then mv -- "$HTTP" "$saved_limits"; moved_limits=yes; fi
+    nginx_workers record "$checkfile/witness" || die "Could not record running nginx workers; no reload."
+    nginx_gate inactive || die "Approved nginx baseline did not match; no reload."
+    reload_attempted=yes
+    nginx_reload || die "Reload outcome unknown; keep the backend and verify nginx before retrying."
+    mv -- "$checkfile/witness" "$pending"
+    say "Reload requested; status backend and credential remain intact."
+    receipt=$(nginx_workers receipt "$pending")
+    say "Only after independent LIVE checks pass, use --remove-backend --confirmed-live $receipt."
+    exit 0
+fi
+
+absent "$HTTP" && absent "$VHOST" || die "Remove the route first; no backend changes."
+nginx_gate inactive || die "Approved nginx baseline did not match; no backend changes."
+[[ -f "$pending" && ! -L "$pending" && $(stat -c '%u %g %a %h' "$pending") == '0 0 600 1' ]] ||
+    die "Phase 1 has no valid receipt; no backend changes."
+nginx_workers verify "$pending" "$3" || die "Live confirmation required; no backend changes."
 
 for unit in "$TIMER" "$API"; do
     if [[ -f "$UNIT_DIR/$unit" ]]; then
@@ -64,7 +90,8 @@ for file in "${UNITS[@]}" quotabar-status.conf limits.conf location.conf; do
     rm -f -- "$BASE/templates/$file"
 done
 rm -f -- "$BASE"/{rollback,staged}-{limits,location}.conf
+rm -- "$pending"
 for dir in "$BASE/templates" "$BASE/nginx/http" "$BASE/nginx/https" "$BASE/nginx" "$BASE"; do
     if [[ -d "$dir" ]]; then rmdir -- "$dir"; fi
 done
-say "Status endpoint removed from nginx configuration. Independently verify the site and the URL."
+say "Confirmed route withdrawal; dedicated status backend removed."
