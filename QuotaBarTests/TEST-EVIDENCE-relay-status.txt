@@ -654,3 +654,52 @@ separate dirty snapshot FAIL (3 failures, 2 errors), not a verified candidate.
 No external network, ECS contact, install, QuotaBar launch, real Keychain read,
 restart, commit, push or deploy. APP-05--08 not in remediation scope; the three
 script reruns above record current evidence, not a rerun of untouched audit HEAD.
+
+== App audit d68c611 APP-01--03 remediation (2026-11-22T18:29:38Z) ==
+Tested the working-tree fix over d68c611256a1ea470eeeec44fa5bd0ccd61c04ea,
+not a new commit. SHA-256 of git diff --binary for RelayStatusClient.swift,
+RelayStatusModels.swift and RelayStatusCheck.swift (in HEAD-relative order):
+898a0fe3bd21f452428e080bc3b5fd87d6836699bc1c75db0b253f39b70d6ce4
+Apple Swift 6.4, macOS 27.2 arm64, local macOS 26.5 SDK (SDKROOT and
+QUOTABAR_SDK). Unmodified test scripts ran in a same-volume archive of HEAD
+with these three files copied in and byte-compared against the working tree.
+
+check-relay-status.sh: PASS.
+  APP-01: HTTP 200 with public,max-age=3600, no Age, and Date one hour after
+  observed_at stayed gray on first load and cleared prior green. With no-store,
+  the stale Date alone failed; sane-but-inconsistent Date also failed. Missing
+  or malformed Date/Cache-Control, +/−1s agreement, fractional observation,
+  expiry from either clock, zero/nonzero/malformed Age, and an intentionally
+  wrong client wall clock were covered by synthetic responses.
+  APP-02: fixed-point microseconds before comparison; both links and summary
+  tested at and on both sides of +5s/90s, including the exact +5.0009s repro.
+  Fractions beyond six digits are rejected; fractional observed_at is covered.
+  APP-03: both links tested for heartbeat_late (90,180] and heartbeat_stale
+  (>180), including 90/180 and adjacent microseconds, null and age-zero
+  contradictions. Unit-state reasons still work without heartbeat evidence;
+  other channel and certificate verified unchanged.
+  Also PASS: existing HTTP/error/polling/replay, strict schema, certificate,
+  helper IPC with synthetic providers, Shanghai time (New York and UTC),
+  and version 1.8.28/41.
+  RENDER=PASS: 17 offscreen PNGs, including 448x110 pt fragment scroll.
+  Four yellow PNGs updated for a 120s-old Feishu heartbeat; 13 PNGs matched
+  tracked bytes. Inspected light and dark yellow panel fragments. No live
+  menu bar, desktop glass, production MenuPanel bottom-scroll or VoiceOver
+  evidence; fragment previews do not replace independent visual review.
+
+Other App checks: run.sh PASS (278 checks), check-memory.sh PASS,
+check-relay-signature.sh PASS (disposable ad-hoc fixtures only), optimized
+arm64 macOS 14 compile/link PASS (source list matches launcher; binary not
+launched), plist/project lint, bash -n and git diff --check PASS. Existing
+Keychain deprecation and UsageClient concurrency warnings remain. Initial
+temporary-directory override triggered swiftc SIGTRAP; scripts worked with
+the default compiler temp location and the local 26.5 SDK. GO-only preview
+and candidate packaging scripts NOT RUN; no worktree guard bypass.
+
+Server: exact baseline 3b4d5d2 PASS (43); exact e7ff870 FAIL (43 run;
+3 failures, 2 errors). See the separate server TEST-EVIDENCE.txt for the
+failure details. Live nginx Date vs collector/API time agreement is NOT RUN;
+disagreement beyond the rounding tolerance intentionally yields gray.
+Only this audit's APP-01--03 addressed; APP-04--07 remain out of scope.
+No external network, ECS contact, real Keychain access, install, QuotaBar
+launch, restart, commit, push or deploy by this remediation.

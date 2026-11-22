@@ -53,10 +53,28 @@ enum RelayStatusClient {
                 }
                 guard age.utf8.allSatisfy({ $0 == 48 }) else { throw RelayIssue.expired }
             }
-            guard response.mimeType?.lowercased() == "application/json", data.count <= maxPayloadBytes else {
+            guard response.value(forHTTPHeaderField: "Cache-Control")?
+                    .trimmingCharacters(in: .whitespaces).lowercased() == "no-store",
+                  response.mimeType?.lowercased() == "application/json", data.count <= maxPayloadBytes,
+                  let header = response.value(forHTTPHeaderField: "Date"), header.utf8.count == 29 else {
                 throw RelayIssue.badResponse
             }
-            return try RelaySnapshot.parse(data)
+            let formatter = httpDateFormatter()
+            guard let date = formatter.date(from: header), formatter.string(from: date) == header else {
+                throw RelayIssue.badResponse
+            }
+            let snapshot = try RelaySnapshot.parse(data)
+            let second = RelayTimestamp.microsecondsPerSecond
+            let dateAge = Int64(date.timeIntervalSince1970) * second - snapshot.observation.microsecondsSince1970
+            let freshness = Int(RelaySnapshot.freshness)
+            guard snapshot.age < freshness, dateAge < Int64(freshness) * second else { throw RelayIssue.expired }
+            // HTTP Date and snapshot_age_s count whole seconds; the two
+            // rounded observations can disagree by one second. Never use
+            // the Mac wall clock to decide whether a snapshot is fresh.
+            guard dateAge > -second, abs(dateAge - Int64(snapshot.age) * second) <= second else {
+                throw RelayIssue.badResponse
+            }
+            return snapshot
         case 401: throw RelayIssue.unauthorized
         case 429: throw RelayIssue.rateLimited(retryAfter(response.value(forHTTPHeaderField: "Retry-After"), now: now))
         case 500...599: throw RelayIssue.unavailable
@@ -81,13 +99,17 @@ enum RelayStatusClient {
         if !header.isEmpty, header.utf8.allSatisfy({ (48...57).contains($0) }),
            let seconds = Double(header), seconds.isFinite { return seconds }
 
+        if let date = httpDateFormatter().date(from: header) { return max(0, date.timeIntervalSince(now)) }
+        return 60
+    }
+
+    private static func httpDateFormatter() -> DateFormatter {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
-        if let date = formatter.date(from: header) { return max(0, date.timeIntervalSince(now)) }
-        return 60
+        return formatter
     }
 }
 

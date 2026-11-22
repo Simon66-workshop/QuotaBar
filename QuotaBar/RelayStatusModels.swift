@@ -48,6 +48,16 @@ enum RelayReason: String {
         case .sourceUnavailable: return .unknown
         }
     }
+
+    func matchesHeartbeatAge(_ age: Int64?) -> Bool {
+        let second = RelayTimestamp.microsecondsPerSecond
+        switch self {
+        case .ready: return age.map { (-5 * second...90 * second).contains($0) } == true
+        case .heartbeatLate: return age.map { $0 > 90 * second && $0 <= 180 * second } == true
+        case .heartbeatStale: return age.map { $0 > 180 * second } == true
+        default: return true // Independent evidence (unit state, pong, lease, etc.).
+        }
+    }
 }
 
 struct RelayLink: Equatable {
@@ -61,16 +71,17 @@ struct RelayLink: Equatable {
         case state, reason, lastHeartbeat = "last_heartbeat_at"
     }
 
-    init(from decoder: Decoder, observedAt: Date, channel: Channel) throws {
+    init(from decoder: Decoder, observedAt: RelayTimestamp, channel: Channel) throws {
         let values = try decoder.relayFields(Keys.self)
         let wireState = RelayLinkState(rawValue: try values.decode(String.self, forKey: .state))
         let wireReason = RelayReason(rawValue: try values.decode(String.self, forKey: .reason))
-        lastHeartbeat = try values.decode(Date?.self, forKey: .lastHeartbeat)
+        let heartbeat = try values.decode(RelayTimestamp?.self, forKey: .lastHeartbeat)
+        lastHeartbeat = heartbeat?.date
         // Check evidence at collection time; snapshot freshness is a separate gate.
-        let heartbeatAge = lastHeartbeat.map { observedAt.timeIntervalSince($0) }
+        let heartbeatAge = heartbeat.map { observedAt.microsecondsSince1970 - $0.microsecondsSince1970 }
         if let wireState, let wireReason, wireReason.state == wireState,
            channel == .wecom || (wireReason != .pongStale && wireReason != .pongLate),
-           wireState != .ok || heartbeatAge.map({ (-5...90).contains($0) }) == true {
+           wireReason.matchesHeartbeatAge(heartbeatAge) {
             state = wireState
             reason = wireReason
         } else {
@@ -93,7 +104,7 @@ struct RelayCertificate: Equatable {
     init(from decoder: Decoder, observedAt: Date) throws {
         let values = try decoder.relayFields(Keys.self)
         let wireState = State(rawValue: try values.decode(String.self, forKey: .state)) ?? .unknown
-        let expiry = try values.decode(Date?.self, forKey: .expiresAt)
+        let expiry = try values.decode(RelayTimestamp?.self, forKey: .expiresAt)?.date
         let days = try values.decode(Int?.self, forKey: .daysRemaining)
         if let expiry, let days, Self.matchesLifetime(wireState, days: days, seconds: expiry.timeIntervalSince(observedAt)) {
             state = wireState
@@ -125,7 +136,8 @@ struct RelayCertificate: Equatable {
 
 struct RelaySnapshot: Decodable, Equatable {
     static let freshness: TimeInterval = 75
-    let observedAt: Date
+    let observation: RelayTimestamp
+    var observedAt: Date { observation.date }
     let age: Int
     let feishu: RelayLink
     let wecom: RelayLink
@@ -141,12 +153,12 @@ struct RelaySnapshot: Decodable, Equatable {
         guard try values.decode(Int.self, forKey: .version) == 1 else {
             throw RelayIssue.unsupportedSchema
         }
-        observedAt = try values.decode(Date.self, forKey: .observedAt)
+        observation = try values.decode(RelayTimestamp.self, forKey: .observedAt)
         age = try values.decode(Int.self, forKey: .age)
         guard age >= 0 else { throw RelayIssue.badResponse }
-        feishu = try RelayLink(from: values.superDecoder(forKey: .feishu), observedAt: observedAt, channel: .feishu)
-        wecom = try RelayLink(from: values.superDecoder(forKey: .wecom), observedAt: observedAt, channel: .wecom)
-        certificate = try RelayCertificate(from: values.superDecoder(forKey: .certificate), observedAt: observedAt)
+        feishu = try RelayLink(from: values.superDecoder(forKey: .feishu), observedAt: observation, channel: .feishu)
+        wecom = try RelayLink(from: values.superDecoder(forKey: .wecom), observedAt: observation, channel: .wecom)
+        certificate = try RelayCertificate(from: values.superDecoder(forKey: .certificate), observedAt: observation.date)
     }
 
     var summary: RelayLinkState { .summary(feishu.state, wecom.state) }
@@ -159,30 +171,6 @@ struct RelaySnapshot: Decodable, Equatable {
         let decoder = JSONDecoder()
         var syntax = RelayV1JSON(bytes: Array(data))
         try syntax.check(decoder: decoder)
-        decoder.dateDecodingStrategy = .custom { decoder in
-            let value = try decoder.singleValueContainer().decode(String.self)
-            guard value.range(of: #"\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|\+00:00)\z"#,
-                              options: .regularExpression) != nil else { throw RelayIssue.badResponse }
-            // ISO8601DateFormatter normalizes some invalid dates. Check the
-            // proleptic Gregorian fields before asking Foundation to parse.
-            let bytes = Array(value.utf8.prefix(19))
-            func number(_ range: Range<Int>) -> Int {
-                range.reduce(0) { $0 * 10 + Int(bytes[$1] - 48) }
-            }
-            let year = number(0..<4), month = number(5..<7), day = number(8..<10)
-            let leap = year.isMultiple(of: 4) && (!year.isMultiple(of: 100) || year.isMultiple(of: 400))
-            let days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-            guard year > 0, (1...12).contains(month), (1...days[month - 1]).contains(day),
-                  number(11..<13) < 24, number(14..<16) < 60, number(17..<19) < 60 else {
-                throw RelayIssue.badResponse
-            }
-            let formatter = ISO8601DateFormatter()
-            formatter.timeZone = TimeZone(secondsFromGMT: 0)
-            if value.contains(".") { formatter.formatOptions.insert(.withFractionalSeconds) }
-            guard let date = formatter.date(from: value),
-                  formatter.string(from: date).prefix(19) == value.prefix(19) else { throw RelayIssue.badResponse }
-            return date
-        }
         do { return try decoder.decode(Self.self, from: data) }
         catch let issue as RelayIssue { throw issue }
         catch { throw RelayIssue.badResponse }
@@ -195,6 +183,45 @@ struct RelaySnapshot: Decodable, Equatable {
         formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")!
         formatter.dateFormat = "MM-dd HH:mm:ss"
         return formatter.string(from: date)
+    }
+}
+
+struct RelayTimestamp: Decodable, Equatable {
+    static let microsecondsPerSecond: Int64 = 1_000_000
+    let microsecondsSince1970: Int64
+
+    var date: Date {
+        Date(timeIntervalSince1970: Double(microsecondsSince1970) / Double(Self.microsecondsPerSecond))
+    }
+
+    init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer().decode(String.self)
+        // Whole seconds plus up to six decimal digits; reject excess precision
+        // instead of rounding a timestamp across a heartbeat boundary.
+        guard value.range(of: #"\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?(Z|\+00:00)\z"#,
+                          options: .regularExpression) != nil else { throw RelayIssue.badResponse }
+        // ISO8601DateFormatter normalizes some invalid dates. Check the
+        // proleptic Gregorian fields before asking Foundation to parse.
+        let bytes = Array(value.utf8)
+        func number(_ range: Range<Int>) -> Int {
+            range.reduce(0) { $0 * 10 + Int(bytes[$1] - 48) }
+        }
+        let year = number(0..<4), month = number(5..<7), day = number(8..<10)
+        let leap = year.isMultiple(of: 4) && (!year.isMultiple(of: 100) || year.isMultiple(of: 400))
+        let days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        guard year > 0, (1...12).contains(month), (1...days[month - 1]).contains(day),
+              number(11..<13) < 24, number(14..<16) < 60, number(17..<19) < 60 else {
+            throw RelayIssue.badResponse
+        }
+        let whole = String(value.prefix(19)) + "Z"
+        let formatter = ISO8601DateFormatter()
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        guard let date = formatter.date(from: whole),
+              formatter.string(from: date) == whole else { throw RelayIssue.badResponse }
+        let fraction = bytes[19] == 46 ? bytes.dropFirst(20).prefix(while: { (48...57).contains($0) }) : []
+        var micros = fraction.reduce(Int64(0)) { $0 * 10 + Int64($1 - 48) }
+        for _ in fraction.count..<6 { micros *= 10 }
+        microsecondsSince1970 = Int64(date.timeIntervalSince1970) * Self.microsecondsPerSecond + micros
     }
 }
 

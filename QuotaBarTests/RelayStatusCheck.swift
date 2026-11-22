@@ -12,6 +12,9 @@ struct RelayStatusCheck {
       "certificate":{"state":"ok","expires_at":"2027-02-20T17:15:00Z","days_remaining":90}
     }
     """
+    private static let freshHeaders = [
+        "Content-Type": "application/json", "Cache-Control": "no-store", "Date": "Sun, 22 Nov 2026 17:15:02 GMT"
+    ]
 
     @MainActor
     static func main() async throws {
@@ -63,9 +66,12 @@ struct RelayStatusCheck {
         }
     }
 
-    private static func variant(_ state: String, _ reason: String) throws -> RelaySnapshot {
-        try parse(good.replacingOccurrences(of: #""state":"ok","reason":"ready","last_heartbeat_at":"2026-11-22T17:14:51Z""#,
-            with: #""state":"\#(state)","reason":"\#(reason)","last_heartbeat_at":"2026-11-22T17:14:51Z""#))
+    private static func variant(_ state: String, _ reason: String,
+                                heartbeat: String? = "2026-11-22T17:14:51Z",
+                                original: String = "2026-11-22T17:14:51Z") throws -> RelaySnapshot {
+        let value = heartbeat.map { "\"\($0)\"" } ?? "null"
+        return try parse(good.replacingOccurrences(of: #""state":"ok","reason":"ready","last_heartbeat_at":"\#(original)""#,
+            with: #""state":"\#(state)","reason":"\#(reason)","last_heartbeat_at":\#(value)"#))
     }
 
     private static func models(_ snapshot: RelaySnapshot) throws {
@@ -79,8 +85,8 @@ struct RelayStatusCheck {
         reject(.badResponse) { try parse(good.replacingOccurrences(of: #""snapshot_age_s": 2"#, with: #""snapshot_age_s": -2"#)) }
         let cases: [(String, String, RelayLinkState)] = [
             ("ok", "ready", .ok), ("down", "unit_down", .down), ("down", "paused_by_lease", .down),
-            ("down", "heartbeat_stale", .down), ("down", "pong_stale", .unknown),
-            ("degraded", "transitioning", .degraded), ("degraded", "heartbeat_late", .degraded),
+            ("down", "heartbeat_stale", .unknown), ("down", "pong_stale", .unknown),
+            ("degraded", "transitioning", .degraded), ("degraded", "heartbeat_late", .unknown),
             ("degraded", "reconnecting", .degraded), ("degraded", "pong_late", .unknown),
             ("degraded", "lease_conflict", .degraded), ("unknown", "source_unavailable", .unknown),
             ("future", "ready", .unknown), ("ok", "future", .unknown), ("ok", "pong_late", .unknown),
@@ -120,10 +126,15 @@ struct RelayStatusCheck {
     private static func heartbeatBoundaries(_ snapshot: RelaySnapshot) throws {
         let cases: [(String, RelayLinkState)] = [
             ("2026-11-22T17:13:29Z", .unknown), // 91s before observation
+            ("2026-11-22T17:13:29.999999Z", .unknown),
             ("2026-11-22T17:13:30Z", .ok),      // 90s
+            ("2026-11-22T17:13:30.000001Z", .ok),
             ("2026-11-22T17:13:31Z", .ok),      // 89s
             ("2026-11-22T17:15:04Z", .ok),      // 4s after observation
+            ("2026-11-22T17:15:04.999999Z", .ok),
             ("2026-11-22T17:15:05Z", .ok),      // 5s
+            ("2026-11-22T17:15:05.000001Z", .unknown),
+            ("2026-11-22T17:15:05.0009Z", .unknown), // Exact audit reproduction
             ("2026-11-22T17:15:06Z", .unknown), // 6s
         ]
         let links: [(String, KeyPath<RelaySnapshot, RelayLink>, KeyPath<RelaySnapshot, RelayLink>)] = [
@@ -139,12 +150,45 @@ struct RelayStatusCheck {
                 precondition(parsed[keyPath: otherLink] == snapshot[keyPath: otherLink] && parsed.summary == expected)
                 precondition(parsed.certificate == snapshot.certificate)
             }
+            for (timestamp, expected) in [
+                ("2026-11-22T17:13:30.000899Z", RelayLinkState.unknown),
+                ("2026-11-22T17:13:30.000900Z", .ok),
+                ("2026-11-22T17:15:05.000900+00:00", .ok),
+                ("2026-11-22T17:15:05.000901+00:00", .unknown),
+            ] {
+                let parsed = try parse(good.replacingOccurrences(of: original, with: timestamp)
+                    .replacingOccurrences(of: "2026-11-22T17:15:00Z", with: "2026-11-22T17:15:00.000900Z"))
+                precondition(parsed[keyPath: changedLink].state == expected && parsed.summary == expected &&
+                             parsed[keyPath: otherLink] == snapshot[keyPath: otherLink])
+            }
+            for (reason, heartbeat, expected) in [
+                (RelayReason.heartbeatLate, nil, RelayLinkState.unknown),
+                (.heartbeatLate, "2026-11-22T17:15:00Z", .unknown),
+                (.heartbeatLate, "2026-11-22T17:13:30Z", .unknown), // 90s
+                (.heartbeatLate, "2026-11-22T17:13:29.999999Z", .degraded),
+                (.heartbeatLate, "2026-11-22T17:12:00Z", .degraded), // 180s
+                (.heartbeatLate, "2026-11-22T17:11:59.999999Z", .unknown),
+                (.heartbeatStale, nil, .unknown),
+                (.heartbeatStale, "2026-11-22T17:15:00Z", .unknown), // Exact audit reproduction
+                (.heartbeatStale, "2026-11-22T17:12:00Z", .unknown),
+                (.heartbeatStale, "2026-11-22T17:11:59.999999Z", .down),
+                (.unitDown, nil, .down),
+                (.unitDown, "2026-11-22T17:15:00Z", .down),
+                (.transitioning, nil, .degraded),
+            ] {
+                let parsed = try variant(reason.state.rawValue, reason.rawValue, heartbeat: heartbeat, original: original)
+                let link = parsed[keyPath: changedLink]
+                precondition(link.state == expected && link.reason == (expected == .unknown ? .sourceUnavailable : reason))
+                precondition(parsed.summary == expected && parsed[keyPath: otherLink] == snapshot[keyPath: otherLink] &&
+                             parsed.certificate == snapshot.certificate)
+            }
         }
         let auditCase = try parse(good.replacingOccurrences(of: "2026-11-22T17:14:51Z", with: "2026-11-22T16:15:00Z")
             .replacingOccurrences(of: "2026-11-22T17:14:47Z", with: "2026-11-23T17:15:00Z"))
         precondition(auditCase.age == 2 && auditCase.feishu.state == .unknown &&
                      auditCase.wecom.state == .unknown && auditCase.summary == .unknown)
-        print("HEARTBEAT_BOUNDARIES=PASS · both paths: 89/90/91s old, +4/+5/+6s future")
+        print("AUDIT_D68C611_APP_02=PASS · both paths: inclusive +5s/90s and microsecond edges, including +5.0009s")
+        print("AUDIT_D68C611_APP_03=PASS · both paths: late (90,180]s, stale >180s; missing/contradictory evidence gray; unit evidence unchanged")
     }
 
     private static func certificateLifetime(_ snapshot: RelaySnapshot) throws {
@@ -186,7 +230,8 @@ struct RelayStatusCheck {
                          "2026-11-22T17:14:47Z", "2027-02-20T17:15:00Z"]
         for bad in ["2026-02-30T17:15:00Z", "2026-02-29T17:15:00Z",
                     "1900-02-29T17:15:00Z", "2026-04-31T17:15:00Z",
-                    "2026-11-22T24:00:00Z", "2026-11-22T17:15:00Z\n"] {
+                    "2026-11-22T24:00:00Z", "2026-11-22T17:15:00Z\n",
+                    "2026-11-22T17:15:00.0000001Z"] {
             let wire = bad.replacingOccurrences(of: "\n", with: #"\n"#)
             for original in originals {
                 reject(.badResponse) { try parse(good.replacingOccurrences(of: original, with: wire)) }
@@ -223,23 +268,55 @@ struct RelayStatusCheck {
         precondition(refused && task.state == .suspended)
         let data = Data(good.utf8)
         let fixtureNow = Date(timeIntervalSince1970: 0)
-        func send(_ status: Int, _ headers: [String: String] = ["Content-Type": "application/json"]) throws -> RelaySnapshot {
-            let response = HTTPURLResponse(url: RelayStatusClient.endpoint, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
-            return try RelayStatusClient.decode(data, response: response, now: fixtureNow)
+        func send(_ status: Int, _ headers: [String: String] = [:], body: Data = data) throws -> RelaySnapshot {
+            let response = HTTPURLResponse(url: RelayStatusClient.endpoint, statusCode: status, httpVersion: "HTTP/1.1",
+                                           headerFields: headers)!
+            return try RelayStatusClient.decode(body, response: response, now: fixtureNow)
         }
-        let valid = try send(200)
+        func headers(_ key: String, _ value: String?) -> [String: String] {
+            var fields = freshHeaders
+            fields[key] = value
+            return fields
+        }
+        let valid = try send(200, freshHeaders)
         precondition(valid == snapshot)
         for zero in ["0", "000", " 0 "] {
-            let zeroAge = try send(200, ["Content-Type": "application/json", "Age": zero])
+            let zeroAge = try send(200, headers("Age", zero))
             precondition(zeroAge == snapshot)
         }
         for age in ["1", "120", "99999999999999999999999999999"] {
-            reject(.expired) { try send(200, ["Content-Type": "application/json", "aGe": age]) }
+            reject(.expired) { try send(200, headers("aGe", age)) }
         }
         for age in ["", "-1", "+0", "0.0", "0, 0", "0, 120"] {
-            reject(.badResponse) { try send(200, ["Content-Type": "application/json", "Age": age]) }
+            reject(.badResponse) { try send(200, headers("Age", age)) }
         }
-        reject(.badResponse) { try send(200, ["Content-Type": "text/html"]) }
+        reject(.badResponse) { try send(200, headers("Content-Type", "text/html")) }
+        for cache: String? in [nil, "public, max-age=3600", "x-no-store", "no-store=1", "no-store, max-age=3600"] {
+            reject(.badResponse) { try send(200, headers("Cache-Control", cache)) }
+        }
+        let upperCache = try send(200, headers("Cache-Control", " NO-STORE "))
+        precondition(upperCache == snapshot)
+        for date: String? in [nil, "not a date", "Mon, 22 Nov 2026 17:15:02 GMT",
+                              "Fri, 31 Apr 2026 17:15:02 GMT",
+                              "Sun, 22 Nov 1000000000000 17:15:02 GMT",
+                              "Sun, 22 Nov 2026 17:15:02 GMT, Sun, 22 Nov 2026 17:15:02 GMT",
+                              "Sun, 22 Nov 2026 17:15:00 GMT", "Sun, 22 Nov 2026 17:15:04 GMT"] {
+            reject(.badResponse) { try send(200, headers("Date", date)) }
+        }
+        for date in ["Sun, 22 Nov 2026 17:15:01 GMT", "Sun, 22 Nov 2026 17:15:03 GMT"] {
+            let rounded = try send(200, headers("Date", date))
+            precondition(rounded == snapshot)
+        }
+        let fractional = Data(good.replacingOccurrences(of: "2026-11-22T17:15:00Z", with: "2026-11-22T17:15:00.999999Z")
+            .replacingOccurrences(of: #""snapshot_age_s": 2"#, with: #""snapshot_age_s": 0"#).utf8)
+        let sameSecond = try send(200, headers("Date", "Sun, 22 Nov 2026 17:15:00 GMT"), body: fractional)
+        precondition(sameSecond.summary == .ok)
+        let almostExpired = Data(good.replacingOccurrences(of: #""snapshot_age_s": 2"#, with: #""snapshot_age_s": 74"#).utf8)
+        let stillFresh = try send(200, headers("Date", "Sun, 22 Nov 2026 17:16:14 GMT"), body: almostExpired)
+        precondition(stillFresh.expiresAt(requestStartedAt: 10) == 11)
+        reject(.expired) { try send(200, headers("Date", "Sun, 22 Nov 2026 17:16:15 GMT"), body: almostExpired) }
+        let atExpiry = Data(good.replacingOccurrences(of: #""snapshot_age_s": 2"#, with: #""snapshot_age_s": 75"#).utf8)
+        reject(.expired) { try send(200, headers("Date", "Sun, 22 Nov 2026 17:16:14 GMT"), body: atExpiry) }
         reject(.unauthorized) { try send(401) }
         reject(.httpError) { try send(302) }
         reject(.httpError) { try send(404) }
@@ -434,7 +511,7 @@ struct RelayStatusCheck {
             (#""days_remaining":90"#, #""days_remaining":90"#),
         ]
         let http = HTTPURLResponse(url: RelayStatusClient.endpoint, statusCode: 200, httpVersion: nil,
-                                   headerFields: ["Content-Type": "application/json"])!
+                                   headerFields: freshHeaders)!
         var malformed = [
             good.replacingOccurrences(of: "}\n}", with: "},\n}"),
             good.replacingOccurrences(of: #""2026-11-22T17:14:51Z"}"#, with: #""2026-11-22T17:14:51Z",}"#),
@@ -475,19 +552,37 @@ struct RelayStatusCheck {
 
     @MainActor
     private static func cachedAtStartup() async {
-        let response = HTTPURLResponse(url: RelayStatusClient.endpoint, statusCode: 200, httpVersion: nil,
-                                       headerFields: ["Content-Type": "application/json", "Age": "120"])!
-        var calls = 0
-        let store = RelayStatusStore(loadSnapshot: {
-            calls += 1
-            return try RelayStatusClient.decode(Data(good.utf8), response: response)
-        }, now: { 0 }, jitter: { 0 })
-        defer { store.stop() }
-        precondition(store.display.summary == .unknown)
-        store.start(monitorNetwork: false)
-        await store.waitForAttempt()
-        precondition(calls == 1 && store.display == .unavailable(.expired) && store.display.summary == .unknown)
-        print("AUDIT_APP_02=PASS · cold start HTTP 200/Age: 120/snapshot_age_s: 2 never becomes green")
+        let staleDate = "Sun, 22 Nov 2026 18:15:00 GMT"
+        for (overrides, expected) in [
+            (["Age": "120"], RelayIssue.expired),
+            (["Date": staleDate, "Cache-Control": "public, max-age=3600"], .badResponse), // Exact audit reproduction
+            (["Date": staleDate], .expired),
+            (["Date": "Sun, 22 Nov 2026 17:15:04 GMT"], .badResponse),
+        ] {
+            let response = HTTPURLResponse(url: RelayStatusClient.endpoint, statusCode: 200, httpVersion: nil,
+                headerFields: freshHeaders.merging(overrides) { _, override in override })!
+            let freshResponse = HTTPURLResponse(url: RelayStatusClient.endpoint, statusCode: 200, httpVersion: nil,
+                                                headerFields: freshHeaders)!
+            var calls = 0
+            var time: TimeInterval = 0
+            let store = RelayStatusStore(loadSnapshot: {
+                calls += 1
+                return try RelayStatusClient.decode(Data(good.utf8), response: calls == 2 ? freshResponse : response)
+            }, now: { time }, jitter: { 0 })
+            defer { store.stop() }
+            precondition(store.display.summary == .unknown)
+            store.start(monitorNetwork: false)
+            await store.waitForAttempt()
+            precondition(calls == 1 && store.display == .unavailable(expected) && store.display.summary == .unknown)
+            time += RelayPollTiming.delay(failures: 1, jitter: 0)
+            store.clockAdvanced()
+            await store.waitForAttempt()
+            precondition(calls == 2 && store.display.summary == .ok)
+            store.manualRefresh()
+            await store.waitForAttempt()
+            precondition(calls == 3 && store.display == .unavailable(expected) && store.display.summary == .unknown)
+        }
+        print("AUDIT_D68C611_APP_01=PASS · cache/Date contradictions (including 1h-old and no Age) gray at cold start and clear prior green")
     }
 
     private static func interactionAllowed() -> Bool {
@@ -507,7 +602,8 @@ struct RelayStatusCheck {
     private static func render(_ output: URL, green: RelaySnapshot) throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let displays: [(String, RelayDisplay)] = [
-            ("green", .live(green)), ("yellow", .live(try variant("degraded", "heartbeat_late"))),
+            ("green", .live(green)),
+            ("yellow", .live(try variant("degraded", "heartbeat_late", heartbeat: "2026-11-22T17:13:00Z"))),
             ("red", .live(try variant("down", "paused_by_lease"))), ("gray", .unavailable(.unauthorized))
         ]
         var sectionHeight: CGFloat?
