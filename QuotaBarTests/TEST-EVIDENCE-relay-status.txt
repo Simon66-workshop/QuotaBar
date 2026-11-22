@@ -547,3 +547,31 @@ STATIC=PASS · launcher source list, plist and Xcode versions, 17 PNG signatures
 
 == Visual inspection scope ==
 Inspected relay-panel-light-yellow.png, relay-panel-dark-gray.png and relay-panel-dark-short-scrolled.png; no live menu-bar, VoiceOver or glass-material acceptance was performed.
+
+== APP-01 / APP-02 audit follow-up (2026-11-22T17:46:19Z, App base 1527824) ==
+macOS 27.2 (26B123), arm64, Apple Swift 6.4, MacOSX26.5 SDK.
+check-relay-status.sh (unchanged script, isolated same-volume copy): PASS.
+  APP_01=PASS: both links checked against observed_at at 89/90/91 seconds old
+  and +4/+5/+6 seconds ahead; 2s-old audit snapshot with -1h/+1d heartbeats is gray.
+  APP_02=PASS: 16 certificate cases, including exact expiry, +/-1s, 14-day
+  threshold, full-day flooring, nil fields, and the 2025 expiry/90-day audit
+  repro. Contradictions clear only certificate fields. The calculation uses
+  transmitted observed_at, not the client wall clock or elapsed snapshot age.
+  V1_PARSE, HTTP_POLICY (synthetic), POLLING (injected), VERSION: PASS.
+  SHANGHAI_TIME: PASS, identical for America/New_York and UTC.
+  RENDER: PASS, 17 offscreen PNGs; byte-identical to tracked Previews.
+  Short viewport: 448x110 pt, 615 contrasting samples. No PNGs replaced.
+run.sh: PASS, 278 usage/menu-bar/PanelFit regression checks.
+check-memory.sh: PASS, sampler agreed with native page counters.
+Full swiftc executable link (arm64 Mach-O): PASS, not launched or packaged;
+  pre-existing Keychain deprecation and UsageClient concurrency warnings remain.
+check-google.sh: stopped at the existing GO-only worktree guard (exit 1).
+Candidate packaging not run; no guard bypass. plutil, bash -n, diff --check: PASS.
+No proof of live menu-bar/VoiceOver/glass, production request redirects, Keychain
+ACL behavior, or complete production bottom-band scrolling. APP-03 through APP-06
+unchanged. Server baseline evidence is in the separate server worktree.
+Compatibility note: if a server rounds observed_at to whole seconds but computes
+days_remaining from fractional seconds, an inconsistent exact-day boundary is
+intentionally shown as unknown until a consistent observation arrives.
+No external network, ECS access, real Keychain read, installation, QuotaBar launch,
+restart, commit, push or deploy.

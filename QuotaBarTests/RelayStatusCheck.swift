@@ -76,19 +76,79 @@ struct RelayStatusCheck {
         }
         let noHeartbeat = try parse(good.replacingOccurrences(of: #""2026-11-22T17:14:51Z""#, with: "null"))
         precondition(noHeartbeat.feishu.lastHeartbeat == nil && noHeartbeat.summary == .unknown)
+        try heartbeatBoundaries(snapshot)
         let ordered: [RelayLinkState] = [.ok, .unknown, .degraded, .down]
         for (i, a) in ordered.enumerated() {
             for (j, b) in ordered.enumerated() {
                 precondition(RelayLinkState.summary(a, b) == ordered[max(i, j)])
             }
         }
-        let expiredCert = try parse(good.replacingOccurrences(of: #""state":"ok","expires_at""#, with: #""state":"expired","expires_at""#)
-            .replacingOccurrences(of: #""days_remaining":90"#, with: #""days_remaining":-1"#))
-        precondition(expiredCert.certificate.label == "已过期" && expiredCert.summary == .ok)
-        let expiring = try parse(good.replacingOccurrences(of: #""state":"ok","expires_at""#, with: #""state":"expiring","expires_at""#)
-            .replacingOccurrences(of: #""days_remaining":90"#, with: #""days_remaining":0"#))
-        precondition(expiring.certificate.label == "不足 1 天" && expiring.summary == .ok)
+        try certificateLifetime(snapshot)
         print("V1_PARSE=PASS · schema, strict keys, malformed data, enum mapping, all 16 priority pairs, certificate independence")
+    }
+
+    private static func heartbeatBoundaries(_ snapshot: RelaySnapshot) throws {
+        let cases: [(String, RelayLinkState)] = [
+            ("2026-11-22T17:13:29Z", .unknown), // 91s before observation
+            ("2026-11-22T17:13:30Z", .ok),      // 90s
+            ("2026-11-22T17:13:31Z", .ok),      // 89s
+            ("2026-11-22T17:15:04Z", .ok),      // 4s after observation
+            ("2026-11-22T17:15:05Z", .ok),      // 5s
+            ("2026-11-22T17:15:06Z", .unknown), // 6s
+        ]
+        let links: [(String, KeyPath<RelaySnapshot, RelayLink>, KeyPath<RelaySnapshot, RelayLink>)] = [
+            ("2026-11-22T17:14:51Z", \.feishu, \.wecom),
+            ("2026-11-22T17:14:47Z", \.wecom, \.feishu),
+        ]
+        for (original, changedLink, otherLink) in links {
+            for (timestamp, expected) in cases {
+                let parsed = try parse(good.replacingOccurrences(of: original, with: timestamp))
+                let link = parsed[keyPath: changedLink]
+                precondition(link.state == expected && link.reason == (expected == .ok ? .ready : .sourceUnavailable),
+                             "heartbeat boundary: \(timestamp)")
+                precondition(parsed[keyPath: otherLink] == snapshot[keyPath: otherLink] && parsed.summary == expected)
+                precondition(parsed.certificate == snapshot.certificate)
+            }
+        }
+        let auditCase = try parse(good.replacingOccurrences(of: "2026-11-22T17:14:51Z", with: "2026-11-22T16:15:00Z")
+            .replacingOccurrences(of: "2026-11-22T17:14:47Z", with: "2026-11-23T17:15:00Z"))
+        precondition(auditCase.age == 2 && auditCase.feishu.state == .unknown &&
+                     auditCase.wecom.state == .unknown && auditCase.summary == .unknown)
+        print("APP_01=PASS · both paths: 89/90/91s old, +4/+5/+6s future, and audit repro")
+    }
+
+    private static func certificateLifetime(_ snapshot: RelaySnapshot) throws {
+        let cases: [(String, String?, Int?, RelayCertificate.State, String)] = [
+            ("ok", "2026-12-06T17:15:01Z", 14, .ok, "剩余 14 天"),
+            ("expiring", "2026-12-06T17:15:00Z", 14, .expiring, "剩余 14 天"),
+            ("expiring", "2026-12-06T17:14:59Z", 13, .expiring, "剩余 13 天"),
+            ("expiring", "2026-11-23T17:15:00Z", 1, .expiring, "剩余 1 天"),
+            ("expiring", "2026-11-23T17:14:59Z", 0, .expiring, "不足 1 天"),
+            ("expiring", "2026-11-22T17:15:01Z", 0, .expiring, "不足 1 天"),
+            ("expired", "2026-11-22T17:15:00Z", 0, .expired, "已过期"),
+            ("expired", "2026-11-22T17:14:59Z", -1, .expired, "已过期"),
+            ("ok", "2025-11-22T17:15:00Z", 90, .unknown, "未知"), // Audit repro
+            ("ok", "2027-02-20T17:15:00Z", 89, .unknown, "未知"),
+            ("ok", "2026-12-06T17:15:00Z", 14, .unknown, "未知"),
+            ("expired", "2026-11-22T17:15:01Z", 0, .unknown, "未知"),
+            ("expired", "2026-11-22T17:14:59Z", 0, .unknown, "未知"),
+            ("ok", nil, 90, .unknown, "未知"),
+            ("ok", "2027-02-20T17:15:00Z", nil, .unknown, "未知"),
+            ("unknown", nil, nil, .unknown, "未知"),
+        ]
+        for (state, expiry, days, expected, label) in cases {
+            let expiryJSON = expiry.map { "\"\($0)\"" } ?? "null"
+            let daysJSON = days.map { String($0) } ?? "null"
+            let parsed = try parse(good.replacingOccurrences(
+                of: #"{"state":"ok","expires_at":"2027-02-20T17:15:00Z","days_remaining":90}"#,
+                with: #"{"state":"\#(state)","expires_at":\#(expiryJSON),"days_remaining":\#(daysJSON)}"#))
+            let cert = parsed.certificate
+            precondition(cert.state == expected && cert.label == label, "certificate lifetime: \(state) \(expiryJSON) \(daysJSON)")
+            precondition(cert.daysRemaining == (expected == .unknown ? nil : days))
+            precondition((cert.expiresAt == nil) == (expected == .unknown))
+            precondition(parsed.feishu == snapshot.feishu && parsed.wecom == snapshot.wecom && parsed.summary == snapshot.summary)
+        }
+        print("APP_02=PASS · \(cases.count) certificate cases: 14-day/expiry boundaries, full days, audit repro and unchanged links")
     }
 
     private static func client(_ snapshot: RelaySnapshot) throws {

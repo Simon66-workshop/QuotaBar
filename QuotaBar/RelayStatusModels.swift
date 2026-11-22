@@ -50,7 +50,7 @@ enum RelayReason: String {
     }
 }
 
-struct RelayLink: Decodable, Equatable {
+struct RelayLink: Equatable {
     let state: RelayLinkState
     let reason: RelayReason
     let lastHeartbeat: Date?
@@ -59,13 +59,15 @@ struct RelayLink: Decodable, Equatable {
         case state, reason, lastHeartbeat = "last_heartbeat_at"
     }
 
-    init(from decoder: Decoder) throws {
+    init(from decoder: Decoder, observedAt: Date) throws {
         let values = try decoder.relayFields(Keys.self)
         let wireState = RelayLinkState(rawValue: try values.decode(String.self, forKey: .state))
         let wireReason = RelayReason(rawValue: try values.decode(String.self, forKey: .reason))
         lastHeartbeat = try values.decode(Date?.self, forKey: .lastHeartbeat)
+        // Check evidence at collection time; snapshot freshness is a separate gate.
+        let heartbeatAge = lastHeartbeat.map { observedAt.timeIntervalSince($0) }
         if let wireState, let wireReason, wireReason.state == wireState,
-           wireState != .ok || lastHeartbeat != nil {
+           wireState != .ok || heartbeatAge.map({ (-5...90).contains($0) }) == true {
             state = wireState
             reason = wireReason
         } else {
@@ -75,7 +77,7 @@ struct RelayLink: Decodable, Equatable {
     }
 }
 
-struct RelayCertificate: Decodable, Equatable {
+struct RelayCertificate: Equatable {
     enum State: String { case ok, expiring, expired, unknown }
     let state: State
     let expiresAt: Date?
@@ -85,12 +87,12 @@ struct RelayCertificate: Decodable, Equatable {
         case state, expiresAt = "expires_at", daysRemaining = "days_remaining"
     }
 
-    init(from decoder: Decoder) throws {
+    init(from decoder: Decoder, observedAt: Date) throws {
         let values = try decoder.relayFields(Keys.self)
         let wireState = State(rawValue: try values.decode(String.self, forKey: .state)) ?? .unknown
         let expiry = try values.decode(Date?.self, forKey: .expiresAt)
         let days = try values.decode(Int?.self, forKey: .daysRemaining)
-        if wireState != .unknown, let expiry, let days, days >= 0 || wireState == .expired {
+        if let expiry, let days, Self.matchesLifetime(wireState, days: days, seconds: expiry.timeIntervalSince(observedAt)) {
             state = wireState
             expiresAt = expiry
             daysRemaining = days
@@ -99,6 +101,12 @@ struct RelayCertificate: Decodable, Equatable {
             expiresAt = nil
             daysRemaining = nil
         }
+    }
+
+    private static func matchesLifetime(_ state: State, days: Int, seconds: TimeInterval) -> Bool {
+        let day: TimeInterval = 86_400
+        let expected: State = seconds <= 0 ? .expired : (seconds <= 14 * day ? .expiring : .ok)
+        return state == expected && Double(days) == floor(seconds / day)
     }
 
     var label: String {
@@ -133,9 +141,9 @@ struct RelaySnapshot: Decodable, Equatable {
         observedAt = try values.decode(Date.self, forKey: .observedAt)
         age = try values.decode(Int.self, forKey: .age)
         guard age >= 0 else { throw RelayIssue.badResponse }
-        feishu = try values.decode(RelayLink.self, forKey: .feishu)
-        wecom = try values.decode(RelayLink.self, forKey: .wecom)
-        certificate = try values.decode(RelayCertificate.self, forKey: .certificate)
+        feishu = try RelayLink(from: values.superDecoder(forKey: .feishu), observedAt: observedAt)
+        wecom = try RelayLink(from: values.superDecoder(forKey: .wecom), observedAt: observedAt)
+        certificate = try RelayCertificate(from: values.superDecoder(forKey: .certificate), observedAt: observedAt)
     }
 
     var summary: RelayLinkState { .summary(feishu.state, wecom.state) }
