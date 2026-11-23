@@ -12,7 +12,7 @@
 
 只接收 GET + Bearer；无 query、请求体、重定向或 CORS。公开 v1 字段为 `schema_version`、UTC `observed_at`、整数 `snapshot_age_s`、`feishu`、`wecom`、`certificate`。200 可含灰/红状态；处理到本路由时错误为固定 JSON：400 `bad_request`、401 `unauthorized`（Bearer challenge）、405 `method_not_allowed`（`Allow: GET`）、429 `rate_limited`（`Retry-After: 30`）、503 `service_unavailable`。upstream 502/504 归一为 503；nginx 协议层拒绝（例如超大 request line）可能先于路由，不能用本片段保证错误形状。响应不可缓存。
 
-200 响应另带 `QuotaBar-Green-For-Ms`：从服务端判定时刻起、现有证据支持两路均绿的最短剩余时长（整毫秒向下取整，范围 0–75000）。已非双绿或不足 1 ms 时为 0。它受心跳、pong、lease 和快照新鲜期约束，不改变 v1 JSON，也不公开是哪条证据限制了时长或其原始值。客户端从本地单调请求起点扣除已花费的时间，缺头不保绿。
+200 响应另带 `QuotaBar-Green-For-Ms`：从服务端判定时刻起、响应内所有仍为绿的行中最短的剩余有效期（整毫秒向下取整，范围 0–75000）。只有一路为绿时仍返回该行的有效期；无绿行或不足 1 ms 时为 0。它受心跳、pong、lease 和快照新鲜期约束，不改变 v1 JSON，也不公开是哪条证据限制了时长或其原始值。客户端从本地单调请求起点扣除已花费的时间，缺头不保绿。
 
 ## 阈值与确认门槛
 

@@ -179,7 +179,7 @@ def project_snapshot(doc, current_boot, current_mono):
 
 
 def project_snapshot_response(doc, current_boot, current_mono):
-    """Return the strict v1 body and the aggregate green window in whole ms."""
+    """Return the strict v1 body and a shared window for every green row, in ms."""
     if (not exact(doc, "schema_version observed_at boot_id observed_boottime lease_clear_for_s "
                        "feishu wecom certificate")
             or type(doc["schema_version"]) is not int or doc["schema_version"] != 1
@@ -260,7 +260,7 @@ def project_snapshot_response(doc, current_boot, current_mono):
     else:
         raise ValueError("invalid certificate state")
     green_for_ms = (max(0, math.floor((green_until - age) * 1_000))
-                    if all(link["state"] == "ok" for link in public_connections.values()) else 0)
+                    if any(link["state"] == "ok" for link in public_connections.values()) else 0)
     return {
         "schema_version": 1, "observed_at": doc["observed_at"],
         "snapshot_age_s": math.floor(age), **public_connections, "certificate": cert,

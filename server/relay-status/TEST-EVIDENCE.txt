@@ -265,3 +265,29 @@ git diff --check: PASS. No nginx/collector/deployment configuration modified.
 NOT RUN: live ECS/nginx, isolated Linux runtime, install/rollback or independent
 acceptance. No network, ECS contact, real Keychain read, QuotaBar install/start/
 stop, service restart, commit, push or deployment.
+
+== APP-V2-R5-01 mixed-row green window (2026-11-23 UTC / Nov 22 New York) ==
+Full server HEAD baseline: 800114cce1517dc0237d8c09a68c239a787948af.
+Full App HEAD baseline: 4797688ad714b1fac044f69d78b081e898968d3c.
+Full local origin/main merge base: 5d405863cea61bd5b0fb2b79bdcc8ff7b3e94d5d.
+Tested uncommitted worktrees on macOS 27.2 (26B123), arm64. Python 3.14.6
+and /usr/bin/python3 3.9.6; no SDK for Python. App/cross-check used macOS
+SDK 26.5 and CLT Apple Swift 6.4 (swiftlang-6.4.0.34.1, driver 1.168.6).
+Server binary git diff SHA-256 excluding this evidence file:
+  79abc17c9905a57ab584f99faeb16f0f0f7c78bc93c6f19d1643c3454cae7ffd
+
+PASS: PYTHONDONTWRITEBYTECODE=1 python3 -B server/relay-status/tests/run.py,
+60/60 on each Python. Authenticated 200 header covered both mixed row
+orders, the fractional and zero deadline boundaries, and no green rows.
+Feishu unit_down and WeCom heartbeat just collected with a 55s effective
+pong: server HEAD returned 0 ms; fixed returns 5000 ms at t=0, 875 ms at
++4.125s and 0 ms at +5s; at +20s WeCom is pong_late and Feishu is still red.
+Fixed App revoked the lone green on its own timer at +5s with one load;
+the menu-bar summary stayed red. The existing two-green cutoff tests passed.
+Strict public v1 body unchanged; no private pong/lease data exposed.
+Working-tree git diff --check passed. No nginx/collector/deploy changes.
+
+NOT RUN: live ECS/nginx, isolated Linux runtime, install/rollback or
+independent acceptance. No external network, ECS contact, real Keychain
+read, raw credential persisted/emitted, QuotaBar install/start/stop,
+service restart, commit, push or deployment. Scratch used TMPDIR.

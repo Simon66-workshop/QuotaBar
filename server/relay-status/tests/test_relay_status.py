@@ -525,7 +525,7 @@ class APITests(unittest.TestCase):
             (0, 55, None, 0, 5000),  # Earlier than the public WeCom sample.
             (0, 55, None, 4.125, 875),
             (0, 55, None, 5, 0),     # Still ready at the strict pong boundary.
-            (0, 55, None, 5.125, 0),
+            (0, 55, None, 5.125, 69875),  # Only Feishu is still green.
             (0, 0, 10.1259, 0, 10125),
             (0, 0, 10.1259, 4.25, 5875),
             (0, 0, 10.1259, 10.125, 0),  # Positive sub-ms lifetime floors to zero.
@@ -542,6 +542,29 @@ class APITests(unittest.TestCase):
                 self.assertEqual(json.loads(body), common.project_snapshot(doc, BOOT, MONO + age))
                 self.assertNotIn(b"lease_clear_for_s", body)
                 self.assertNotIn(b"effective_pong_age_s", body)
+
+    def test_green_header_covers_each_ready_row_in_mixed_responses(self):
+        for feishu_down, age, expected, reasons in (
+            (True, 0, 5000, ("unit_down", "ready")),
+            (True, 4.125, 875, ("unit_down", "ready")),
+            (True, 5, 0, ("unit_down", "ready")),
+            (True, 20, 0, ("unit_down", "pong_late")),
+            (False, 0, 5000, ("ready", "reconnecting")),
+            (False, 5.125, 0, ("heartbeat_late", "reconnecting")),
+        ):
+            with self.subTest(feishu_down=feishu_down, age=age):
+                doc = private_snapshot()
+                if feishu_down:
+                    doc["feishu"] = {"state": "down", "reason": "unit_down", "last_heartbeat_at": common.rfc3339(NOW)}
+                    doc["wecom"] = connection("wecom", wecom(pong=55))
+                else:
+                    doc["feishu"] = connection("feishu", feishu(age=85))
+                    doc["wecom"] = connection("wecom", wecom(state="reconnecting"))
+                read = lambda: common.project_snapshot_response(doc, BOOT, MONO + age)
+                header, body = self.assert_response(self.send(request(), snapshot=read), 200)
+                self.assertIn(f"QuotaBar-Green-For-Ms: {expected}".encode("ascii"), header.split(b"\r\n"))
+                public = json.loads(body)
+                self.assertEqual(tuple(public[name]["reason"] for name in ("feishu", "wecom")), reasons)
 
     def test_http_503_missing_bad_or_stale_snapshot(self):
         def stale():
