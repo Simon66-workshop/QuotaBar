@@ -14,6 +14,10 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
     private var panelHost: ClearHosting<AnyView>?
     private var store: UsageStore?
     private var titleWatch: AnyCancellable?
+    private var relayWatch: AnyCancellable?
+    private let relay = RelayStatusStore()
+    private var quotaToolTip = ""
+    private var relayImageState: RelayLinkState?
     private var localMonitor: Any?
     private var globalMonitor: Any?
     private var lastBarToggle = Date.distantPast
@@ -28,6 +32,9 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
     private static let panelWidth: CGFloat = CGFloat(PanelFitMetrics.panelWidth)
 
     static func main() {
+        if CommandLine.arguments.dropFirst().elementsEqual([RelayStatusHelper.argument]) {
+            RelayStatusHelper.runAndExit()
+        }
         let app = NSApplication.shared
         let delegate = QuotaBarApp()
         retained = delegate
@@ -63,6 +70,14 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
                 self?.applyTitle(snap, disks: disks, memory: memory)
             }
 
+        relayWatch = relay.$display.sink { [weak self] display in
+            self?.applyRelayStatus(display)
+        }
+        relay.start()
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(systemWoke(_:)), name: NSWorkspace.didWakeNotification, object: nil
+        )
+
         // Local: clicks that still land on our status-item window after action dies.
         // Global: clicks the system treats as someone else's after Safari OAuth.
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
@@ -88,10 +103,16 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        relay.stop()
+        NSWorkspace.shared.notificationCenter.removeObserver(self, name: NSWorkspace.didWakeNotification, object: nil)
         if let localMonitor { NSEvent.removeMonitor(localMonitor) }
         if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
         NotificationCenter.default.removeObserver(self, name: NSApplication.didChangeScreenParametersNotification, object: nil)
         refitWork?.cancel()
+    }
+
+    @objc private func systemWoke(_ notification: Notification) {
+        relay.woke()
     }
 
     @objc private func screenParametersChanged(_ notification: Notification) {
@@ -108,10 +129,12 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.isVisible = true
         if let button = item.button {
+            button.imagePosition = .imageLeft
             button.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
             button.isEnabled = true
             button.appearsDisabled = false
         }
+        relayImageState = nil
         statusItem = item
         rebindBar()
         if let snap = store?.snap {
@@ -201,10 +224,12 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         guard let store, let button = statusItem?.button else { return }
         rebindBar()
 
+        relay.panelOpened()
         let host = ClearHosting(rootView: AnyView(
-            MenuPanel(probeEpoch: fitModel.epoch)
+            MenuPanel(probeEpoch: fitModel.epoch, onRelayRefresh: relay.manualRefresh)
                 .environmentObject(store)
                 .environmentObject(fitModel)
+                .environmentObject(relay)
         ))
         _ = host.view
         self.panelHost = host
@@ -476,7 +501,10 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         return item
     }
 
-    @objc func menuRefresh() { Task { await store?.refresh(userInitiated: true) } }
+    @objc func menuRefresh() {
+        relay.manualRefresh()
+        Task { await store?.refresh(userInitiated: true) }
+    }
     @objc func menuCopy() { store?.copySummary() }
     @objc func menuSignIn() { store?.startDeviceLogin() }
     @objc func menuDisconnect() { Task { await store?.disconnectGrok() } }
@@ -544,7 +572,20 @@ final class QuotaBarApp: NSObject, NSApplicationDelegate {
         }
         tip.append("Memory \(memory?.barLabel ?? "M —") · \(memory?.sizeLabel ?? "Unavailable")")
         tip.append(contentsOf: disks.map { "\($0.name) \(Int($0.usedPct.rounded()))% · \($0.sizeLabel) · \($0.rateLabel)" })
-        button.toolTip = tip.isEmpty ? "QuotaBar" : tip.joined(separator: "\n")
+        quotaToolTip = tip.joined(separator: "\n")
+        applyRelayStatus(relay.display)
+    }
+
+    private func applyRelayStatus(_ display: RelayDisplay) {
+        guard let button = statusItem?.button else { return }
+        if relayImageState != display.summary {
+            button.image = display.summary.menuImage
+            relayImageState = display.summary
+        }
+        let relayText = "转发器连接：\(display.statusText)"
+        button.toolTip = [quotaToolTip, relayText].filter { !$0.isEmpty }.joined(separator: "\n")
+        let title = button.attributedTitle.string
+        button.setAccessibilityLabel("\(title)，\(relayText)")
     }
 
     /// Top edge stays `anchorGap` points under the status item while the height changes.

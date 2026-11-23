@@ -1,4 +1,4 @@
-# QuotaBar 1.8.27
+# QuotaBar 1.8.28
 
 Mac menu bar extra for live usage. **G** is the shared weekly pool (X Subscription Super: Grok, Cursor, and Grok Bot). **GO** is Google Gemini model quota from the official Antigravity CLI. ChatGPT / Codex, Claude, local and external disks, and local RAM stay on the bar.
 
@@ -28,7 +28,7 @@ Cursor and Grok Bot are not separate bar, tooltip, or panel items.
 - **Left-click** the bar → glass panel (details, connect, hide disks)
 - **Right-click** the bar → short native menu (refresh / copy / alerts / quit)
 
-The panel header should say **v1.8.27** (build **40**). If it still says an older version, quit QuotaBar and run `Start QuotaBar.command` again. **For this local upgrade review, do not install or launch it; use the candidate-only build below.**
+The panel header should say **v1.8.28** (build **41**). The launcher keeps the existing app running if the new build fails. **For this local upgrade review, do not install or launch it; run `bash QuotaBarTests/check-launcher.sh` for the offline launcher check.**
 
 Later launches: just double-click `Start QuotaBar.command` again.
 
@@ -47,7 +47,65 @@ If Claude stays under Connect, open Claude Desktop while signed in, then click R
 
 Plug in a USB / Thunderbolt disk and it appears in the panel; eject it and it disappears. Hide Time Machine or VM disks from the panel — they stay off the bar until you Show them again.
 
-The bar only turns orange / red on a token that is actually high (85%+ services, 90%+ disks / RAM). A normal 60–80% day stays neutral.
+Quota figures only turn orange / red on a token that is actually high (85%+ services, 90%+ disks / RAM). A normal 60–80% day stays neutral.
+
+## 1.8.28 — 转发器连接
+
+The dot before the existing quota tokens reports the two relay connections: green only when
+both are healthy; red for a confirmed outage; amber for degradation; hollow gray for
+unknown, missing, or stale status. The panel shows Feishu and WeCom heartbeat times in
+Asia/Shanghai and the website certificate separately. A green dot does **not** prove
+end-to-end message delivery. Certificate expiry does not change the relay dot.
+
+The feature is opt-in. Without a matching generic password in the **login** keychain it
+shows **未配置** and does not call the endpoint. The launcher signs local builds ad hoc
+with Hardened Runtime; **do not grant Keychain access to an ad-hoc build**. Leave the
+relay unconfigured until the operator has approved the final installed bundle and it
+has been signed with the approved Apple signing identity, with Hardened Runtime and
+no entitlements. Signing an approved local build is a separate operator step; builds
+that are replaced by the launcher must be approved and signed again before ACL use.
+
+Run the verifier from the trusted checkout against the **final installed** bundle, using
+the Team ID recorded by the operator (not a value copied from an untrusted binary). It
+checks the bundle signature, the helper executable, Hardened Runtime, absence of
+entitlements that could disable library validation, and the approved signer. If any
+check fails, **do not add or retain an ACL for that executable**. This check does not
+test real Keychain authorization or approve a release.
+
+Once the service owner provides the scoped v1 token, confirm the **default** keychain
+is **login** in Keychain Access before using the following (it writes to the default
+keychain). Set `APPROVED_TEAM_ID` to the approved Team ID first. Keep `-w` last so
+macOS prompts for the token rather than receiving it on the command line.
+
+```sh
+APP="$HOME/Applications/QuotaBar.app"
+bash ./verify-relay-signature.sh "$APP" "${APPROVED_TEAM_ID:?Approved Team ID required}" &&
+security add-generic-password -U \
+  -s app.quotabar.mac.relay-status -a 66workshop.cn/relay-status-v1 \
+  -T "" -T "$APP/Contents/MacOS/QuotaBar" -w
+```
+
+If the login keychain is not the default, run the same signature verifier and only after
+it passes provision the item directly in the **login** keychain using Keychain Access.
+Trust only the verified QuotaBar executable, not all apps
+(`-A`). If an update via `-U` preserves an old ACL, check that specific item's Access
+Control in Keychain Access. An unavailable/locked keychain or an ACL denial prevents a
+fetch; never relax the ACL to all apps. Rebuilt or re-signed candidates may need a new
+ACL check. After changing credentials use **Refresh** (or **Refresh now**); HTTP 401
+pauses automatic polling until then. A dedicated child mode of the same QuotaBar
+executable suppresses Keychain prompts without changing the main process's
+interaction policy. The child returns status or a fixed error, never the credential.
+The relay only sends the token as a Bearer header to
+`https://66workshop.cn/api/relay-status/v1`; redirects are refused. QuotaBar does not
+log, export, or save the token outside the login keychain.
+Every green row is time-limited by the server's `QuotaBar-Green-For-Ms`
+response header, even when the other row is not green. QuotaBar charges the
+full request time and revokes green at the local monotonic deadline without
+waiting for the next poll. Missing or zero lifetime cannot keep a row green;
+confirmed red and yellow are preserved.
+
+Offline verification (synthetic responses, no real Keychain access or QuotaBar launch):
+`QUOTABAR_SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk bash QuotaBarTests/check-relay-status.sh`.
 
 ## 1.8.25 — GO (Google / Antigravity)
 
@@ -87,7 +145,7 @@ QUOTABAR_SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk \
 
 `build-candidate.sh` is restricted to this Mini1 worktree and checks that the external volume is mounted. It compiles via `swiftc` (the current non-Xcode build path) to `$BASE/candidate/QuotaBar.app`, using canonical version metadata, without quitting, replacing, signing, or opening the installed app. **Do not open the candidate during this review.**
 
-Mini1's current default CLT 6.4 / macOS 27 SDK is missing the `SwiftUIMacros` plugin needed by existing `@State` code. The commands above explicitly select the already-installed macOS 26.5 SDK for this process only. `QUOTABAR_SDK` is also supported by the normal launcher, without changing `xcode-select`, installing tools, or weakening a check. The default SDK 27 build remains an environment blocker; successful compilation against SDK 26.5 does not prove that SDK 27 is fixed. Compiler caches use canonical absolute paths to avoid duplicate-module errors from mixing `worktree/../candidate` with `candidate`.
+Mini1's current default CLT 6.4 / macOS 27 SDK fails to expand SwiftUI's `@State` macro. The launcher checks that macro before compiling and falls back to the installed macOS 26.5 SDK if needed. An explicit `QUOTABAR_SDK` takes precedence and must pass the same check. Compilation, signing and verification finish before the installed app is replaced or stopped. The commands above select macOS 26.5 explicitly for the standalone tests; no global toolchain selection changes. Compiler caches use canonical absolute paths to avoid duplicate-module errors from mixing `worktree/../candidate` with `candidate`.
 
 Tests use a synthetic, non-account fixture of the official envelope, malformed/error fixtures, and local fake processes for timeout, exit, size, stdin, and environment behavior; they do not call a network or access credentials. Existing AC/AT/AF, O, G, disk, RAM, and panel-fit regression checks still run. A component-only renderer and optional live Google smoke check are described in `QuotaBarTests/check-google.sh`; neither starts a menu-bar instance. Offline render evidence does not constitute full-app interaction acceptance or independent human review.
 

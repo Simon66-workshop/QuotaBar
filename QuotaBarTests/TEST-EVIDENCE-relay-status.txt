@@ -1,0 +1,967 @@
+QuotaBar 1.8.28 / 41 — Relay Status App-only test evidence
+Synthetic relay credentials, transport, and snapshots; no network, real Keychain,
+installation, launch/restart of QuotaBar, server change, commit, push, or deploy.
+The Google component script and candidate packaging script stopped at their
+existing GO-only worktree guards. Neither guard was edited or bypassed. The
+unguarded standalone swiftc app link below validates the full app executable,
+not bundle assembly, installed-app behavior, signing, or any server.
+Existing UsageClient Swift-concurrency warnings and legacy file-based Keychain
+deprecation warnings are retained verbatim. Cache and linked test executables
+used temporary directories on the mounted external volume.
+
+== Initial App link (failed: DarwinBoolean conversion, fixed) ==
++zsh:7> date '+%Y-%m-%d %H:%M:%S %Z %z'
+2026-11-22 12:25:04 EST -0500
++zsh:8> swiftc --version
+swift-driver version: 1.168.6 Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)
+Target: arm64-apple-macosx27.2.0
++zsh:9> sw_vers
+ProductName:		macOS
+ProductVersion:		27.2
+BuildVersion:		26B123
++zsh:10> swiftc -parse-as-library -O -target arm64-apple-macos14.0 -sdk /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk -module-cache-path /Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/cache QuotaBar/ClaudeDesktop.swift QuotaBar/ClaudeUsage.swift QuotaBar/DiskMonitor.swift QuotaBar/GoogleUsage.swift QuotaBar/GrokDeviceAuth.swift QuotaBar/MemoryMonitor.swift QuotaBar/MenuPanel.swift QuotaBar/Models.swift QuotaBar/PanelFit.swift QuotaBar/QuotaBarApp.swift QuotaBar/RelayStatusClient.swift QuotaBar/RelayStatusKeychain.swift QuotaBar/RelayStatusModels.swift QuotaBar/RelayStatusSection.swift QuotaBar/RelayStatusStore.swift QuotaBar/TokenReader.swift QuotaBar/UsageClient.swift QuotaBar/UsageSource.swift QuotaBar/UsageStore.swift -o /Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/QuotaBar -framework AppKit -framework SwiftUI -framework Combine -framework UserNotifications -framework Security -framework CryptoKit -framework IOKit -framework DiskArbitration -lsqlite3
+QuotaBar/RelayStatusKeychain.swift:20:15: warning: 'SecKeychainOpen' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+18 |             .appendingPathComponent("Library/Keychains/login.keychain-db").path
+19 |         var login: SecKeychain?
+20 |         guard SecKeychainOpen(path, &login) == errSecSuccess, let login else {
+   |               `- warning: 'SecKeychainOpen' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+21 |             throw RelayIssue.keychainUnavailable
+22 |         }
+
+QuotaBar/RelayStatusKeychain.swift:41:15: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+39 |         // immediately after this synchronous Security call. ACL enforcement stays on.
+40 |         var previous = DarwinBoolean(false)
+41 |         guard SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess,
+   |               `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+42 |               SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else {
+43 |             throw RelayIssue.keychainUnavailable
+
+QuotaBar/RelayStatusKeychain.swift:42:15: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+40 |         var previous = DarwinBoolean(false)
+41 |         guard SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess,
+42 |               SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else {
+   |               `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+43 |             throw RelayIssue.keychainUnavailable
+44 |         }
+
+QuotaBar/RelayStatusKeychain.swift:48:58: error: cannot convert value of type 'DarwinBoolean' to expected argument type 'Bool'
+46 |         var item: CFTypeRef?
+47 |         do {
+48 |             defer { SecKeychainSetUserInteractionAllowed(previous) }
+   |                                                          `- error: cannot convert value of type 'DarwinBoolean' to expected argument type 'Bool'
+49 |             status = SecItemCopyMatching(query as CFDictionary, &item)
+50 |         }
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+
+== Initial Relay check (failed: atomic PNG save denied, fixed with same-volume staging) ==
++zsh:5> QUOTABAR_SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk bash QuotaBarTests/check-relay-status.sh
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/RelayStatusKeychain.swift:19:15: warning: 'SecKeychainOpen' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+17 |             .appendingPathComponent("Library/Keychains/login.keychain-db").path
+18 |         var login: SecKeychain?
+19 |         guard SecKeychainOpen(path, &login) == errSecSuccess, let login else {
+   |               `- warning: 'SecKeychainOpen' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+20 |             throw RelayIssue.keychainUnavailable
+21 |         }
+
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/RelayStatusKeychain.swift:37:15: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+35 |         // immediately after this synchronous Security call. ACL enforcement stays on.
+36 |         var previous = DarwinBoolean(false)
+37 |         guard SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess,
+   |               `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+38 |               SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else {
+39 |             throw RelayIssue.keychainUnavailable
+
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/RelayStatusKeychain.swift:38:15: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+36 |         var previous = DarwinBoolean(false)
+37 |         guard SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess,
+38 |               SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else {
+   |               `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+39 |             throw RelayIssue.keychainUnavailable
+40 |         }
+
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/RelayStatusKeychain.swift:44:21: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+42 |         var item: CFTypeRef?
+43 |         do {
+44 |             defer { SecKeychainSetUserInteractionAllowed(previous.boolValue) }
+   |                     `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+45 |             status = SecItemCopyMatching(query as CFDictionary, &item)
+46 |         }
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/UsageClient.swift:299:29: warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 297 | 
+ 298 |     private static func desktopIdentity(cookie: String, hint: String?) async -> DesktopIdentity? {
+ 299 |         desktopIdentityLock.lock()
+     |                             `- warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 300 |         if let cached = desktopIdentityCache,
+ 301 |            cached.hint == hint,
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:13:1: note: 'lock()' declared here
+11 | @protocol NSLocking
+12 | 
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'lock()' declared here
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/UsageClient.swift:305:33: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 303 |         {
+ 304 |             let identity = cached.identity
+ 305 |             desktopIdentityLock.unlock()
+     |                                 `- warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 306 |             return identity
+ 307 |         }
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:15:1: note: 'unlock()' declared here
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'unlock()' declared here
+16 | 
+17 | @end
+
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/UsageClient.swift:308:29: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 306 |             return identity
+ 307 |         }
+ 308 |         desktopIdentityLock.unlock()
+     |                             `- warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 309 |         if let found = await bootstrapIdentity(cookie: cookie, hint: hint) {
+ 310 |             rememberDesktopIdentity(found, hint: hint)
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:15:1: note: 'unlock()' declared here
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'unlock()' declared here
+16 | 
+17 | @end
+SHANGHAI_TIME=PASS · TZ=America/New_York and TZ=UTC: Feishu=11-23 01:14:51; WeCom=11-23 01:14:47
+Swift/ErrorType.swift:254: Fatal error: Error raised at top level: Error Domain=NSCocoaErrorDomain Code=513 "You don’t have permission to save the file “relay-light-green.png” in the folder “Previews”." UserInfo={NSURL=file:///Volumes/2T%E6%89%A9%E5%B1%95%E7%9B%98/Agent%E6%96%87%E4%BB%B6/QuotaBar-relay-status-20261122/repo-app/QuotaBarTests/Previews/relay-light-green.png, NSUserStringVariant=Folder, NSUnderlyingError=0x7726025e60 {Error Domain=NSPOSIXErrorDomain Code=1 "Operation not permitted"}}
+QuotaBarTests/check-relay-status.sh: line 26: 49907 Trace/BPT trap: 5       "$WORK/relay-check" check "$ROOT" "$OUT"
++zsh:6> r=133 
++zsh:7> set +x
+EXIT=133
+
+== Existing regression script attempts and complete output ==
++zsh:24> QUOTABAR_TEST_OUT=/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/quotabar-tests QUOTABAR_MODULE_CACHE=/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/reg-cache bash QuotaBarTests/run.sh
+ok 278 checks
++zsh:24> echo 'RUN_EXIT=0'
+RUN_EXIT=0
++zsh:25> QUOTABAR_MEMORY_CHECK_OUT=/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/quotabar-memory-check QUOTABAR_MODULE_CACHE=/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/reg-cache bash QuotaBarTests/check-memory.sh
+RAM check at 2026-11-22T17:27:57Z
+Formula: (active + wired + compressor physical pages) * page size / physicalMemory * 100
+Speculative/inactive/free excluded; no separate purgeable adjustment; GB = 2^30 bytes.
+App sampler: 73.2032%; M 73%; 23.4 / 32.0 GB used; usedBytes=25152438272; totalBytes=34359738368
+
+$ /usr/bin/vm_stat
+Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                                    62259.
+Pages active:                                 466918.
+Pages inactive:                               464003.
+Pages speculative:                              2117.
+Pages throttled:                                   0.
+Pages wired down:                             236047.
+Pages purgeable:                                  96.
+"Translation faults":                     4477390624.
+Pages copy-on-write:                       181642391.
+Pages zero filled:                        3197477030.
+Pages reactivated:                         220695753.
+Pages purged:                               25541098.
+File-backed pages:                            305829.
+Anonymous pages:                              627209.
+Pages stored in compressor:                  1229090.
+Pages occupied by compressor:                 832341.
+Decompressions:                            157215956.
+Compressions:                              223198035.
+Pageins:                                   398795607.
+Pageouts:                                     362226.
+Swapins:                                     3498897.
+Swapouts:                                    7615201.
+
+Recomputed: active=466918 wired=236047 compressor=832341 pageSize=16384 usedBytes=25154453504; 73.2091%; delta=0.0059 percentage points
+
+$ /usr/bin/memory_pressure
+The system has 34359738368 (2097152 pages with a page size of 16384).
+
+Stats: 
+Pages free: 62424 
+Pages purgeable: 96 
+Pages purged: 25541098 
+
+Swap I/O:
+Swapins: 3498897 
+Swapouts: 7615201 
+
+Page Q counts:
+Pages active: 466752 
+Pages inactive: 463954 
+Pages speculative: 2118 
+Pages throttled: 0 
+Pages wired down: 236096 
+
+Compressor Stats:
+Pages used by compressor: 832341 
+Pages decompressed: 157215956 
+Pages compressed: 223198035 
+
+File I/O:
+Pageins: 398795609 
+Pageouts: 362226 
+
+System-wide memory free percentage: 48%
+
+Recomputed: active=466752 wired=236096 compressor=832341 pageSize=16384 usedBytes=25152536576; 73.2035%; delta=0.0003 percentage points
+Physical total matches ProcessInfo: true
+The tool's system-wide free percentage is memory-pressure availability, NOT 100 - M.
+App sampler after: 73.2312%; 23.4 / 32.0 GB used
+Comparison tolerance: < 1 percentage point for sequential live samples.
+PASS: app sampler agrees with both tools' page counters.
++zsh:25> echo 'MEMORY_EXIT=0'
+MEMORY_EXIT=0
++zsh:26> QUOTABAR_SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk QUOTABAR_MODULE_CACHE=/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/reg-cache bash QuotaBarTests/check-google.sh
+Requires the GO upgrade worktree and mounted external volume.
++zsh:26> echo 'GOOGLE_EXIT=1'
+GOOGLE_EXIT=1
++zsh:27> QUOTABAR_SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk QUOTABAR_MODULE_CACHE=/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/reg-cache bash QuotaBarTests/build-candidate.sh
+Candidate build is restricted to the GO upgrade worktree.
++zsh:27> echo 'CANDIDATE_EXIT=1'
+CANDIDATE_EXIT=1
+
+== Intermediate App link after compiler fix ==
++zsh:14> swiftc -parse-as-library -O -target arm64-apple-macos14.0 -sdk /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk -module-cache-path /Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/cache QuotaBar/ClaudeDesktop.swift QuotaBar/ClaudeUsage.swift QuotaBar/DiskMonitor.swift QuotaBar/GoogleUsage.swift QuotaBar/GrokDeviceAuth.swift QuotaBar/MemoryMonitor.swift QuotaBar/MenuPanel.swift QuotaBar/Models.swift QuotaBar/PanelFit.swift QuotaBar/QuotaBarApp.swift QuotaBar/RelayStatusClient.swift QuotaBar/RelayStatusKeychain.swift QuotaBar/RelayStatusModels.swift QuotaBar/RelayStatusSection.swift QuotaBar/RelayStatusStore.swift QuotaBar/TokenReader.swift QuotaBar/UsageClient.swift QuotaBar/UsageSource.swift QuotaBar/UsageStore.swift -o /Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/QuotaBar -framework AppKit -framework SwiftUI -framework Combine -framework UserNotifications -framework Security -framework CryptoKit -framework IOKit -framework DiskArbitration -lsqlite3
+QuotaBar/RelayStatusKeychain.swift:19:15: warning: 'SecKeychainOpen' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+17 |             .appendingPathComponent("Library/Keychains/login.keychain-db").path
+18 |         var login: SecKeychain?
+19 |         guard SecKeychainOpen(path, &login) == errSecSuccess, let login else {
+   |               `- warning: 'SecKeychainOpen' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+20 |             throw RelayIssue.keychainUnavailable
+21 |         }
+
+QuotaBar/RelayStatusKeychain.swift:37:15: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+35 |         // immediately after this synchronous Security call. ACL enforcement stays on.
+36 |         var previous = DarwinBoolean(false)
+37 |         guard SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess,
+   |               `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+38 |               SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else {
+39 |             throw RelayIssue.keychainUnavailable
+
+QuotaBar/RelayStatusKeychain.swift:38:15: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+36 |         var previous = DarwinBoolean(false)
+37 |         guard SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess,
+38 |               SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else {
+   |               `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+39 |             throw RelayIssue.keychainUnavailable
+40 |         }
+
+QuotaBar/RelayStatusKeychain.swift:44:21: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+42 |         var item: CFTypeRef?
+43 |         do {
+44 |             defer { SecKeychainSetUserInteractionAllowed(previous.boolValue) }
+   |                     `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+45 |             status = SecItemCopyMatching(query as CFDictionary, &item)
+46 |         }
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+QuotaBar/UsageClient.swift:299:29: warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 297 | 
+ 298 |     private static func desktopIdentity(cookie: String, hint: String?) async -> DesktopIdentity? {
+ 299 |         desktopIdentityLock.lock()
+     |                             `- warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 300 |         if let cached = desktopIdentityCache,
+ 301 |            cached.hint == hint,
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:13:1: note: 'lock()' declared here
+11 | @protocol NSLocking
+12 | 
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'lock()' declared here
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+
+QuotaBar/UsageClient.swift:305:33: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 303 |         {
+ 304 |             let identity = cached.identity
+ 305 |             desktopIdentityLock.unlock()
+     |                                 `- warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 306 |             return identity
+ 307 |         }
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:15:1: note: 'unlock()' declared here
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'unlock()' declared here
+16 | 
+17 | @end
+
+QuotaBar/UsageClient.swift:308:29: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 306 |             return identity
+ 307 |         }
+ 308 |         desktopIdentityLock.unlock()
+     |                             `- warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 309 |         if let found = await bootstrapIdentity(cookie: cookie, hint: hint) {
+ 310 |             rememberDesktopIdentity(found, hint: hint)
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:15:1: note: 'unlock()' declared here
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'unlock()' declared here
+16 | 
+17 | @end
++zsh:15> r=0 
++zsh:16> set +x
+EXIT=0
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/QuotaBar: Mach-O 64-bit executable arm64
+
+== Final Relay check and complete output ==
++ QUOTABAR_SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk
++ bash QuotaBarTests/check-relay-status.sh
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/RelayStatusKeychain.swift:19:15: warning: 'SecKeychainOpen' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+17 |             .appendingPathComponent("Library/Keychains/login.keychain-db").path
+18 |         var login: SecKeychain?
+19 |         guard SecKeychainOpen(path, &login) == errSecSuccess, let login else {
+   |               `- warning: 'SecKeychainOpen' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+20 |             throw RelayIssue.keychainUnavailable
+21 |         }
+
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/RelayStatusKeychain.swift:37:15: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+35 |         // immediately after this synchronous Security call. ACL enforcement stays on.
+36 |         var previous = DarwinBoolean(false)
+37 |         guard SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess,
+   |               `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+38 |               SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else {
+39 |             throw RelayIssue.keychainUnavailable
+
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/RelayStatusKeychain.swift:38:15: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+36 |         var previous = DarwinBoolean(false)
+37 |         guard SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess,
+38 |               SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else {
+   |               `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+39 |             throw RelayIssue.keychainUnavailable
+40 |         }
+
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/RelayStatusKeychain.swift:44:21: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+42 |         var item: CFTypeRef?
+43 |         do {
+44 |             defer { SecKeychainSetUserInteractionAllowed(previous.boolValue) }
+   |                     `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+45 |             status = SecItemCopyMatching(query as CFDictionary, &item)
+46 |         }
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/UsageClient.swift:299:29: warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 297 | 
+ 298 |     private static func desktopIdentity(cookie: String, hint: String?) async -> DesktopIdentity? {
+ 299 |         desktopIdentityLock.lock()
+     |                             `- warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 300 |         if let cached = desktopIdentityCache,
+ 301 |            cached.hint == hint,
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:13:1: note: 'lock()' declared here
+11 | @protocol NSLocking
+12 | 
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'lock()' declared here
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/UsageClient.swift:305:33: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 303 |         {
+ 304 |             let identity = cached.identity
+ 305 |             desktopIdentityLock.unlock()
+     |                                 `- warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 306 |             return identity
+ 307 |         }
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:15:1: note: 'unlock()' declared here
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'unlock()' declared here
+16 | 
+17 | @end
+
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBar/UsageClient.swift:308:29: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 306 |             return identity
+ 307 |         }
+ 308 |         desktopIdentityLock.unlock()
+     |                             `- warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 309 |         if let found = await bootstrapIdentity(cookie: cookie, hint: hint) {
+ 310 |             rememberDesktopIdentity(found, hint: hint)
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:15:1: note: 'unlock()' declared here
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'unlock()' declared here
+16 | 
+17 | @end
+SHANGHAI_TIME=PASS · TZ=America/New_York and TZ=UTC: Feishu=11-23 01:14:51; WeCom=11-23 01:14:47
+V1_PARSE=PASS · schema, strict keys, malformed data, enum mapping, all 16 priority pairs, certificate independence
+HTTP_POLICY=PASS · no I/O; cache/cookies/credential storage disabled, 5s, refused redirect, error labels and Retry-After
+POLLING=PASS · injected clock/credentials/transport; single flight, panel gate, wake, offline, 401, 429, expiry, backoff
+VERSION=PASS · 1.8.28/41
+relay-light-green.png · 448×123 pt · 721 contrasting samples
+relay-panel-light-green.png · 448×255 pt · 1353 contrasting samples
+relay-light-yellow.png · 448×123 pt · 791 contrasting samples
+relay-panel-light-yellow.png · 448×255 pt · 1420 contrasting samples
+relay-light-red.png · 448×123 pt · 839 contrasting samples
+relay-panel-light-red.png · 448×255 pt · 1484 contrasting samples
+relay-light-gray.png · 448×123 pt · 589 contrasting samples
+relay-panel-light-gray.png · 448×255 pt · 1171 contrasting samples
+relay-dark-green.png · 448×123 pt · 848 contrasting samples
+relay-panel-dark-green.png · 448×255 pt · 1724 contrasting samples
+relay-dark-yellow.png · 448×123 pt · 936 contrasting samples
+relay-panel-dark-yellow.png · 448×255 pt · 1811 contrasting samples
+relay-dark-red.png · 448×123 pt · 996 contrasting samples
+relay-panel-dark-red.png · 448×255 pt · 1875 contrasting samples
+relay-dark-gray.png · 448×123 pt · 688 contrasting samples
+relay-panel-dark-gray.png · 448×255 pt · 1537 contrasting samples
+relay-panel-dark-short-scrolled.png · 448×110 pt · 615 contrasting samples
+RENDER=PASS · 17 offscreen PNGs; stable section height, drawable foreground and short native scroll
+PREVIEWS=/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/QuotaBarTests/Previews
++ r=0
++ set +x
+RELAY_EXIT=0
+
+== Final optimized App compile/link and complete output ==
++ swiftc -parse-as-library -O -target arm64-apple-macos14.0 -sdk /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk -module-cache-path $'/Volumes/2T�\211��\225�\233\230/Agent�\226\207件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/cache' QuotaBar/ClaudeDesktop.swift QuotaBar/ClaudeUsage.swift QuotaBar/DiskMonitor.swift QuotaBar/GoogleUsage.swift QuotaBar/GrokDeviceAuth.swift QuotaBar/MemoryMonitor.swift QuotaBar/MenuPanel.swift QuotaBar/Models.swift QuotaBar/PanelFit.swift QuotaBar/QuotaBarApp.swift QuotaBar/RelayStatusClient.swift QuotaBar/RelayStatusKeychain.swift QuotaBar/RelayStatusModels.swift QuotaBar/RelayStatusSection.swift QuotaBar/RelayStatusStore.swift QuotaBar/TokenReader.swift QuotaBar/UsageClient.swift QuotaBar/UsageSource.swift QuotaBar/UsageStore.swift -o $'/Volumes/2T�\211��\225�\233\230/Agent�\226\207件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/QuotaBar' -framework AppKit -framework SwiftUI -framework Combine -framework UserNotifications -framework Security -framework CryptoKit -framework IOKit -framework DiskArbitration -lsqlite3
+QuotaBar/RelayStatusKeychain.swift:19:15: warning: 'SecKeychainOpen' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+17 |             .appendingPathComponent("Library/Keychains/login.keychain-db").path
+18 |         var login: SecKeychain?
+19 |         guard SecKeychainOpen(path, &login) == errSecSuccess, let login else {
+   |               `- warning: 'SecKeychainOpen' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+20 |             throw RelayIssue.keychainUnavailable
+21 |         }
+
+QuotaBar/RelayStatusKeychain.swift:37:15: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+35 |         // immediately after this synchronous Security call. ACL enforcement stays on.
+36 |         var previous = DarwinBoolean(false)
+37 |         guard SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess,
+   |               `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+38 |               SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else {
+39 |             throw RelayIssue.keychainUnavailable
+
+QuotaBar/RelayStatusKeychain.swift:38:15: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+36 |         var previous = DarwinBoolean(false)
+37 |         guard SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess,
+38 |               SecKeychainSetUserInteractionAllowed(false) == errSecSuccess else {
+   |               `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+39 |             throw RelayIssue.keychainUnavailable
+40 |         }
+
+QuotaBar/RelayStatusKeychain.swift:44:21: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+42 |         var item: CFTypeRef?
+43 |         do {
+44 |             defer { SecKeychainSetUserInteractionAllowed(previous.boolValue) }
+   |                     `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+45 |             status = SecItemCopyMatching(query as CFDictionary, &item)
+46 |         }
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+QuotaBar/UsageClient.swift:299:29: warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 297 | 
+ 298 |     private static func desktopIdentity(cookie: String, hint: String?) async -> DesktopIdentity? {
+ 299 |         desktopIdentityLock.lock()
+     |                             `- warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 300 |         if let cached = desktopIdentityCache,
+ 301 |            cached.hint == hint,
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:13:1: note: 'lock()' declared here
+11 | @protocol NSLocking
+12 | 
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'lock()' declared here
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+
+QuotaBar/UsageClient.swift:305:33: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 303 |         {
+ 304 |             let identity = cached.identity
+ 305 |             desktopIdentityLock.unlock()
+     |                                 `- warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 306 |             return identity
+ 307 |         }
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:15:1: note: 'unlock()' declared here
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'unlock()' declared here
+16 | 
+17 | @end
+
+QuotaBar/UsageClient.swift:308:29: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 306 |             return identity
+ 307 |         }
+ 308 |         desktopIdentityLock.unlock()
+     |                             `- warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 309 |         if let found = await bootstrapIdentity(cookie: cookie, hint: hint) {
+ 310 |             rememberDesktopIdentity(found, hint: hint)
+
+/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:15:1: note: 'unlock()' declared here
+13 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+14 | 
+15 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
+   | `- note: 'unlock()' declared here
+16 | 
+17 | @end
++ r=0
++ set +x
+APP_LINK_EXIT=0
+/Volumes/2T扩展盘/Agent文件/QuotaBar-relay-status-20261122/repo-app/.relay-verify.aITlfi/QuotaBar: Mach-O 64-bit executable arm64
+
+== Final static sanity checks and complete output ==
++ date '+%Y-%m-%d %H:%M:%S %Z %z'
+2026-11-22 12:30:44 EST -0500
++ swiftc --version
+swift-driver version: 1.168.6 Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)
+Target: arm64-apple-macosx27.2.0
++ plutil -lint QuotaBar/Info.plist QuotaBar.xcodeproj/project.pbxproj
+QuotaBar/Info.plist: OK
+QuotaBar.xcodeproj/project.pbxproj: OK
++ bash -n 'Start QuotaBar.command'
++ bash -n QuotaBarTests/check-relay-status.sh
++ git diff --check
++ python3 -
+QuotaBarTests/Previews/relay-dark-gray.png
+QuotaBarTests/Previews/relay-dark-green.png
+QuotaBarTests/Previews/relay-dark-red.png
+QuotaBarTests/Previews/relay-dark-yellow.png
+QuotaBarTests/Previews/relay-light-gray.png
+QuotaBarTests/Previews/relay-light-green.png
+QuotaBarTests/Previews/relay-light-red.png
+QuotaBarTests/Previews/relay-light-yellow.png
+QuotaBarTests/Previews/relay-panel-dark-gray.png
+QuotaBarTests/Previews/relay-panel-dark-green.png
+QuotaBarTests/Previews/relay-panel-dark-red.png
+QuotaBarTests/Previews/relay-panel-dark-short-scrolled.png
+QuotaBarTests/Previews/relay-panel-dark-yellow.png
+QuotaBarTests/Previews/relay-panel-light-gray.png
+QuotaBarTests/Previews/relay-panel-light-green.png
+QuotaBarTests/Previews/relay-panel-light-red.png
+QuotaBarTests/Previews/relay-panel-light-yellow.png
+STATIC=PASS · launcher source list, plist and Xcode versions, 17 PNG signatures, no server directory
+
+== Visual inspection scope ==
+Inspected relay-panel-light-yellow.png, relay-panel-dark-gray.png and relay-panel-dark-short-scrolled.png; no live menu-bar, VoiceOver or glass-material acceptance was performed.
+
+== APP-01 / APP-02 audit follow-up (2026-11-22T17:46:19Z, App base 1527824) ==
+macOS 27.2 (26B123), arm64, Apple Swift 6.4, MacOSX26.5 SDK.
+check-relay-status.sh (unchanged script, isolated same-volume copy): PASS.
+  APP_01=PASS: both links checked against observed_at at 89/90/91 seconds old
+  and +4/+5/+6 seconds ahead; 2s-old audit snapshot with -1h/+1d heartbeats is gray.
+  APP_02=PASS: 16 certificate cases, including exact expiry, +/-1s, 14-day
+  threshold, full-day flooring, nil fields, and the 2025 expiry/90-day audit
+  repro. Contradictions clear only certificate fields. The calculation uses
+  transmitted observed_at, not the client wall clock or elapsed snapshot age.
+  V1_PARSE, HTTP_POLICY (synthetic), POLLING (injected), VERSION: PASS.
+  SHANGHAI_TIME: PASS, identical for America/New_York and UTC.
+  RENDER: PASS, 17 offscreen PNGs; byte-identical to tracked Previews.
+  Short viewport: 448x110 pt, 615 contrasting samples. No PNGs replaced.
+run.sh: PASS, 278 usage/menu-bar/PanelFit regression checks.
+check-memory.sh: PASS, sampler agreed with native page counters.
+Full swiftc executable link (arm64 Mach-O): PASS, not launched or packaged;
+  pre-existing Keychain deprecation and UsageClient concurrency warnings remain.
+check-google.sh: stopped at the existing GO-only worktree guard (exit 1).
+Candidate packaging not run; no guard bypass. plutil, bash -n, diff --check: PASS.
+No proof of live menu-bar/VoiceOver/glass, production request redirects, Keychain
+ACL behavior, or complete production bottom-band scrolling. APP-03 through APP-06
+unchanged. Server baseline evidence is in the separate server worktree.
+Compatibility note: if a server rounds observed_at to whole seconds but computes
+days_remaining from fractional seconds, an inconsistent exact-day boundary is
+intentionally shown as unknown until a consistent observation arrives.
+No external network, ECS access, real Keychain read, installation, QuotaBar launch,
+restart, commit, push or deploy.
+
+== Independent rerun accompanying server P0/P1 remediation (2026-11-22 UTC) ==
+App source: af5335052cc29829650adb464789aaa56d1b0e58; tested in an exact
+git archive in the writable external-volume workspace, not by launching App.
+Apple Swift 6.4, macOS 26.5 SDK; optimized arm64 macOS 14 compile/link PASS.
+PASS: QuotaBarTests/run.sh (278 checks), check-memory.sh, check-relay-status.sh
+(APP-01/02, strict v1 parsing, no-I/O HTTP policy, injected polling, version,
+New York/UTC Shanghai equivalence, 17 offscreen PNGs).
+PASS: plist/project lint and launcher/component shell syntax.
+All 17 offscreen PNGs byte-identical to the existing tracked previews;
+no App source or preview changed in this rerun. GO-only check scripts not
+run from this checkout; their dedicated worktree boundary was preserved.
+No real Keychain, external network, App install/start or deployment.
+Live menu bar/VoiceOver/glass and ECS are not covered by this rerun.
+
+== Independent App audit APP-01 through APP-04 remediation (2026-11-22T18:02:16Z) ==
+Tested this working-tree change over af5335052cc29829650adb464789aaa56d1b0e58
+in an isolated writable copy; changed source files matched the working tree.
+Apple Swift 6.4, macOS 26.5 SDK on Darwin arm64.
+PASS: QUOTABAR_SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk
+      bash QuotaBarTests/check-relay-status.sh
+  APP-01: same observation replayed every 30s, still gray at 90s and 120s;
+          exact expiry, later observation recovery, shortening, reconnect,
+          and rejection of an older observation.
+  APP-02: 12 duplicate-key order/level cases, including escaped names and
+          identical values; HTTP decode returns badResponse and Store clears green.
+  APP-03: invalid month ends/non-leap dates and invalid time rejected in all
+          four timestamp fields; leap day with fraction and +00:00 accepted.
+  APP-04: actual subprocess and anonymous pipe with synthetic providers;
+          child's Security interaction policy disabled, parent's unchanged.
+          No real Keychain file/item read or network request in this test.
+  Also PASS: polling, HTTP policy, v1 parsing and existing heartbeat/certificate
+  regressions, version, New York/UTC Shanghai equivalence, 17 offscreen PNGs.
+  All 17 regenerated PNGs were byte-identical; no tracked previews changed.
+PASS: QuotaBarTests/run.sh (278 checks), check-memory.sh, optimized app
+      arm64 macOS 14 compile/link (binary not run), plist/project lint,
+      launcher/component shell syntax and git diff --check.
+Toolchain note: default SDK 27.0 attempt hit missing SwiftUIMacros.StateMacro;
+the complete rerun used the documented, locally installed macOS 26.5 SDK.
+Not run: GO-only scripts (separate restricted worktree), actual signed-app
+Keychain ACL/authorization, desktop menu bar/VoiceOver/glass, live ECS/nginx.
+No network, ECS contact, installation, QuotaBar launch, restart, deployment,
+commit or push. APP-05 through APP-07 not changed or claimed fixed.
+
+== Audit dc5df1c APP-01--04 remediation (2026-11-22T18:14:41Z) ==
+Tested working-tree Swift changes over dc5df1cf2282aa007178039b6b07557378a7b7a4.
+Swift 6.4 (driver 1.168.6), macOS 27.2 arm64, local MacOSX26.5 SDK.
+Three unmodified App scripts were rerun in a writable same-volume copy. Plain
+swiftc worked in this run (SDKROOT and QUOTABAR_SDK selected the 26.5 SDK):
+  run.sh: compile/link PASS; assertions PASS (278 usage/menu-bar/PanelFit checks).
+  check-memory.sh: compile/link PASS; native page-counter comparison PASS.
+  check-relay-status.sh: compile/link PASS; assertions and rendering PASS:
+    APP-01: all 23 malformed bodies rejected by production HTTP/model decoding;
+      root/child trailing commas, precise fractional version/age/days, integer
+      lexeme/overflow cases and duplicate keys. Every case cleared prior green.
+    APP-02: a cold-start HTTP 200 with Age: 120 and snapshot_age_s: 2 stayed gray
+      (.expired). Absent/zero Age accepted; positive or malformed Age rejected.
+    APP-04: Feishu pong_stale/pong_late -> unknown; the same WeCom pairs
+      -> down/degraded. The other channel and priority rule remain independent.
+    Prior replay, strict date, heartbeat, certificate, polling, synthetic
+      helper/IPC, HTTP policy, version and Shanghai time regressions also PASS.
+    17 generated offscreen PNGs matched tracked Previews byte for byte. No PNG
+      changes. These are component/fragment renders, not production MenuPanel
+      measurement, real menu bar, VoiceOver, or glass/visual acceptance.
+APP-03: check-relay-signature.sh PASS using disposable, unlaunched fixtures:
+  hardened ad-hoc allowed only for ordinary local use; missing runtime,
+  ad-hoc ACL, tampered sealed resource and disable-library-validation rejected.
+  Optimized app compile/link with launcher file list and flags: PASS; signed
+  arm64 bundle using the launcher's plist and ad-hoc runtime signing flags:
+  local verification PASS / relay ACL verification DENIED as expected.
+  Trusted Apple signing identity / actual Keychain ACL authorization NOT RUN.
+  Real Keychain, launcher execution and application startup NOT RUN.
+Static: shell syntax, plist/project lint and git diff --check PASS.
+GO-only scripts/candidate packaging NOT RUN; existing worktree guard preserved.
+Server evidence recorded separately: committed server baseline PASS (43);
+separate dirty snapshot FAIL (3 failures, 2 errors), not a verified candidate.
+No external network, ECS contact, install, QuotaBar launch, real Keychain read,
+restart, commit, push or deploy. APP-05--08 not in remediation scope; the three
+script reruns above record current evidence, not a rerun of untouched audit HEAD.
+
+== App audit d68c611 APP-01--03 remediation (2026-11-22T18:29:38Z) ==
+Tested the working-tree fix over d68c611256a1ea470eeeec44fa5bd0ccd61c04ea,
+not a new commit. SHA-256 of git diff --binary for RelayStatusClient.swift,
+RelayStatusModels.swift and RelayStatusCheck.swift (in HEAD-relative order):
+898a0fe3bd21f452428e080bc3b5fd87d6836699bc1c75db0b253f39b70d6ce4
+Apple Swift 6.4, macOS 27.2 arm64, local macOS 26.5 SDK (SDKROOT and
+QUOTABAR_SDK). Unmodified test scripts ran in a same-volume archive of HEAD
+with these three files copied in and byte-compared against the working tree.
+
+check-relay-status.sh: PASS.
+  APP-01: HTTP 200 with public,max-age=3600, no Age, and Date one hour after
+  observed_at stayed gray on first load and cleared prior green. With no-store,
+  the stale Date alone failed; sane-but-inconsistent Date also failed. Missing
+  or malformed Date/Cache-Control, +/−1s agreement, fractional observation,
+  expiry from either clock, zero/nonzero/malformed Age, and an intentionally
+  wrong client wall clock were covered by synthetic responses.
+  APP-02: fixed-point microseconds before comparison; both links and summary
+  tested at and on both sides of +5s/90s, including the exact +5.0009s repro.
+  Fractions beyond six digits are rejected; fractional observed_at is covered.
+  APP-03: both links tested for heartbeat_late (90,180] and heartbeat_stale
+  (>180), including 90/180 and adjacent microseconds, null and age-zero
+  contradictions. Unit-state reasons still work without heartbeat evidence;
+  other channel and certificate verified unchanged.
+  Also PASS: existing HTTP/error/polling/replay, strict schema, certificate,
+  helper IPC with synthetic providers, Shanghai time (New York and UTC),
+  and version 1.8.28/41.
+  RENDER=PASS: 17 offscreen PNGs, including 448x110 pt fragment scroll.
+  Four yellow PNGs updated for a 120s-old Feishu heartbeat; 13 PNGs matched
+  tracked bytes. Inspected light and dark yellow panel fragments. No live
+  menu bar, desktop glass, production MenuPanel bottom-scroll or VoiceOver
+  evidence; fragment previews do not replace independent visual review.
+
+Other App checks: run.sh PASS (278 checks), check-memory.sh PASS,
+check-relay-signature.sh PASS (disposable ad-hoc fixtures only), optimized
+arm64 macOS 14 compile/link PASS (source list matches launcher; binary not
+launched), plist/project lint, bash -n and git diff --check PASS. Existing
+Keychain deprecation and UsageClient concurrency warnings remain. Initial
+temporary-directory override triggered swiftc SIGTRAP; scripts worked with
+the default compiler temp location and the local 26.5 SDK. GO-only preview
+and candidate packaging scripts NOT RUN; no worktree guard bypass.
+
+Server: exact baseline 3b4d5d2 PASS (43); exact e7ff870 FAIL (43 run;
+3 failures, 2 errors). See the separate server TEST-EVIDENCE.txt for the
+failure details. Live nginx Date vs collector/API time agreement is NOT RUN;
+disagreement beyond the rounding tolerance intentionally yields gray.
+Only this audit's APP-01--03 addressed; APP-04--07 remain out of scope.
+No external network, ECS contact, real Keychain access, install, QuotaBar
+launch, restart, commit, push or deploy by this remediation.
+
+== R5 APP-02 launcher remediation (2026-11-23 UTC / Nov 22 New York) ==
+Full App HEAD baseline: 2f0e2877191184b81de4540416561a6c7f5554d4.
+Tested the working-tree fix, not a new commit. macOS 27.2 (26B123) arm64;
+Apple Swift 6.4 (swiftlang-6.4.0.34.1; driver 1.168.6), CLT.
+SDKs: default macOS 27.0 (preflight failed); local macOS 26.5 (selected by
+launcher fallback and supplied to App checks via QUOTABAR_SDK or SDKROOT).
+/usr/bin/python3 3.9.6 used for plist/version and PNG byte validation only.
+
+check-launcher.sh: PASS.
+  Production rebuild branch with a disposable fake HOME, synthetic compile
+  failure and blocked lifecycle commands: old executable, plist and source
+  stamp unchanged; no pkill, open or xattr, and staging cleaned up. Covered
+  default SDK fallback, valid explicit override, incompatible explicit
+  override with no fallback, and no usable SDK.
+  Real toolchain with no SDK override: default 27.0 probe reproduced the
+  missing SwiftUIMacros.StateMacro; fallback 26.5 passed the probe and the
+  launcher compiled/linked the complete arm64 macOS 14 candidate, signed it
+  with hardened ad-hoc options and passed verify-relay-signature.sh. Only a
+  disposable candidate bundle was produced; the executable was not run.
+run.sh: PASS (278 checks). check-memory.sh: PASS (native page counters).
+check-relay-status.sh: PASS (strict parsing, synthetic HTTP and polling,
+  helper/IPC with synthetic providers, version, Shanghai time in New York
+  and UTC, and 17 offscreen PNGs byte-identical to tracked previews).
+check-relay-signature.sh: PASS (runtime, tamper and ACL rejection fixtures).
+Static: bash -n, plist/project lint, launcher version metadata and
+  git diff --check PASS. No test scratch directory or preview change in repo.
+
+R5 APP-01 and APP-03: reviewed against v2 threat model, P2 and unchanged.
+  APP-01: R5's 74.9s + 0.2s case exceeds the 75s boundary by about 0.1s,
+  inside the accepted 1–2s boundary/rounding margin.
+  APP-03: R5's 90s date-form Retry-After failure needs the Mac 120s fast,
+  outside the <=5s clock-skew model. Numeric Retry-After is unaffected.
+Read-only stash/patch comparison: identical and not applied; no launcher
+change in that patch. No P0 in this remediation.
+
+NOT RUN: protected GO-only scripts in their separate worktree, actual
+replacement/rollback or launch, trusted signer or real Keychain ACL, live
+menu bar/VoiceOver/glass, ECS/nginx. No network, ECS contact, real Keychain
+read, QuotaBar install/start/stop, commit, push or deployment.
+
+== App V2 P1 remediation (2026-11-23T01:02:49Z) ==
+Full HEAD baseline: e0b871198453ea11123a75fd5ea34f5f177bb046.
+Tested the working-tree fixes, not a new commit. macOS 27.2 (26B123)
+arm64; CLT Apple Swift 6.4 (swiftlang-6.4.0.34.1; driver 1.168.6).
+SDK: default macOS 27.0 probe failed to expand SwiftUI @State; the
+launcher automatically selected local macOS 26.5. macOS 26.5 was also
+selected for the standalone checks via QUOTABAR_SDK or SDKROOT.
+/usr/bin/python3 3.9.6 verified documentation alignment and PNG bytes.
+
+APP-V2-01: PASS. Without execute permission, the new test failed with
+exit 1 and a Finder-specific diagnostic before compilation. Git reports
+the mode-only diff 100644 => 100755; applying it to a clean HEAD export
+made the launcher executable without changing its bytes. The test now
+invokes the executable directly. Its four failure cases left the old
+synthetic bundle untouched and did not stop an app, clear quarantine, or
+launch it. The real --check-build compiled, signed ad hoc with Hardened
+Runtime, and verified a disposable candidate without running it.
+The Git directory is read-only; the mode change is unstaged and HEAD
+still records 100644. Finder right-click Open itself was not exercised.
+
+APP-V2-02: PASS. Install.txt and README.md now identify the same offline
+command, bash QuotaBarTests/check-launcher.sh, which passed from repo-app.
+The unmodified legacy build-candidate.sh rejected repo-app before build,
+with its expected GO worktree diagnostic.
+
+Related App reruns: run.sh PASS (278 checks); check-memory.sh PASS
+(native page counters); check-relay-status.sh PASS (synthetic HTTP,
+polling and helper checks; matching Shanghai times in New York and UTC;
+17 offscreen PNGs byte-identical to tracked previews);
+check-relay-signature.sh PASS (disposable ad-hoc fixtures only).
+Shell syntax, plist/project lint and git diff --check PASS.
+No P0 findings; APP-V2-03/04/05 remain unchanged. Offscreen fragments do
+not validate the production panel's short-window bottom scroll.
+GO-only build/render and live checks were not run. All test scratch was
+in TMPDIR. No network, ECS contact, app install/start/stop, real Keychain
+read, commit, push or deployment.
+
+== App V2 round 2 P1 remediation (2026-11-23 UTC / Nov 22 New York) ==
+Full App HEAD baseline: 0142c8f39af81d3056dfa72b9abb1d9a29823ed0.
+Tested working-tree changes, not a new commit. macOS 27.2 (26B123) arm64;
+CLT Apple Swift 6.4 (swiftlang-6.4.0.34.1, driver 1.168.6); macOS SDK 26.5
+selected for the standalone checks via QUOTABAR_SDK/SDKROOT.
+/usr/bin/python3 3.9.6 generated the contract fixtures and compared PNGs.
+Swift source/test diff SHA-256:
+5e7cda0c7911051e93510fdaf4a056162466328d2f17b6fa1d655d721e333229
+
+Contract source: local server HEAD dbbad3b21cd28bc670c886544570a060434d731b,
+server/relay-status/common.py::project_snapshot, loaded from the committed
+file. Synthetic collection: Feishu heartbeat 85s old, WeCom heartbeat
+and effective pong 13s old. The pure function emitted Fixtures/relay-r2-age-
+{0,5,20}.json at monotonic offsets 0, 5.25, 20s. No server or HTTP process
+was started; the App tests use synthetic response headers.
+
+APP-V2-R2-01: PASS. The store stayed green at 4.75s, and its scheduled
+timer changed Feishu to degraded/heartbeat_late at 5s without a second
+request. At 20s it was still yellow with WeCom and certificate unchanged.
+Same-observation replay could not restore green; request/helper elapsed
+time was charged before publishing. WeCom's public heartbeat deadline
+also passed. Snapshot expiry still changed the display to gray at 75s.
+The v1 response does not expose pong lifetime; no client pong deadline was
+inferred and no wire fields changed.
+APP-V2-R2-02: PASS. The age-20 response decoded and displayed yellow on
+cold start; the 5.25s boundary case (wire age 5) also stayed yellow.
+Both links were checked at the projected 90s/180s acceptance boundaries;
+missing/contradictory heartbeat evidence stayed gray.
+
+check-relay-status.sh: PASS (both P1s, strict parsing, synthetic HTTP and
+helper/IPC, polling, replay and version 1.8.28/41). New York and UTC returned
+the same Shanghai time. All 17 offscreen PNGs regenerated under TMPDIR and
+were byte-identical to the existing previews; no previews replaced.
+run.sh: PASS (278 checks). check-memory.sh: PASS (native page counters).
+check-relay-signature.sh: PASS (unlaunched synthetic ad-hoc fixtures).
+check-launcher.sh: PASS (fake-home failure scenarios and disposable signed
+candidate compile/link/verification). Default SDK 27.0 lacked
+SwiftUIMacros.StateMacro; actual build used the launcher fallback, SDK 26.5.
+Shell syntax, plist/project lint and git diff --check: PASS.
+
+No P0 listed; R2-03/04/05 unchanged. Live panel/menu bar, real Keychain ACL,
+ECS/nginx and legacy GO-only scripts/packaging were not tested.
+No network, ECS contact, real Keychain read, QuotaBar install/start/stop,
+commit, push, deployment or service restart. Test scratch was in TMPDIR,
+not the checkout.
+
+== App V2 round 3 P1 remediation (2026-11-23 UTC / Nov 22 New York) ==
+Full App HEAD baseline: 6ef428424c5a26273d97a1ac0735aefd68862fef.
+Tested the working-tree changes, not a new commit. macOS 27.2 (26B123)
+arm64; CLT Apple Swift 6.4 (swiftlang-6.4.0.34.1, driver 1.168.6).
+macOS SDK 26.5 used for the App checks and isolated HEAD comparison.
+The launcher reproduced the default SDK 27.0 SwiftUIMacros.StateMacro
+probe failure and built successfully using its 26.5 fallback.
+/usr/bin/python3 3.9.6 generated and checked the fixture and compared PNGs.
+
+Contract baseline: 0cdf242d42fdf92db5a40f6b3a0d3d71a574d7b4
+(local feat/relay-status-server Git object), server/relay-status/common.py
+project_snapshot(). make-relay-r3-fixtures.py ran only the pure projection,
+with no server process. Regeneration matched Fixtures/relay-r3-projection.json
+(SHA-256 4e124f6311d993cacbc3d355c027ada8e19ea1c04ef7b0c2116c348981bab9d2).
+
+APP-V2-R3-01: PASS. WeCom sample age 55s, sample-time last pong age 0s.
+After +20s with just one load, exact HEAD stayed ready vs server pong_late;
+patched App matched pong_late. The production timer path changed the row
+and summary before polling, just past the 60s sample-based line. The table
+also checked 60s equality and heartbeat_late taking priority past 90s.
+APP-V2-R3-02: PASS. Feishu heartbeat age 170s. After +20s with one load,
+exact HEAD stayed heartbeat_late vs server heartbeat_stale; patched App
+matched heartbeat_stale. The scheduled timer changed both row and summary
+to red just past 180s, while the snapshot and other link were still valid.
+The table also checked 180s equality, nonzero wire age, red priority,
+existing unit/lease reasons, and no red inference from transitioning or
+unknown historical timestamps.
+
+check-relay-status.sh: PASS. Ten server-generated timelines / 59 points
+covering public-evidence projection, 75s snapshot expiry, and explicit
+wire limits. v1 does not expose exact pong age or the lease cutoff:
+server-only earlier pong transitions and lease-expiry gray cannot be
+timed locally. A new response did clear green on lease expiry; yellow or
+red server evidence retained its priority. Request/helper elapsed time,
+same-observation replay, synthetic HTTP and helper/IPC also passed.
+New York and UTC showed the same Shanghai time. All 17 offscreen PNGs were
+generated in TMPDIR and matched the tracked previews byte for byte.
+run.sh: PASS (278 checks). check-memory.sh: PASS (native counters).
+check-relay-signature.sh: PASS (disposable ad-hoc fixtures).
+check-launcher.sh: PASS (fake-home failure paths; unlaunched arm64
+candidate compiled, ad-hoc signed and verified). Shell syntax,
+plist/project lint and git diff --check: PASS.
+
+No P0 listed; APP-V2-R3-03/04/05 unchanged. No wire or server changes.
+Live menu bar/production panel, actual Keychain ACL, ECS/nginx and
+GO-only scripts were not tested. No network, real Keychain read, ECS
+contact, QuotaBar install/start/stop, service restart, commit, push or
+deployment. Scratch was outside the checkout in TMPDIR.
+
+== App V2 round 4 P1 remediation (2026-11-23 UTC / Nov 22 New York) ==
+Full App HEAD baseline: f83c70905e0d684e79e035862bd4972fa5e01682.
+Full local origin/main merge base: 5d405863cea61bd5b0fb2b79bdcc8ff7b3e94d5d.
+Full server HEAD baseline: 0cdf242d42fdf92db5a40f6b3a0d3d71a574d7b4.
+Tested the uncommitted changes in both local worktrees. macOS 27.2 (26B123)
+arm64; CLT Apple Swift 6.4 (swiftlang-6.4.0.34.1, driver 1.168.6); macOS SDK
+26.5 (SDKROOT/QUOTABAR_SDK; launcher confirmed its selected SDK).
+/usr/bin/python3 3.9.6 regenerated the fixture and compared preview bytes.
+Server unittest passed with Python 3.14.6 and /usr/bin/python3 3.9.6 (59 each).
+SHA-256 of the App and server binary git diffs, excluding evidence files:
+  App:    55efc6419e8cc48ac602bbb57de7ed32559524fbaeb6d23cb46cc22450c59d9d
+  Server: ace6b1a88356b8edaff88ece0700da26073802d1832531a1915959d2eb8b3eba
+Fixture relay-r3-projection.json regenerated byte for byte:
+  bbca3f74c82c1823b338a34f7107adb0f6ff4b8b61210ccd9a66be7007ccfa75
+
+APP-V2-R4-01: PASS. An authenticated 200 carries QuotaBar-Green-For-Ms,
+the minimum remaining evidence lifetime rounded down to whole milliseconds.
+Strict v1 JSON is unchanged; no raw lease or pong value is returned.
+The App charges the complete helper/request time and schedules the cutoff
+on its monotonic clock independently of normal polling or 75s expiry.
+Private lease and private pong fixtures start green and revoke green with
+only one load, at +10s and +5s, respectively; neither shows green at the
+original +20s / +15s reproduction points. Fresh server non-green reasons
+are retained; absent/zero lifetime cannot establish dual green, malformed
+lifetimes are rejected, equal observations cannot extend the deadline and
+may shorten it, and a newer observation can restore green.
+
+check-relay-status.sh: PASS (10 server-projected timelines, synthetic HTTP,
+helper/pipe, and polling; identical Shanghai time in New York and UTC;
+17 offscreen PNGs regenerated in TMPDIR and byte-identical to tracked PNGs).
+run.sh: PASS (278 checks, standard system TMPDIR, no external TMPDIR override).
+check-memory.sh: PASS (native counters).
+check-relay-signature.sh: PASS (disposable ad-hoc fixtures).
+check-launcher.sh: PASS (synthetic failure paths, unlaunched signed build).
+Shell syntax, plist/project lint and git diff --check: PASS.
+
+No P0 listed. APP-V2-R4-02/03/04/05 unchanged. Live menu bar, production
+short-window bottom reachability, real Keychain ACL, and ECS/nginx runtime
+were not verified; GO-only scripts were not run. No network, ECS contact,
+real Keychain read, QuotaBar install/start/stop, service restart, commit,
+push or deployment. All test scratch was in system TMPDIR.
+
+== APP-V2-R5-01 mixed-row green window (2026-11-23 UTC / Nov 22 New York) ==
+Full App HEAD baseline: 4797688ad714b1fac044f69d78b081e898968d3c.
+Full server HEAD baseline: 800114cce1517dc0237d8c09a68c239a787948af.
+Full local origin/main merge base: 5d405863cea61bd5b0fb2b79bdcc8ff7b3e94d5d.
+Tested uncommitted changes on macOS 27.2 (26B123) arm64; CLT Apple Swift
+6.4 (swiftlang-6.4.0.34.1, driver 1.168.6), macOS SDK 26.5.
+Python 3.14.6 and /usr/bin/python3 3.9.6 produced identical public fixture
+bytes from the local server projection. Both ran the server suite (60/60
+each); system Python also compared preview bytes. Python uses no SDK.
+Fixture relay-r3-projection.json SHA-256 (11 timelines, 68 points):
+  e961715a3a17364641509dc702a2f107165857f78b0e12b1514483f093ad295a
+Binary git diff SHA-256 excluding each worktree's test evidence:
+  App:    a003d5434c90dc2d565b6513dd33fe88d876a8473ea8ee98f2e193d7e815b9cf
+  Server: 79abc17c9905a57ab584f99faeb16f0f0f7c78bc93c6f19d1643c3454cae7ffd
+
+APP-V2-R5-01: PASS. Pure server/Swift HEAD comparison reproduced unit_down /
+ready with a 0 ms window at t=0 and the stale App green at +20s, when the
+server using the same evidence had already projected pong_late. With both
+fixes, the header is 5000 ms at t=0 and the production App store's scheduled
+timer makes WeCom gray at +5s without a second load. At +20s Feishu is still
+unit_down and the summary is still red; a subsequent server response shows
+WeCom's confirmed pong_late. App HEAD with the fixed server still misses
+mixed-row expiry; the fixed App with server HEAD immediately clears mixed
+green because its 0 ms window cannot prove green. Dual green still expires.
+Synthetic HTTP covers missing/zero windows with red or yellow preserved.
+Same-observation replay cannot restore green past the shared deadline.
+
+check-relay-status.sh: PASS (including the R2/R3/R4 regressions, mixed-row
+timer, synthetic HTTP/helper checks, and version 1.8.28/41). The initial
+run exposed an outdated test expectation that a same-observation response
+could keep a lone green after the original deadline; updated that assertion
+to enforce the existing replay clamp and reran successfully.
+New York and UTC produced the same Shanghai times.
+Offscreen rendering: 17/17 passed; byte comparison: 17/17 identical to
+tracked previews in this run. No tracked PNGs replaced.
+run.sh: PASS (278); check-memory.sh: PASS (native counters);
+check-relay-signature.sh: PASS (disposable ad-hoc fixtures);
+check-launcher.sh: PASS (fake-home failure paths and unlaunched signed
+candidate; build selected SDK 26.5). Shell syntax and plist/project lint
+passed. Working-tree git diff --check passed in both worktrees; this does
+not cover historical whitespace in the full branch diff.
+
+P0 none listed. APP-V2-R5-02/03/04/05/06 unchanged. Live menu bar and
+production short-screen reachability, actual Keychain ACL, live ECS/nginx
+and independent acceptance not verified. No external network, ECS contact,
+real Keychain read, raw credential persisted/emitted, QuotaBar install/
+start/stop, service restart, commit, push or deployment. Scratch used TMPDIR.
