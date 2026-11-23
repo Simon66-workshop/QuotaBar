@@ -5,7 +5,7 @@ enum RelayStatusHelper {
     static let argument = "--relay-status-helper"
 
     private enum Reply: Codable {
-        case snapshot(Data)
+        case snapshot(RelayStatusClient.Payload)
         case failure(RelayIssue)
     }
 
@@ -43,7 +43,7 @@ enum RelayStatusHelper {
             throw RelayIssue.keychainUnavailable
         }
         switch reply {
-        case .snapshot(let body): return try RelaySnapshot.parse(body)
+        case .snapshot(let payload): return try payload.snapshot()
         case .failure(let issue): throw issue
         }
     }
@@ -53,7 +53,7 @@ enum RelayStatusHelper {
     // the child makes the fixed request and returns only v1 status or a typed error.
     static func runAndExit(
         readToken: @escaping () throws -> String = readLoginItem,
-        fetch: @escaping (String) async throws -> Data = RelayStatusClient.fetchPayload
+        fetch: @escaping (String) async throws -> RelayStatusClient.Payload = RelayStatusClient.fetchPayload
     ) -> Never {
         Task.detached(priority: .utility) {
             let reply: Reply

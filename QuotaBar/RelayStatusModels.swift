@@ -80,6 +80,7 @@ struct RelayLink: Equatable {
     var state: RelayLinkState { reason.state }
     private(set) var reason: RelayReason
     private let receivedReason: RelayReason
+    var wasReady: Bool { receivedReason == .ready }
     private let channel: Channel
     private let heartbeat: RelayTimestamp?
     var lastHeartbeat: Date? { heartbeat?.date }
@@ -122,9 +123,8 @@ struct RelayLink: Equatable {
         if receivedReason == .ready {
             cutoffs.append((.heartbeatLate, cutoff(RelayReason.heartbeatOK)))
             if channel == .wecom {
-                // The public sample age bounds pong age from below. Exact pong
-                // age (including an earlier red deadline) and lease expiry
-                // aren't on the v1 wire; only a new response can prove those.
+                // The public sample age bounds pong age from below. The
+                // aggregate green window may end sooner, without a reason.
                 cutoffs.append((.pongLate, cutoff(RelayReason.pongOK)))
             }
         }
@@ -138,6 +138,10 @@ struct RelayLink: Equatable {
             next = min(next ?? deadline, deadline)
         }
         return next
+    }
+
+    mutating func revokeGreen() {
+        if state == .ok { reason = .sourceUnavailable }
     }
 }
 
@@ -186,12 +190,14 @@ struct RelayCertificate: Equatable {
 
 struct RelaySnapshot: Decodable, Equatable {
     static let freshness: TimeInterval = 75
+    static let maxGreenForMilliseconds = Int(freshness * 1_000)
     let observation: RelayTimestamp
     var observedAt: Date { observation.date }
     let age: Int
     private(set) var feishu: RelayLink
     private(set) var wecom: RelayLink
     let certificate: RelayCertificate
+    private(set) var greenForMilliseconds = 0
 
     private enum Keys: String, CodingKey, CaseIterable {
         case version = "schema_version", observedAt = "observed_at", age = "snapshot_age_s"
@@ -219,19 +225,45 @@ struct RelaySnapshot: Decodable, Equatable {
         requestStartedAt + (Self.freshness - Double(age))
     }
 
-    func projected(at time: TimeInterval, snapshotDeadline: TimeInterval) -> (snapshot: Self, nextDeadline: TimeInterval) {
+    func greenExpiresAt(requestStartedAt: TimeInterval) -> TimeInterval {
+        let duration = feishu.wasReady && wecom.wasReady ? Double(greenForMilliseconds) / 1_000 : 0
+        // Charge the full request/helper duration, not just time since receipt.
+        return requestStartedAt + duration
+    }
+
+    func projected(at time: TimeInterval, snapshotDeadline: TimeInterval,
+                   greenDeadline: TimeInterval) -> (snapshot: Self, nextDeadline: TimeInterval) {
         let observationTime = snapshotDeadline - Self.freshness
         var aged = self
         let feishuDeadline = aged.feishu.project(at: time, observedAt: observation, observationTime: observationTime)
         let wecomDeadline = aged.wecom.project(at: time, observedAt: observation, observationTime: observationTime)
-        return (aged, min(snapshotDeadline, feishuDeadline ?? .infinity, wecomDeadline ?? .infinity))
+        var next = min(snapshotDeadline, feishuDeadline ?? .infinity, wecomDeadline ?? .infinity)
+        if feishu.wasReady && wecom.wasReady {
+            if time < greenDeadline {
+                next = min(next, greenDeadline)
+            } else {
+                // The duration says when the pair stops being provably green,
+                // not which link changed or why. Preserve independently known
+                // red/yellow; do not invent a failure for the remaining rows.
+                aged.feishu.revokeGreen()
+                aged.wecom.revokeGreen()
+            }
+        }
+        return (aged, next)
     }
 
-    static func parse(_ data: Data) throws -> Self {
+    func withGreenWindow(milliseconds: Int) throws -> Self {
+        guard (0...Self.maxGreenForMilliseconds).contains(milliseconds) else { throw RelayIssue.badResponse }
+        var snapshot = self
+        snapshot.greenForMilliseconds = milliseconds
+        return snapshot
+    }
+
+    static func parse(_ data: Data, greenForMilliseconds: Int) throws -> Self {
         let decoder = JSONDecoder()
         var syntax = RelayV1JSON(bytes: Array(data))
         try syntax.check(decoder: decoder)
-        do { return try decoder.decode(Self.self, from: data) }
+        do { return try decoder.decode(Self.self, from: data).withGreenWindow(milliseconds: greenForMilliseconds) }
         catch let issue as RelayIssue { throw issue }
         catch { throw RelayIssue.badResponse }
     }

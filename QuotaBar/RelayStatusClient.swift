@@ -4,6 +4,16 @@ enum RelayStatusClient {
     static let endpoint = URL(string: "https://66workshop.cn/api/relay-status/v1")!
     static let timeout: TimeInterval = 5
     static let maxPayloadBytes = 16_384
+    static let greenWindowHeader = "QuotaBar-Green-For-Ms"
+
+    struct Payload: Codable {
+        let body: Data
+        let greenForMilliseconds: Int
+
+        func snapshot() throws -> RelaySnapshot {
+            try RelaySnapshot.parse(body, greenForMilliseconds: greenForMilliseconds)
+        }
+    }
 
     static func configuration() -> URLSessionConfiguration {
         let config = URLSessionConfiguration.ephemeral
@@ -19,7 +29,7 @@ enum RelayStatusClient {
         return config
     }
 
-    static func fetchPayload(token: String) async throws -> Data {
+    static func fetchPayload(token: String) async throws -> Payload {
         var request = URLRequest(url: endpoint, timeoutInterval: timeout)
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -30,8 +40,8 @@ enum RelayStatusClient {
         do {
             let (data, response) = try await session.data(for: request)
             guard let response = response as? HTTPURLResponse else { throw RelayIssue.badResponse }
-            _ = try decode(data, response: response)
-            return data
+            let snapshot = try decode(data, response: response)
+            return Payload(body: data, greenForMilliseconds: snapshot.greenForMilliseconds)
         } catch let issue as RelayIssue {
             throw issue
         } catch let error as URLError {
@@ -63,7 +73,16 @@ enum RelayStatusClient {
             guard let date = formatter.date(from: header), formatter.string(from: date) == header else {
                 throw RelayIssue.badResponse
             }
-            let snapshot = try RelaySnapshot.parse(data)
+            // An older server (no header) supplies no positive green window.
+            let greenForMilliseconds: Int
+            if let raw = response.value(forHTTPHeaderField: greenWindowHeader) {
+                guard (1...5).contains(raw.utf8.count), raw.utf8.allSatisfy({ (48...57).contains($0) }),
+                      let value = Int(raw) else { throw RelayIssue.badResponse }
+                greenForMilliseconds = value
+            } else {
+                greenForMilliseconds = 0
+            }
+            let snapshot = try Payload(body: data, greenForMilliseconds: greenForMilliseconds).snapshot()
             let second = RelayTimestamp.microsecondsPerSecond
             let dateAge = Int64(date.timeIntervalSince1970) * second - snapshot.observation.microsecondsSince1970
             let freshness = Int(RelaySnapshot.freshness)

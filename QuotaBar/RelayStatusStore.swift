@@ -37,7 +37,7 @@ final class RelayStatusStore: ObservableObject {
     private var expires: TimeInterval?
     // Keep the high-water mark even after errors/expiry. Refusing older observations
     // is fail-closed and avoids retaining an unbounded history of deadlines.
-    private var latest: (observedAt: Date, deadline: TimeInterval)?
+    private var latest: (observedAt: Date, deadline: TimeInterval, greenDeadline: TimeInterval)?
 
     init(
         loadSnapshot: @escaping () async throws -> RelaySnapshot = RelayStatusHelper.load,
@@ -125,8 +125,9 @@ final class RelayStatusStore: ObservableObject {
                 display = .unavailable(.expired)
             } else {
                 displayDeadline = expires
-                if case .live(let snapshot) = display {
-                    let projection = snapshot.projected(at: time, snapshotDeadline: expires)
+                if case .live(let snapshot) = display, let latest {
+                    let projection = snapshot.projected(at: time, snapshotDeadline: expires,
+                                                        greenDeadline: latest.greenDeadline)
                     if projection.snapshot != snapshot { display = .live(projection.snapshot) }
                     displayDeadline = projection.nextDeadline
                 }
@@ -183,10 +184,12 @@ final class RelayStatusStore: ObservableObject {
                     break
                 }
                 var deadline = snapshot.expiresAt(requestStartedAt: requestStarted)
+                var greenDeadline = snapshot.greenExpiresAt(requestStartedAt: requestStarted)
                 if let latest, snapshot.observedAt == latest.observedAt {
                     deadline = min(deadline, latest.deadline)
+                    greenDeadline = min(greenDeadline, latest.greenDeadline)
                 }
-                latest = (snapshot.observedAt, deadline)
+                latest = (snapshot.observedAt, deadline, greenDeadline)
                 if time < deadline {
                     failures = 0
                     retryNotBefore = 0
@@ -195,7 +198,8 @@ final class RelayStatusStore: ObservableObject {
                     expires = deadline
                     // Include time spent in the request/helper, and use the
                     // clamped deadline so repeats cannot extend green.
-                    display = .live(snapshot.projected(at: time, snapshotDeadline: deadline).snapshot)
+                    display = .live(snapshot.projected(at: time, snapshotDeadline: deadline,
+                                                       greenDeadline: greenDeadline).snapshot)
                 } else {
                     fail(.expired, at: time)
                 }

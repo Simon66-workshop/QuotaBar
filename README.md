@@ -98,6 +98,10 @@ interaction policy. The child returns status or a fixed error, never the credent
 The relay only sends the token as a Bearer header to
 `https://66workshop.cn/api/relay-status/v1`; redirects are refused. QuotaBar does not
 log, export, or save the token outside the login keychain.
+Both green rows are time-limited by the server's `QuotaBar-Green-For-Ms`
+response header. QuotaBar charges the full request time and revokes green at the
+local monotonic deadline without waiting for the next poll. An older server
+without this header cannot yield a green indicator.
 
 Offline verification (synthetic responses, no real Keychain access or QuotaBar launch):
 `QUOTABAR_SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk bash QuotaBarTests/check-relay-status.sh`.
