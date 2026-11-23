@@ -118,9 +118,19 @@ final class RelayStatusStore: ObservableObject {
     private func tick() {
         guard started else { return }
         let time = now()
-        if let expires, time >= expires {
-            self.expires = nil
-            display = .unavailable(.expired)
+        var displayDeadline = TimeInterval.infinity
+        if let expires {
+            if time >= expires {
+                self.expires = nil
+                display = .unavailable(.expired)
+            } else {
+                displayDeadline = expires
+                if case .live(let snapshot) = display {
+                    let aged = snapshot.agingHeartbeats(at: time, snapshotDeadline: expires)
+                    if aged != snapshot { display = .live(aged) }
+                    displayDeadline = min(expires, aged.nextHeartbeatDeadline(snapshotDeadline: expires) ?? .infinity)
+                }
+            }
         }
         let canPoll = online && !unauthorized && flight == nil
         let due = max(nextPoll, retryNotBefore)
@@ -129,7 +139,7 @@ final class RelayStatusStore: ObservableObject {
         }
         timer?.cancel()
         timer = nil
-        let wake = min(expires ?? .infinity, canPoll && flight == nil ? due : .infinity)
+        let wake = min(displayDeadline, canPoll && flight == nil ? due : .infinity)
         if wake.isFinite {
             // Bound a single sleep, not the server's Retry-After deadline.
             timer = Task { [weak self] in
@@ -183,7 +193,9 @@ final class RelayStatusStore: ObservableObject {
                     retryIssue = nil
                     nextPoll = time + RelayPollTiming.delay(failures: 0, jitter: jitter())
                     expires = deadline
-                    display = .live(snapshot)
+                    // Include time spent in the request/helper, and use the
+                    // clamped deadline so repeats cannot extend green.
+                    display = .live(snapshot.agingHeartbeats(at: time, snapshotDeadline: deadline))
                 } else {
                     fail(.expired, at: time)
                 }

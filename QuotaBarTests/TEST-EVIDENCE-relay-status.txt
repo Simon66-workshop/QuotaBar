@@ -780,3 +780,49 @@ not validate the production panel's short-window bottom scroll.
 GO-only build/render and live checks were not run. All test scratch was
 in TMPDIR. No network, ECS contact, app install/start/stop, real Keychain
 read, commit, push or deployment.
+
+== App V2 round 2 P1 remediation (2026-11-23 UTC / Nov 22 New York) ==
+Full App HEAD baseline: 0142c8f39af81d3056dfa72b9abb1d9a29823ed0.
+Tested working-tree changes, not a new commit. macOS 27.2 (26B123) arm64;
+CLT Apple Swift 6.4 (swiftlang-6.4.0.34.1, driver 1.168.6); macOS SDK 26.5
+selected for the standalone checks via QUOTABAR_SDK/SDKROOT.
+/usr/bin/python3 3.9.6 generated the contract fixtures and compared PNGs.
+Swift source/test diff SHA-256:
+5e7cda0c7911051e93510fdaf4a056162466328d2f17b6fa1d655d721e333229
+
+Contract source: local server HEAD dbbad3b21cd28bc670c886544570a060434d731b,
+server/relay-status/common.py::project_snapshot, loaded from the committed
+file. Synthetic collection: Feishu heartbeat 85s old, WeCom heartbeat
+and effective pong 13s old. The pure function emitted Fixtures/relay-r2-age-
+{0,5,20}.json at monotonic offsets 0, 5.25, 20s. No server or HTTP process
+was started; the App tests use synthetic response headers.
+
+APP-V2-R2-01: PASS. The store stayed green at 4.75s, and its scheduled
+timer changed Feishu to degraded/heartbeat_late at 5s without a second
+request. At 20s it was still yellow with WeCom and certificate unchanged.
+Same-observation replay could not restore green; request/helper elapsed
+time was charged before publishing. WeCom's public heartbeat deadline
+also passed. Snapshot expiry still changed the display to gray at 75s.
+The v1 response does not expose pong lifetime; no client pong deadline was
+inferred and no wire fields changed.
+APP-V2-R2-02: PASS. The age-20 response decoded and displayed yellow on
+cold start; the 5.25s boundary case (wire age 5) also stayed yellow.
+Both links were checked at the projected 90s/180s acceptance boundaries;
+missing/contradictory heartbeat evidence stayed gray.
+
+check-relay-status.sh: PASS (both P1s, strict parsing, synthetic HTTP and
+helper/IPC, polling, replay and version 1.8.28/41). New York and UTC returned
+the same Shanghai time. All 17 offscreen PNGs regenerated under TMPDIR and
+were byte-identical to the existing previews; no previews replaced.
+run.sh: PASS (278 checks). check-memory.sh: PASS (native page counters).
+check-relay-signature.sh: PASS (unlaunched synthetic ad-hoc fixtures).
+check-launcher.sh: PASS (fake-home failure scenarios and disposable signed
+candidate compile/link/verification). Default SDK 27.0 lacked
+SwiftUIMacros.StateMacro; actual build used the launcher fallback, SDK 26.5.
+Shell syntax, plist/project lint and git diff --check: PASS.
+
+No P0 listed; R2-03/04/05 unchanged. Live panel/menu bar, real Keychain ACL,
+ECS/nginx and legacy GO-only scripts/packaging were not tested.
+No network, ECS contact, real Keychain read, QuotaBar install/start/stop,
+commit, push, deployment or service restart. Test scratch was in TMPDIR,
+not the checkout.

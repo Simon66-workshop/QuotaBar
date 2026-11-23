@@ -45,6 +45,7 @@ struct RelayStatusCheck {
         await cachedAtStartup()
         try await helper(snapshot)
         let root = URL(fileURLWithPath: args[2], isDirectory: true)
+        try await heartbeatFreshness(root.appendingPathComponent("QuotaBarTests/Fixtures"))
         let version = try Data(contentsOf: root.appendingPathComponent("QuotaBar/Info.plist"))
         let plist = try PropertyListSerialization.propertyList(from: version, format: nil) as? [String: Any]
         precondition(plist?["CFBundleShortVersionString"] as? String == "1.8.28")
@@ -164,14 +165,14 @@ struct RelayStatusCheck {
             for (reason, heartbeat, expected) in [
                 (RelayReason.heartbeatLate, nil, RelayLinkState.unknown),
                 (.heartbeatLate, "2026-11-22T17:15:00Z", .unknown),
-                (.heartbeatLate, "2026-11-22T17:13:30Z", .unknown), // 90s
-                (.heartbeatLate, "2026-11-22T17:13:29.999999Z", .degraded),
-                (.heartbeatLate, "2026-11-22T17:12:00Z", .degraded), // 180s
-                (.heartbeatLate, "2026-11-22T17:11:59.999999Z", .unknown),
+                (.heartbeatLate, "2026-11-22T17:13:33Z", .unknown), // upper exclusive = 90s
+                (.heartbeatLate, "2026-11-22T17:13:32.999999Z", .degraded),
+                (.heartbeatLate, "2026-11-22T17:12:02Z", .degraded), // lower = 180s
+                (.heartbeatLate, "2026-11-22T17:12:01.999999Z", .unknown),
                 (.heartbeatStale, nil, .unknown),
                 (.heartbeatStale, "2026-11-22T17:15:00Z", .unknown), // Exact audit reproduction
-                (.heartbeatStale, "2026-11-22T17:12:00Z", .unknown),
-                (.heartbeatStale, "2026-11-22T17:11:59.999999Z", .down),
+                (.heartbeatStale, "2026-11-22T17:12:03Z", .unknown), // upper exclusive = 180s
+                (.heartbeatStale, "2026-11-22T17:12:02.999999Z", .down),
                 (.unitDown, nil, .down),
                 (.unitDown, "2026-11-22T17:15:00Z", .down),
                 (.transitioning, nil, .degraded),
@@ -188,7 +189,7 @@ struct RelayStatusCheck {
         precondition(auditCase.age == 2 && auditCase.feishu.state == .unknown &&
                      auditCase.wecom.state == .unknown && auditCase.summary == .unknown)
         print("AUDIT_D68C611_APP_02=PASS · both paths: inclusive +5s/90s and microsecond edges, including +5.0009s")
-        print("AUDIT_D68C611_APP_03=PASS · both paths: late (90,180]s, stale >180s; missing/contradictory evidence gray; unit evidence unchanged")
+        print("AUDIT_D68C611_APP_03=PASS · both paths: projected late (90,180]s, stale >180s; contradictory evidence gray; unit evidence unchanged")
     }
 
     private static func certificateLifetime(_ snapshot: RelaySnapshot) throws {
@@ -411,6 +412,8 @@ struct RelayStatusCheck {
         await status.waitForAttempt()
         precondition(calls == 5)
         let nearlyOld = try parse(good.replacingOccurrences(of: "T17:15:00Z", with: "T17:16:00Z")
+            .replacingOccurrences(of: "T17:14:51Z", with: "T17:15:59Z")
+            .replacingOccurrences(of: "T17:14:47Z", with: "T17:15:58Z")
             .replacingOccurrences(of: #""snapshot_age_s": 2"#, with: #""snapshot_age_s": 70"#))
         response = .success(nearlyOld)
         stall = true
@@ -470,6 +473,8 @@ struct RelayStatusCheck {
         }
         precondition(calls == 5, "the identical observation was actually replayed at 90 and 120s")
         let newerWire = good.replacingOccurrences(of: "T17:15:00Z", with: "T17:15:30Z")
+            .replacingOccurrences(of: "T17:14:51Z", with: "T17:15:29Z")
+            .replacingOccurrences(of: "T17:14:47Z", with: "T17:15:28Z")
         let newer = try parse(newerWire)
         response = newer
         now = 180
@@ -498,6 +503,87 @@ struct RelayStatusCheck {
         await status.waitForAttempt()
         precondition(status.display == .unavailable(.expired), "older observation cannot bypass the high-water mark")
         print("REPLAY=PASS · replay at 30/60/90/120s, exact deadline, recovery with newer data, shortening, reconnect and rollback")
+    }
+
+    @MainActor
+    private static func heartbeatFreshness(_ fixtures: URL) async throws {
+        // Unmodified v1 bodies emitted by the local server's project_snapshot.
+        func projected(_ age: Int) throws -> RelaySnapshot {
+            let body = try Data(contentsOf: fixtures.appendingPathComponent("relay-r2-age-\(age).json"))
+            var headers = freshHeaders
+            headers["Date"] = "Sun, 22 Nov 2026 17:15:" + String(format: "%02d", age) + " GMT"
+            let response = HTTPURLResponse(url: RelayStatusClient.endpoint, statusCode: 200,
+                                           httpVersion: nil, headerFields: headers)!
+            return try RelayStatusClient.decode(body, response: response)
+        }
+
+        let green = try projected(0)
+        precondition(green.summary == .ok)
+        for age in [5, 20] {
+            let yellow = try projected(age)
+            precondition(yellow.age == age && yellow.feishu.lastHeartbeat == green.feishu.lastHeartbeat &&
+                         yellow.feishu.reason == .heartbeatLate && yellow.summary == .degraded &&
+                         yellow.wecom == green.wecom && yellow.certificate == green.certificate,
+                         "APP-V2-R2-02: retain the server's projected yellow")
+            let cold = RelayStatusStore(loadSnapshot: { yellow }, now: { 0 }, jitter: { 0 })
+            cold.start(monitorNetwork: false)
+            await cold.waitForAttempt()
+            precondition(cold.display == .live(yellow))
+            cold.stop()
+        }
+        print("APP-V2-R2-02=PASS · cold start accepts server yellow at age 20s and the floored 5.25s boundary")
+
+        var time: TimeInterval = 0
+        var calls = 0
+        let status = RelayStatusStore(loadSnapshot: {
+            calls += 1
+            return green
+        }, now: { time }, jitter: { 0 })
+        status.start(monitorNetwork: false)
+        defer { status.stop() }
+        await status.waitForAttempt()
+        time = 4.75
+        status.clockAdvanced()
+        precondition(status.display == .live(green) && calls == 1)
+        time = 5
+        // Let the scheduled heartbeat timer deliver the update (no tick or poll).
+        for _ in 0..<200 where status.display.summary == .ok {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        guard case .live(let aged) = status.display else { preconditionFailure("snapshot still fresh") }
+        precondition(aged.feishu.reason == .heartbeatLate && aged.summary == .degraded &&
+                     aged.wecom == green.wecom && aged.certificate == green.certificate && calls == 1,
+                     "APP-V2-R2-01: heartbeat timer must revoke green without fetching")
+        time = 20
+        status.clockAdvanced()
+        precondition(status.display == .live(aged) && calls == 1)
+        status.manualRefresh()
+        await status.waitForAttempt()
+        precondition(status.display == .live(aged) && calls == 2, "same observation must not restore green")
+        time = 75
+        status.clockAdvanced()
+        await status.waitForAttempt()
+        precondition(status.display == .unavailable(.expired), "snapshot expiry still overrides heartbeat yellow")
+
+        time = 0
+        let delayed = RelayStatusStore(loadSnapshot: { time = 6; return green }, now: { time }, jitter: { 0 })
+        delayed.start(monitorNetwork: false)
+        await delayed.waitForAttempt()
+        precondition(delayed.display == .live(aged), "request time counts against green")
+        delayed.stop()
+
+        let wecomGreen = try parse(good.replacingOccurrences(of: "T17:14:47Z", with: "T17:14:02Z"))
+        time = 0
+        let wecom = RelayStatusStore(loadSnapshot: { wecomGreen }, now: { time }, jitter: { 3 })
+        wecom.start(monitorNetwork: false)
+        await wecom.waitForAttempt()
+        precondition(wecom.display == .live(wecomGreen))
+        time = 30 // 58s at collection + 2s wire age + 30s local elapsed.
+        wecom.clockAdvanced()
+        guard case .live(let agedWeCom) = wecom.display else { preconditionFailure("snapshot still fresh") }
+        precondition(agedWeCom.wecom.reason == .heartbeatLate && agedWeCom.feishu == wecomGreen.feishu)
+        wecom.stop()
+        print("APP-V2-R2-01=PASS · heartbeat timer, request time, both channels, replay and independent 75s expiry")
     }
 
     @MainActor
