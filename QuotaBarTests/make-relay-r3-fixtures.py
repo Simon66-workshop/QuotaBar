@@ -67,6 +67,8 @@ cases = [
          [0, 5, 5.25, 10, 15, 15.25, 20], link(75), link(55), 55, lease=10),
     case("private pong offset can advance yellow", [0, 4.75, 5, 5.25, 15, 15.25, 20],
          link(0), link(45), 55),
+    case("APP-V2-R5-01", [0, 4.75, 5, 5.25, 20, 74.75],
+         link(0, "down", "unit_down"), link(0), 55),
     case("private pong offset can advance red", [0, 5, 5.25, 20, 50.25],
          link(0), link(130, "degraded", "heartbeat_late"), 175,
          local={5.25: ["ready", "heartbeat_late"], 20: ["ready", "heartbeat_late"]}),

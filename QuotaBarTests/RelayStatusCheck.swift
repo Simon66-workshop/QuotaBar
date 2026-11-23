@@ -294,6 +294,21 @@ struct RelayStatusCheck {
                                               greenDeadline: legacy.greenExpiresAt(requestStartedAt: 100))
             precondition(projection.snapshot.summary == .unknown &&
                          projection.snapshot.certificate == snapshot.certificate)
+            for (readyText, nonGreenText, expected) in [
+                (#""feishu": {"state":"ok","reason":"ready""#,
+                 #""feishu": {"state":"down","reason":"unit_down""#, RelayLinkState.down),
+                (#""wecom": {"state":"ok","reason":"ready""#,
+                 #""wecom": {"state":"degraded","reason":"reconnecting""#, RelayLinkState.degraded),
+            ] {
+                let mixed = Data(good.replacingOccurrences(of: readyText, with: nonGreenText).utf8)
+                let decoded = try send(200, headers(RelayStatusClient.greenWindowHeader, value), body: mixed)
+                let projected = decoded.projected(at: 100, snapshotDeadline: 173,
+                                                  greenDeadline: decoded.greenExpiresAt(requestStartedAt: 100)).snapshot
+                precondition(projected.summary == expected &&
+                             projected.feishu.reason == (expected == .down ? .unitDown : .sourceUnavailable) &&
+                             projected.wecom.reason == (expected == .down ? .sourceUnavailable : .reconnecting),
+                             "a mixed response must not keep green without a positive window")
+            }
         }
         for zero in ["0", "000", " 0 "] {
             let zeroAge = try send(200, headers("Age", zero))
@@ -656,8 +671,8 @@ struct RelayStatusCheck {
                 let reasons = [snapshot.feishu.reason.rawValue, snapshot.wecom.reason.rawValue]
                 let serverReasons = [server.feishu.reason.rawValue, server.wecom.reason.rawValue]
                 precondition(projection.nextDeadline > now && projection.nextDeadline <= deadline, note)
-                if initial.summary == .ok && now >= greenDeadline {
-                    precondition(snapshot.summary != .ok, note)
+                if (initial.feishu.wasReady || initial.wecom.wasReady) && now >= greenDeadline {
+                    precondition(snapshot.feishu.state != .ok && snapshot.wecom.state != .ok, note)
                     // The aggregate header cannot supply a private reason.
                     // Check exact matches where the public evidence suffices;
                     // gray is valid for a ready row or an opaque transition.
@@ -713,7 +728,8 @@ struct RelayStatusCheck {
             print("\(id)=PASS · scheduled row and summary update before the next poll")
         }
 
-        for (name, threshold) in [("private lease cutoff", 10.0), ("private pong offset can advance yellow", 5.0)] {
+        for (name, threshold) in [("private lease cutoff", 10.0), ("private pong offset can advance yellow", 5.0),
+                                  ("APP-V2-R5-01", 5.0)] {
             let points = cases.first { $0.name == name }!.points
             let initial = try points[0].response()
             precondition(initial.greenExpiresAt(requestStartedAt: 0) == threshold)
@@ -727,27 +743,41 @@ struct RelayStatusCheck {
             status.start(monitorNetwork: false)
             defer { status.stop() }
             await status.waitForAttempt()
-            precondition(status.display.summary == .ok, name)
+            precondition(status.display == .live(initial) && calls == 1, name)
             clock = threshold - 0.05
             status.clockAdvanced()
-            precondition(status.display.summary == .ok, name)
+            precondition(status.display == .live(initial), name)
             await Task.yield()
             clock = threshold
-            for _ in 0..<200 where status.display.summary == .ok {
+            for _ in 0..<200 where status.display == .live(initial) {
                 try await Task.sleep(for: .milliseconds(10))
             }
             guard case .live(let revoked) = status.display else { preconditionFailure(name) }
-            precondition(revoked.feishu.state == .unknown && revoked.wecom.state == .unknown && calls == 1, name)
+            let retainedFeishu: RelayReason = initial.feishu.wasReady ? .sourceUnavailable : initial.feishu.reason
+            precondition(revoked.feishu.reason == retainedFeishu && revoked.wecom.reason == .sourceUnavailable &&
+                         calls == 1, name)
             clock = 20
+            if name == "APP-V2-R5-01" {
+                status.clockAdvanced()
+                let server = points.first { $0.elapsed == clock }!.server!
+                precondition(status.display == .live(revoked) && status.display.summary == .down &&
+                             server.feishu.reason == .unitDown && server.wecom.reason == .pongLate &&
+                             calls == 1, name)
+                print("\(name)=PASS · one load; WeCom green revoked at +5s; Feishu and summary remain red at +20s")
+            }
             status.manualRefresh()
             await status.waitForAttempt()
             guard case .live(let replayed) = status.display else { preconditionFailure(name) }
-            precondition(replayed.feishu.state == .unknown && replayed.summary != .ok && calls == 2,
+            precondition(replayed.feishu.reason == retainedFeishu && replayed.wecom.state != .ok && calls == 2,
                          "same observation cannot regrant green")
             response = try points.first { $0.elapsed == clock }!.response()
             status.manualRefresh()
             await status.waitForAttempt()
-            precondition(status.display == .live(response) && status.display.summary != .ok && calls == 3, name)
+            guard case .live(let refreshed) = status.display else { preconditionFailure(name) }
+            // A new response can establish a non-green reason; the same
+            // observation still cannot regrant green after the shared cutoff.
+            precondition(refreshed.feishu.reason == retainedFeishu && refreshed.wecom == response.wecom &&
+                         calls == 3, name)
 
             clock = 0
             let delayed = RelayStatusStore(loadSnapshot: { clock = threshold; return initial },

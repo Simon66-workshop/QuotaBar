@@ -917,3 +917,51 @@ short-window bottom reachability, real Keychain ACL, and ECS/nginx runtime
 were not verified; GO-only scripts were not run. No network, ECS contact,
 real Keychain read, QuotaBar install/start/stop, service restart, commit,
 push or deployment. All test scratch was in system TMPDIR.
+
+== APP-V2-R5-01 mixed-row green window (2026-11-23 UTC / Nov 22 New York) ==
+Full App HEAD baseline: 4797688ad714b1fac044f69d78b081e898968d3c.
+Full server HEAD baseline: 800114cce1517dc0237d8c09a68c239a787948af.
+Full local origin/main merge base: 5d405863cea61bd5b0fb2b79bdcc8ff7b3e94d5d.
+Tested uncommitted changes on macOS 27.2 (26B123) arm64; CLT Apple Swift
+6.4 (swiftlang-6.4.0.34.1, driver 1.168.6), macOS SDK 26.5.
+Python 3.14.6 and /usr/bin/python3 3.9.6 produced identical public fixture
+bytes from the local server projection. Both ran the server suite (60/60
+each); system Python also compared preview bytes. Python uses no SDK.
+Fixture relay-r3-projection.json SHA-256 (11 timelines, 68 points):
+  e961715a3a17364641509dc702a2f107165857f78b0e12b1514483f093ad295a
+Binary git diff SHA-256 excluding each worktree's test evidence:
+  App:    a003d5434c90dc2d565b6513dd33fe88d876a8473ea8ee98f2e193d7e815b9cf
+  Server: 79abc17c9905a57ab584f99faeb16f0f0f7c78bc93c6f19d1643c3454cae7ffd
+
+APP-V2-R5-01: PASS. Pure server/Swift HEAD comparison reproduced unit_down /
+ready with a 0 ms window at t=0 and the stale App green at +20s, when the
+server using the same evidence had already projected pong_late. With both
+fixes, the header is 5000 ms at t=0 and the production App store's scheduled
+timer makes WeCom gray at +5s without a second load. At +20s Feishu is still
+unit_down and the summary is still red; a subsequent server response shows
+WeCom's confirmed pong_late. App HEAD with the fixed server still misses
+mixed-row expiry; the fixed App with server HEAD immediately clears mixed
+green because its 0 ms window cannot prove green. Dual green still expires.
+Synthetic HTTP covers missing/zero windows with red or yellow preserved.
+Same-observation replay cannot restore green past the shared deadline.
+
+check-relay-status.sh: PASS (including the R2/R3/R4 regressions, mixed-row
+timer, synthetic HTTP/helper checks, and version 1.8.28/41). The initial
+run exposed an outdated test expectation that a same-observation response
+could keep a lone green after the original deadline; updated that assertion
+to enforce the existing replay clamp and reran successfully.
+New York and UTC produced the same Shanghai times.
+Offscreen rendering: 17/17 passed; byte comparison: 17/17 identical to
+tracked previews in this run. No tracked PNGs replaced.
+run.sh: PASS (278); check-memory.sh: PASS (native counters);
+check-relay-signature.sh: PASS (disposable ad-hoc fixtures);
+check-launcher.sh: PASS (fake-home failure paths and unlaunched signed
+candidate; build selected SDK 26.5). Shell syntax and plist/project lint
+passed. Working-tree git diff --check passed in both worktrees; this does
+not cover historical whitespace in the full branch diff.
+
+P0 none listed. APP-V2-R5-02/03/04/05/06 unchanged. Live menu bar and
+production short-screen reachability, actual Keychain ACL, live ECS/nginx
+and independent acceptance not verified. No external network, ECS contact,
+real Keychain read, raw credential persisted/emitted, QuotaBar install/
+start/stop, service restart, commit, push or deployment. Scratch used TMPDIR.

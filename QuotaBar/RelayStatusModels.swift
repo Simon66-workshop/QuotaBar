@@ -124,7 +124,7 @@ struct RelayLink: Equatable {
             cutoffs.append((.heartbeatLate, cutoff(RelayReason.heartbeatOK)))
             if channel == .wecom {
                 // The public sample age bounds pong age from below. The
-                // aggregate green window may end sooner, without a reason.
+                // shared green window may end sooner, without a reason.
                 cutoffs.append((.pongLate, cutoff(RelayReason.pongOK)))
             }
         }
@@ -226,7 +226,7 @@ struct RelaySnapshot: Decodable, Equatable {
     }
 
     func greenExpiresAt(requestStartedAt: TimeInterval) -> TimeInterval {
-        let duration = feishu.wasReady && wecom.wasReady ? Double(greenForMilliseconds) / 1_000 : 0
+        let duration = feishu.wasReady || wecom.wasReady ? Double(greenForMilliseconds) / 1_000 : 0
         // Charge the full request/helper duration, not just time since receipt.
         return requestStartedAt + duration
     }
@@ -238,13 +238,12 @@ struct RelaySnapshot: Decodable, Equatable {
         let feishuDeadline = aged.feishu.project(at: time, observedAt: observation, observationTime: observationTime)
         let wecomDeadline = aged.wecom.project(at: time, observedAt: observation, observationTime: observationTime)
         var next = min(snapshotDeadline, feishuDeadline ?? .infinity, wecomDeadline ?? .infinity)
-        if feishu.wasReady && wecom.wasReady {
+        if aged.feishu.state == .ok || aged.wecom.state == .ok {
             if time < greenDeadline {
                 next = min(next, greenDeadline)
             } else {
-                // The duration says when the pair stops being provably green,
-                // not which link changed or why. Preserve independently known
-                // red/yellow; do not invent a failure for the remaining rows.
+                // The shared duration bounds every ready row, but does not
+                // say which link changed or why. Preserve known red/yellow.
                 aged.feishu.revokeGreen()
                 aged.wecom.revokeGreen()
             }
