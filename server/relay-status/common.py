@@ -186,7 +186,7 @@ def project_snapshot(doc, current_boot, current_mono):
         raise ValueError("stale snapshot")
     observed = parse_date(doc["observed_at"])
     public_connections = {}
-    for name, max_green_age in (("feishu", FEISHU_OK_AGE), ("wecom", WECOM_PONG_OK_AGE)):
+    for name, heartbeat_ok in (("feishu", FEISHU_OK_AGE), ("wecom", WECOM_HEARTBEAT_OK_AGE)):
         status = doc[name]
         keys = "state reason last_heartbeat_at"
         if not exact(status, keys + (" effective_pong_age_s" if name == "wecom" else "")):
@@ -195,18 +195,29 @@ def project_snapshot(doc, current_boot, current_mono):
         if type(state) is not str or type(reason) is not str or reason not in REASONS.get(state, ()):
             raise ValueError("invalid connection enum")
         heartbeat = validate_timestamp(status["last_heartbeat_at"], observed)
-        # Both times are floored to UTC seconds. The true difference can
-        # differ by less than one second, so a displayed 91s cannot be <=90s.
-        # Compare at collection, not at request time; snapshot TTL is separate.
-        if state == "ok" and (heartbeat is None or observed - heartbeat > max_green_age):
+        # Check green was possible at collection (times are floored to UTC
+        # seconds). The effective WeCom pong cannot be younger than its sample.
+        heartbeat_age = max(0, observed - heartbeat) if heartbeat is not None else None
+        collection_limit = min(heartbeat_ok, WECOM_PONG_OK_AGE) if name == "wecom" else heartbeat_ok
+        if state == "ok" and (heartbeat_age is None or heartbeat_age > collection_limit):
             raise ValueError("contradictory green heartbeat evidence")
         if name == "wecom":
             pong = status["effective_pong_age_s"]
             if (pong is not None and (not number(pong) or pong < 0)
-                    or state == "ok" and (pong is None or not observed - heartbeat <= pong + 1
+                    or state == "ok" and (pong is None or heartbeat_age > pong + 1
                                           or pong > WECOM_PONG_OK_AGE)):
                 raise ValueError("contradictory pong evidence")
-        public_connections[name] = {key: status[key] for key in keys.split()}
+        if state == "ok":
+            # Age the observed evidence with the unrounded monotonic elapsed
+            # time, not the public (floored) snapshot_age_s. Do not mutate
+            # the snapshot or turn an already non-green observation green.
+            if heartbeat_age + age > heartbeat_ok:
+                state, reason = "degraded", "heartbeat_late"
+            elif name == "wecom" and pong + age > WECOM_PONG_OK_AGE:
+                state, reason = "degraded", "pong_late"
+        public_connections[name] = {
+            "state": state, "reason": reason, "last_heartbeat_at": status["last_heartbeat_at"],
+        }
     cert = doc["certificate"]
     if not exact(cert, "state expires_at days_remaining"):
         raise ValueError("invalid certificate")

@@ -136,3 +136,41 @@ under v2 and were not addressed; other P2/P3 findings were not targeted.
 NO_DEPLOY / NO_COMMIT / NO_PUSH. No external network, ECS, QuotaBar operation,
 real Keychain access, or live install/rollback/reload. No raw token or secret
 was persisted or emitted; temporary test files were under TMPDIR and removed.
+
+== Server P0/P1 remediation (2026-11-23T01:01:11Z) ==
+Baseline HEAD (feat/relay-status-server): aeafa50221bf6b22b647e01b1b5f9a1d995416ae
+Local origin/main: 5d405863cea61bd5b0fb2b79bdcc8ff7b3e94d5d
+Scope: uncommitted server/relay-status candidate. Candidate SHA-256
+(nginx-gate.py candidate_sha, excludes this evidence):
+ace6630826b1ac4ee96853ed29b3298ebb0c4d2d3194c1f5e47056001f48c5dc
+Host: macOS 27.2 (26B123), arm64. macOS SDK 27.0; Apple Swift 6.4
+(swiftlang-6.4.0.34.1). Python 3.14.6 and /usr/bin/python3 3.9.6.
+
+PASS: python3 -B server/relay-status/tests/run.py
+  Trusted TMPDIR, Python 3.14.6: 54/54 (1.268s).
+  TMPDIR mode 1777 with a separate short trusted HOME, Python 3.14.6:
+    54/54 (1.362s). This is a permissions simulation on macOS, not Linux.
+  TMPDIR unset with a short trusted HOME, Python 3.9.6: 54/54 (1.413s).
+  P0-01: initial provisioning and rotation in synthetic subprocess tests
+    use a real stdin pipe and suppress child output. Real filesystem writes
+    contain only 0600 verify.json; no raw file is created. Existing verify.json
+    blocks overwrite; a failed handoff removes the digest; the old digest
+    expires at the 24h boundary. Native writer built against the macOS SDK,
+    with expected SecKeychainOpen deprecation warning. Six invalid inputs
+    were silently rejected before any Keychain operation.
+  P0-02: unchanged private snapshot served at +25s returns HTTP 200 with
+    Feishu heartbeat_late (110s) and WeCom pong_late (80s). Exact and fractional
+    evidence boundaries, independent channel expiry, heartbeat precedence,
+    immutable projection and HTTP 503 past the 75s TTL were checked.
+  P1-01: trusted, short fixture path with synthetic Unix socket round trip;
+    1777 ancestor still rejected by the unchanged production reader even
+    with a private child. No test fixture directory remained in the repo.
+PASS: bash -n on deploy-common.sh, install.sh, rollback.sh and README snippet;
+  install/rollback --dry-run; git diff --check and new-file whitespace checks.
+
+NOT RUN: real login Keychain add/update, QuotaBar read authorization, or isolated
+Ubuntu 22.04 nginx/systemd runtime matrix. P2/P3 remain out of scope.
+NO_DEPLOY / NO_COMMIT / NO_PUSH. No external network, ECS, QuotaBar operation,
+real Keychain access, service restart, live install/rollback/reload, or
+production approval. No real credential was generated; temporary test/build
+artifacts were under the host TMPDIR and removed.

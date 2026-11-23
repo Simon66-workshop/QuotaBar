@@ -231,7 +231,6 @@ def certificate(expiry, now):
 
 def collect():
     current_boot = boot_id()
-    observed_boottime = boot_clock()
     policy = read_policy()
     try:
         uid = pwd.getpwnam("relay66").pw_uid
@@ -248,7 +247,7 @@ def collect():
                for path in (FEISHU_FILE, WECOM_FILE)]
     lease_sample = source(LEASE_FILE, mode=0o644, missing_ok=True)
     after = load_units()
-    now, mono = time.time(), time.monotonic()
+    now, mono, observed_boottime = time.time(), time.monotonic(), boot_clock()
     lease = lease_status(lease_sample, now, policy)
     doc = {"schema_version": 1, "boot_id": current_boot, "observed_boottime": observed_boottime,
            "observed_at": rfc3339(now), "certificate": certificate(expiry, now)}

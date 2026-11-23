@@ -23,7 +23,7 @@
 | 本机叶证书剩余时间 | >14 天 | >0 且 ≤14 天 | ≤0；按完整 24 小时向下取整 |
 | 快照时效 | 同一 boot、年龄 ≤75s 可读 | — | >75s、未来、boot 不符或缺损 → HTTP 503，不造业务红灯 |
 
-unit 确认 failed/inactive 优先判红；活跃的有效停机 lease 仅解释已停，或对运行中的实例产生冲突黄，不替代观测。unit 过渡为黄。当前实例心跳缺失、来源不可用、时间矛盾、未来 >5 秒等为灰；可保留可信历史的时间，但不沿用旧绿。企微有效 pong 年龄是 `last_pong_age + 文件年龄`；`source_mono - last_pong_age >= unit.started` 不用墙钟容差。同文件的 mtime 与源 monotonic 对照，不能将 monotonic 当日历时间。飞书 timestamp 和 mtime 分别不得超前 5 秒以上，再比较二者差值。API 以快照采集时刻校验绿灯的心跳年龄：两端均截到整秒，显示年龄 90 秒可接受，91 秒明确不可能；与请求时 75 秒快照 TTL 分开。飞书还需 `connection_ready=true` 且为已验证的 `heartbeat_ack`。未知的 lease 或连接证据不能被当作「无阻断」或正常。
+unit 确认 failed/inactive 优先判红；活跃的有效停机 lease 仅解释已停，或对运行中的实例产生冲突黄，不替代观测。unit 过渡为黄。当前实例心跳缺失、来源不可用、时间矛盾、未来 >5 秒等为灰；可保留可信历史的时间，但不沿用旧绿。企微有效 pong 年龄是 `last_pong_age + 文件年龄`；`source_mono - last_pong_age >= unit.started` 不用墙钟容差。同文件的 mtime 与源 monotonic 对照，不能将 monotonic 当日历时间。飞书 timestamp 和 mtime 分别不得超前 5 秒以上，再比较二者差值。API 先按采集时刻验证绿灯证据，再将单调时钟经过的时间加到各路证据年龄；超过本路心跳或 pong 绿灯阈值则降黄，即使 75 秒快照 TTL 尚未到期。快照本身不改写。飞书还需 `connection_ready=true` 且为已验证的 `heartbeat_ack`。未知的 lease 或连接证据不能被当作「无阻断」或正常。
 
 `source-policy.example.json` 的开关全关。在 `/etc/quotabar-relay-status/source-policy.json` 缺失或无效时采用此保守默认。可观察到可信超时/停机时仍会按规则显示黄/红。**只在脱敏样本与负责人确认后**，才可将对应项加到 root:root 0600 策略文件：
 
@@ -46,7 +46,17 @@ unit 确认 failed/inactive 优先判红；活跃的有效停机 lease 仅解释
 
 ### Token 建立、轮换与撤销
 
-在可信本地机器准备一个所有者为当前用户、权限 0700、无链接的绝对目录，再运行 `./generate-token.py --output-dir <绝对目录>`。输出仅是两个新建 **0600** 文件：`token`（32 字节随机源、不填充的 Base64URL）和 `verify.json`（仅校验值及轮换元数据）。不把 token 写入命令行、stdout、历史、日志、仓库、截图或 nginx。通过获批安全渠道录入 Mini 钥匙串；ECS 上只保存 `verify.json`。不要把整个 bundle 复制到 ECS。
+单独获批后，在**运行 QuotaBar 的 Mini 上用对应登录用户**操作，不用 sudo。将 `OUTPUT_DIR` 指向一个新建、所有者为当前用户、权限 0700 且路径各级无链接及无组/全员写权限的绝对目录；然后在仓库根目录利用本机现有 macOS SDK 编译钥匙串写入助手：
+
+```sh
+build="$(mktemp -d "${TMPDIR%/}/qb-keychain.XXXXXX")" &&
+xcrun --sdk macosx swiftc -module-cache-path "$build/module-cache" \
+  server/relay-status/write-login-keychain.swift -o "$build/write-login-keychain" &&
+  python3 -B server/relay-status/generate-token.py \
+    --keychain-writer "$build/write-login-keychain" --output-dir "$OUTPUT_DIR"
+```
+
+仅用上面从已审源代码编译的助手。它通过匿名管道接收不填充的 Base64URL token（32 字节随机源），写入登录钥匙串的指定 Generic Password 项（service `app.quotabar.mac.relay-status`、account `66workshop.cn/relay-status-v1`），不读取旧密码、不放宽 ACL。核验当前 QuotaBar 候选的读取授权；不选「允许所有应用访问」。普通磁盘输出只有新建的 **0600** `verify.json`（仅校验值及轮换元数据），不创建明文文件，也不通过命令参数、环境变量或输出传递 token。获批后只传 `verify.json` 给 ECS。若命令失败或中断，不发布该次输出，先核对钥匙串和校验文件的状态。
 
 计划轮换用新输出目录、`--previous-credential <旧verify.json的绝对路径> --overlap-hours <1到24>`，计时从生成开始；新旧候选都做两次等长 `hmac.compare_digest`，旧槽到期即拒绝。原子上传校验文件后，仅重启新增的 `quotabar-status-api.service` 以载入凭据。验证新 token 后，将旧槽 `previous_sha256`、`rotated_at`、`previous_until` 原子置为 null，重新加载该 API，再验证旧 token 为 401。怀疑泄漏时直接无重叠生成并撤销；轮换期间保持可信系统时钟。不要让实际 token 出现在测试、curl 参数或验证报告里。
 
@@ -64,6 +74,6 @@ unit 确认 failed/inactive 优先判红；活跃的有效停机 lease 仅解释
 
 ## 测试与遗留风险
 
-从仓库根目录执行 `python3 -B -m unittest discover -s server/relay-status/tests -v`。测试用合成输入、Unix socket、本机证书探针 mock；没有 TCP 请求。nginx 的传输层行为不由 Python 测试推断；429/502/504 的路由映射测试仅检查模板，不是线上限速验收。
+从仓库根目录执行 `python3 -B server/relay-status/tests/run.py`。入口将整个测试套件的临时文件放在一个自动清理的私有目录：优先用路径够短、祖先可信的 `TMPDIR`，否则使用符合相同约束的 `$HOME`（例如 Ubuntu 默认 /tmp 为 1777 时）；两者都不合适时，先指定满足条件且在仓库外的 `TMPDIR`。1777 祖先仍是负例，生产校验不变。测试用合成输入、Unix socket、本机证书探针 mock；没有 TCP 请求或真实钥匙串访问。nginx 的传输层行为不由 Python 测试推断；429/502/504 的路由映射测试仅检查模板，不是线上限速验收。
 
 仍须隔离 Linux 证实 systemd 沙箱、证书和 socket uid/gid、nginx 完整配置/继承、真实限速与回滚、5 秒采集和 32 MiB 进程预算。全局额度在大量请求或共享 NAT 下可能先耗尽，但仅影响该路由；不加 fail2ban 或 IP 锁定。30 秒轮询不保证捕捉所有瞬时断线，且采集器失联最多要到 75 秒才拒绝快照。生产源语义未核实前不开放相应绿灯开关。以上不构成生产就绪或部署批准。

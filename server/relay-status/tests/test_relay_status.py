@@ -276,6 +276,21 @@ class ReadAndContractTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(self.target.stat().st_mode), 0o640)
         self.assertEqual(list(self.folder.iterdir()), [self.target])
 
+    def test_sticky_writable_ancestor_refuses_private_descendant(self):
+        sticky = self.folder / "sticky"
+        sticky.mkdir()
+        trusted_leaf = sticky / "private"
+        trusted_leaf.mkdir(mode=0o700)
+        target = trusted_leaf / "input.json"
+        target.write_text("{}", encoding="ascii")
+        self.assertEqual(common.read_regular(target, 32, owners=OWNERS)[0], b"{}")
+        sticky.chmod(0o1777)
+        try:
+            with self.assertRaisesRegex(ValueError, "untrusted directory"):
+                common.read_regular(target, 32, owners=OWNERS)
+        finally:
+            sticky.chmod(0o700)
+
     def test_public_whitelist_and_injected_data_rejection(self):
         doc = private_snapshot()
         public = common.project_snapshot(doc, BOOT, MONO+1.9)
@@ -334,42 +349,65 @@ class ReadAndContractTests(unittest.TestCase):
             self.target.chmod(0o644)
             self.assertTrue(call().startswith(b"HTTP/1.1 503 "))
 
-    def test_generator_writes_only_private_bundle_and_refuses_overwrite(self):
+    def test_generator_writes_only_digest_and_hands_off_over_pipe(self):
         spec = importlib.util.spec_from_file_location("generate_token", ROOT / "generate-token.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         output = io.StringIO()
-        token_bytes = io.BytesIO()
-        real_fdopen = os.fdopen
-        token_file = self.folder / "token"
-
-        @contextlib.contextmanager
-        def capture_token(handle, mode):
-            with real_fdopen(handle, mode) as stream:
-                if os.path.samestat(os.fstat(handle), token_file.stat()):
-                    # Exercise real file creation/permissions without persisting even
-                    # the synthetic raw token. The digest stream writes normally.
-                    wrapper = mock.Mock(wraps=stream)
-                    wrapper.write.side_effect = token_bytes.write
-                    yield wrapper
-                else:
-                    yield stream
-
+        writer = self.folder / "writer"
+        provisioned = self.folder / "new"
+        provisioned.mkdir(mode=0o700)
+        # Synthetic child actually receives an anonymous pipe, checks its
+        # digest in memory and leaves no file. No mocking of production writes.
+        writer.write_text(f"""#!{sys.executable}
+import hashlib, json, os, stat, sys
+from pathlib import Path
+assert len(sys.argv) == 1
+assert stat.S_ISFIFO(os.fstat(0).st_mode)
+assert os.path.samestat(os.fstat(1), os.stat(os.devnull))
+assert os.path.samestat(os.fstat(2), os.stat(os.devnull))
+candidate = sys.stdin.buffer.read()
+assert len(candidate) == 43
+assert all(candidate not in value for value in os.environb.values())
+doc = json.loads((Path(__file__).parent / 'new/verify.json').read_bytes())
+assert hashlib.sha256(candidate).hexdigest() == doc['active_sha256']
+""", encoding="ascii")
+        writer.chmod(0o700)
         with (contextlib.redirect_stdout(output), contextlib.redirect_stderr(output),
-              mock.patch.object(module.os, "fdopen", side_effect=capture_token),
+              mock.patch.object(module.time, "time", return_value=NOW),
               mock.patch.object(module.secrets, "token_urlsafe", return_value=TOKEN.decode("ascii"))):
-            module.generate(self.folder)
+            module.generate(provisioned, writer)
             with self.assertRaises(FileExistsError):
-                module.generate(self.folder)
+                module.generate(provisioned, self.folder / "nonexistent")
+            previous = self.folder / "previous.json"
+            previous_doc = credentials_document(True) | {
+                "active_sha256": digest(OLD_TOKEN), "previous_sha256": digest(WRONG_TOKEN),
+            }
+            common.atomic_write(previous, json.dumps(previous_doc).encode(), 0o600, owners=OWNERS)
+            rotation = self.folder / "rotation"
+            rotation.mkdir(mode=0o700)
+            rotation_writer = self.folder / "rotation-writer"
+            rotation_writer.write_text(writer.read_text().replace("new/verify.json", "rotation/verify.json"))
+            rotation_writer.chmod(0o700)
+            module.generate(rotation, rotation_writer, previous, 24)
+            rejected = self.folder / "rejected"
+            rejected.mkdir(mode=0o700)
+            with self.assertRaises(subprocess.CalledProcessError):
+                module.generate(rejected, Path("/usr/bin/false"))
         self.assertTrue(not output.getvalue(), "generator produced output")
-        raw = token_bytes.getvalue().strip()
-        self.assertTrue(raw == TOKEN, "raw token did not go to the private stream")
-        credential = (self.folder / "verify.json").read_bytes()
-        self.assertTrue(raw not in credential, "credential document contains a raw token")
-        self.assertTrue(api.Credentials.from_document(json.loads(credential)).allows(b"Bearer "+raw, NOW))
-        for filename in ("token", "verify.json"):
-            self.assertEqual(stat.S_IMODE((self.folder / filename).stat().st_mode), 0o600)
-        self.assertEqual(token_file.stat().st_size, 0)
+        for directory, rolling in ((provisioned, False), (rotation, True)):
+            path = directory / "verify.json"
+            self.assertEqual(set(directory.iterdir()), {path})
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            credential = path.read_bytes()
+            self.assertTrue(TOKEN not in credential and OLD_TOKEN not in credential,
+                            "credential document contains a raw token")
+            creds = api.Credentials.from_document(json.loads(credential))
+            self.assertTrue(creds.allows(b"Bearer " + TOKEN, NOW))
+            self.assertEqual(creds.allows(b"Bearer " + OLD_TOKEN, NOW), rolling)
+            self.assertFalse(creds.allows(b"Bearer " + OLD_TOKEN, NOW + common.DAY))
+            self.assertFalse(creds.allows(b"Bearer " + WRONG_TOKEN, NOW))
+        self.assertEqual(list(rejected.iterdir()), [])
 
 
 class CertificateTests(unittest.TestCase):
@@ -479,7 +517,7 @@ class APITests(unittest.TestCase):
             self.assert_response(self.send(request(), snapshot=read), 503,
                                  {"error": "service_unavailable"})
 
-    def test_api_rejects_green_incompatible_with_observation_not_response_age(self):
+    def test_api_rejects_green_incompatible_with_observation(self):
         for name, cases in (
             ("feishu", ((89.9, 200), (90, 200), (91, 503), (181, 503), (-5, 200), (-6, 503))),
             ("wecom", ((59.9, 200), (60, 200), (61, 503), (89.9, 503), (90, 503), (181, 503),
@@ -491,16 +529,48 @@ class APITests(unittest.TestCase):
                     doc[name]["last_heartbeat_at"] = common.rfc3339(NOW - age)
                     if name == "wecom":
                         doc[name]["effective_pong_age_s"] = min(60, max(0, age))
-                    # Green at collection remains valid while this immutable
-                    # snapshot is served, up to the separate 75s snapshot TTL.
                     def read():
-                        return common.project_snapshot(doc, BOOT, MONO + 75)
+                        return common.project_snapshot(doc, BOOT, MONO)
                     self.assert_response(self.send(request(), snapshot=read), code)
         # Equal serialized age is valid regardless of observation fraction.
         doc = private_snapshot()
         doc["observed_at"] = common.rfc3339(NOW + 0.999)
         doc["feishu"]["last_heartbeat_at"] = common.rfc3339(NOW - 90 + 0.999)
         self.assertEqual(common.project_snapshot(doc, BOOT, MONO)["feishu"]["state"], "ok")
+
+    def test_api_downgrades_each_green_at_its_response_time_deadline(self):
+        doc = private_snapshot()
+        doc["feishu"] = connection("feishu", feishu(age=85))
+        doc["wecom"] = connection("wecom", wecom(age=45, pong=10))
+        original = json.dumps(doc)
+        for delay, feishu_state, wecom_state in (
+            (0, "ready", "ready"), (5, "ready", "ready"),
+            (5.125, "heartbeat_late", "pong_late"),
+            (25, "heartbeat_late", "pong_late"), (45, "heartbeat_late", "pong_late"),
+            (45.125, "heartbeat_late", "heartbeat_late"), (75, "heartbeat_late", "heartbeat_late"),
+        ):
+            with self.subTest(delay=delay):
+                def read():
+                    return common.project_snapshot(doc, BOOT, MONO + delay)
+
+                _, body = self.assert_response(self.send(request(), snapshot=read), 200)
+                public = json.loads(body)
+                self.assertEqual(public["snapshot_age_s"], int(delay))
+                for name, reason in (("feishu", feishu_state), ("wecom", wecom_state)):
+                    self.assertEqual(public[name], {
+                        "state": "ok" if reason == "ready" else "degraded", "reason": reason,
+                        "last_heartbeat_at": doc[name]["last_heartbeat_at"],
+                    })
+        self.assertEqual(json.dumps(doc), original)
+        stale = lambda: common.project_snapshot(doc, BOOT, MONO + 75.125)
+        self.assert_response(self.send(request(), snapshot=stale), 503, {"error": "service_unavailable"})
+
+        # The earlier pong deadline does not alter the Feishu projection.
+        doc["feishu"] = connection("feishu", feishu(age=80))
+        read = lambda: common.project_snapshot(doc, BOOT, MONO + 6)
+        _, body = self.assert_response(self.send(request(), snapshot=read), 200)
+        public = json.loads(body)
+        self.assertEqual((public["feishu"]["reason"], public["wecom"]["reason"]), ("ready", "pong_late"))
 
     def test_fixed_429_contract_and_nginx_mapping(self):
         header, _ = self.assert_response(api.response(429), 429, {"error": "rate_limited"})
