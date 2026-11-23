@@ -28,7 +28,7 @@ Cursor and Grok Bot are not separate bar, tooltip, or panel items.
 - **Left-click** the bar → glass panel (details, connect, hide disks)
 - **Right-click** the bar → short native menu (refresh / copy / alerts / quit)
 
-The panel header should say **v1.8.28** (build **41**). If it still says an older version, quit QuotaBar and run `Start QuotaBar.command` again. **For this local upgrade review, do not install or launch it; use the candidate-only build below.**
+The panel header should say **v1.8.28** (build **41**). The launcher keeps the existing app running if the new build fails. **For this local upgrade review, do not install or launch it; run `bash QuotaBarTests/check-launcher.sh` for the offline launcher check.**
 
 Later launches: just double-click `Start QuotaBar.command` again.
 
@@ -140,7 +140,7 @@ QUOTABAR_SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk \
 
 `build-candidate.sh` is restricted to this Mini1 worktree and checks that the external volume is mounted. It compiles via `swiftc` (the current non-Xcode build path) to `$BASE/candidate/QuotaBar.app`, using canonical version metadata, without quitting, replacing, signing, or opening the installed app. **Do not open the candidate during this review.**
 
-Mini1's current default CLT 6.4 / macOS 27 SDK is missing the `SwiftUIMacros` plugin needed by existing `@State` code. The commands above explicitly select the already-installed macOS 26.5 SDK for this process only. `QUOTABAR_SDK` is also supported by the normal launcher, without changing `xcode-select`, installing tools, or weakening a check. The default SDK 27 build remains an environment blocker; successful compilation against SDK 26.5 does not prove that SDK 27 is fixed. Compiler caches use canonical absolute paths to avoid duplicate-module errors from mixing `worktree/../candidate` with `candidate`.
+Mini1's current default CLT 6.4 / macOS 27 SDK fails to expand SwiftUI's `@State` macro. The launcher checks that macro before compiling and falls back to the installed macOS 26.5 SDK if needed. An explicit `QUOTABAR_SDK` takes precedence and must pass the same check. Compilation, signing and verification finish before the installed app is replaced or stopped. The commands above select macOS 26.5 explicitly for the standalone tests; no global toolchain selection changes. Compiler caches use canonical absolute paths to avoid duplicate-module errors from mixing `worktree/../candidate` with `candidate`.
 
 Tests use a synthetic, non-account fixture of the official envelope, malformed/error fixtures, and local fake processes for timeout, exit, size, stdin, and environment behavior; they do not call a network or access credentials. Existing AC/AT/AF, O, G, disk, RAM, and panel-fit regression checks still run. A component-only renderer and optional live Google smoke check are described in `QuotaBarTests/check-google.sh`; neither starts a menu-bar instance. Offline render evidence does not constitute full-app interaction acceptance or independent human review.
 

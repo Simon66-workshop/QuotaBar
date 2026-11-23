@@ -9,7 +9,7 @@ if ! /sbin/mount | grep -F " on $VOLUME (" >/dev/null ||
     echo 'Requires this checkout on the mounted, writable external volume with >256 MiB free.' >&2
     exit 1
 fi
-WORK="$(mktemp -d "$ROOT/QuotaBarTests/.relay-signature.XXXXXX")"
+WORK="$(mktemp -d "${QUOTABAR_TEST_TMPDIR:-$ROOT/QuotaBarTests}/.relay-signature.XXXXXX")"
 trap 'rm -rf -- "$WORK"' EXIT
 APP="$WORK/Fixture.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

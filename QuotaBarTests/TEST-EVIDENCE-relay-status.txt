@@ -703,3 +703,43 @@ disagreement beyond the rounding tolerance intentionally yields gray.
 Only this audit's APP-01--03 addressed; APP-04--07 remain out of scope.
 No external network, ECS contact, real Keychain access, install, QuotaBar
 launch, restart, commit, push or deploy by this remediation.
+
+== R5 APP-02 launcher remediation (2026-11-23 UTC / Nov 22 New York) ==
+Full App HEAD baseline: 2f0e2877191184b81de4540416561a6c7f5554d4.
+Tested the working-tree fix, not a new commit. macOS 27.2 (26B123) arm64;
+Apple Swift 6.4 (swiftlang-6.4.0.34.1; driver 1.168.6), CLT.
+SDKs: default macOS 27.0 (preflight failed); local macOS 26.5 (selected by
+launcher fallback and supplied to App checks via QUOTABAR_SDK or SDKROOT).
+/usr/bin/python3 3.9.6 used for plist/version and PNG byte validation only.
+
+check-launcher.sh: PASS.
+  Production rebuild branch with a disposable fake HOME, synthetic compile
+  failure and blocked lifecycle commands: old executable, plist and source
+  stamp unchanged; no pkill, open or xattr, and staging cleaned up. Covered
+  default SDK fallback, valid explicit override, incompatible explicit
+  override with no fallback, and no usable SDK.
+  Real toolchain with no SDK override: default 27.0 probe reproduced the
+  missing SwiftUIMacros.StateMacro; fallback 26.5 passed the probe and the
+  launcher compiled/linked the complete arm64 macOS 14 candidate, signed it
+  with hardened ad-hoc options and passed verify-relay-signature.sh. Only a
+  disposable candidate bundle was produced; the executable was not run.
+run.sh: PASS (278 checks). check-memory.sh: PASS (native page counters).
+check-relay-status.sh: PASS (strict parsing, synthetic HTTP and polling,
+  helper/IPC with synthetic providers, version, Shanghai time in New York
+  and UTC, and 17 offscreen PNGs byte-identical to tracked previews).
+check-relay-signature.sh: PASS (runtime, tamper and ACL rejection fixtures).
+Static: bash -n, plist/project lint, launcher version metadata and
+  git diff --check PASS. No test scratch directory or preview change in repo.
+
+R5 APP-01 and APP-03: reviewed against v2 threat model, P2 and unchanged.
+  APP-01: R5's 74.9s + 0.2s case exceeds the 75s boundary by about 0.1s,
+  inside the accepted 1–2s boundary/rounding margin.
+  APP-03: R5's 90s date-form Retry-After failure needs the Mac 120s fast,
+  outside the <=5s clock-skew model. Numeric Retry-After is unaffected.
+Read-only stash/patch comparison: identical and not applied; no launcher
+change in that patch. No P0 in this remediation.
+
+NOT RUN: protected GO-only scripts in their separate worktree, actual
+replacement/rollback or launch, trusted signer or real Keychain ACL, live
+menu bar/VoiceOver/glass, ECS/nginx. No network, ECS contact, real Keychain
+read, QuotaBar install/start/stop, commit, push or deployment.

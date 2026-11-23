@@ -9,9 +9,9 @@ if ! /sbin/mount | grep -F " on $VOLUME (" >/dev/null ||
     echo 'Requires this checkout on the mounted, writable external volume with >256 MiB free.' >&2
     exit 1
 fi
-WORK="$(mktemp -d "$ROOT/QuotaBarTests/.relay-check.XXXXXX")"
+WORK="$(mktemp -d "${QUOTABAR_TEST_TMPDIR:-$ROOT/QuotaBarTests}/.relay-check.XXXXXX")"
 trap 'rm -rf -- "$WORK"' EXIT
-OUT="$ROOT/QuotaBarTests/Previews"
+OUT="${QUOTABAR_RELAY_PREVIEWS:-$ROOT/QuotaBarTests/Previews}"
 SDK="${QUOTABAR_SDK:-$(xcrun --sdk macosx --show-sdk-path)}"
 mkdir -p "$OUT" "$WORK/cache" "$WORK/previews"
 swiftc -parse-as-library -D QUOTABAR_COMPONENT_CHECK -target arm64-apple-macos14.0 \
@@ -25,8 +25,7 @@ diff -u "$WORK/New_York.txt" "$WORK/UTC.txt"
 printf 'SHANGHAI_TIME=PASS · TZ=America/New_York and TZ=UTC: '
 cat "$WORK/UTC.txt"
 "$WORK/relay-check" check "$ROOT" "$WORK/previews"
-# Publish only after validation, with same-volume renames (no Foundation
-# replacement directory outside the sandbox).
+# Publish only after validation; default work and preview paths share a volume.
 for preview in "$WORK"/previews/relay-*.png; do
     mv -f -- "$preview" "$OUT/"
 done
