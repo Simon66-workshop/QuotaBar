@@ -45,7 +45,9 @@ struct RelayStatusCheck {
         await cachedAtStartup()
         try await helper(snapshot)
         let root = URL(fileURLWithPath: args[2], isDirectory: true)
-        try await heartbeatFreshness(root.appendingPathComponent("QuotaBarTests/Fixtures"))
+        let fixtures = root.appendingPathComponent("QuotaBarTests/Fixtures")
+        try await heartbeatFreshness(fixtures)
+        try await serverProjection(fixtures)
         let version = try Data(contentsOf: root.appendingPathComponent("QuotaBar/Info.plist"))
         let plist = try PropertyListSerialization.propertyList(from: version, format: nil) as? [String: Any]
         precondition(plist?["CFBundleShortVersionString"] as? String == "1.8.28")
@@ -413,7 +415,8 @@ struct RelayStatusCheck {
         precondition(calls == 5)
         let nearlyOld = try parse(good.replacingOccurrences(of: "T17:15:00Z", with: "T17:16:00Z")
             .replacingOccurrences(of: "T17:14:51Z", with: "T17:15:59Z")
-            .replacingOccurrences(of: "T17:14:47Z", with: "T17:15:58Z")
+            .replacingOccurrences(of: #""state":"ok","reason":"ready","last_heartbeat_at":"2026-11-22T17:14:47Z""#,
+                                  with: #""state":"degraded","reason":"pong_late","last_heartbeat_at":"2026-11-22T17:15:58Z""#)
             .replacingOccurrences(of: #""snapshot_age_s": 2"#, with: #""snapshot_age_s": 70"#))
         response = .success(nearlyOld)
         stall = true
@@ -423,7 +426,7 @@ struct RelayStatusCheck {
         now = 1204
         resume?.resume()
         await status.waitForAttempt()
-        precondition(status.display.summary == .ok)
+        precondition(status.display == .live(nearlyOld))
         now = 1205
         status.clockAdvanced()
         precondition(status.display == .unavailable(.expired) && calls == 6, "expiry uses server age + request time")
@@ -468,8 +471,14 @@ struct RelayStatusCheck {
             now = time
             status.clockAdvanced()
             await status.waitForAttempt()
-            if time < 73 { precondition(status.display == .live(snapshot)) }
-            else { precondition(status.display == .unavailable(.expired) && status.display.summary == .unknown) }
+            if time == 30 {
+                precondition(status.display == .live(snapshot))
+            } else if time < 73 {
+                guard case .live(let aged) = status.display else { preconditionFailure("snapshot still fresh") }
+                precondition(aged.wecom.reason == .pongLate && aged.summary == .degraded && aged.feishu == snapshot.feishu)
+            } else {
+                precondition(status.display == .unavailable(.expired) && status.display.summary == .unknown)
+            }
         }
         precondition(calls == 5, "the identical observation was actually replayed at 90 and 120s")
         let newerWire = good.replacingOccurrences(of: "T17:15:00Z", with: "T17:15:30Z")
@@ -483,17 +492,19 @@ struct RelayStatusCheck {
         precondition(status.display == .live(newer))
         // Same timestamp shrinks to 200, then a smaller advertised age and a
         // connectivity bounce must not extend it.
-        response = try parse(newerWire.replacingOccurrences(of: #""snapshot_age_s": 2"#, with: #""snapshot_age_s": 70"#))
+        response = try parse(newerWire.replacingOccurrences(of: #""snapshot_age_s": 2"#, with: #""snapshot_age_s": 70"#)
+            .replacingOccurrences(of: #""state":"ok","reason":"ready","last_heartbeat_at":"2026-11-22T17:15:28Z""#,
+                                  with: #""state":"degraded","reason":"pong_late","last_heartbeat_at":"2026-11-22T17:15:28Z""#))
         now = 195
         status.manualRefresh()
         await status.waitForAttempt()
-        precondition(status.display.summary == .ok)
+        precondition(status.display.summary == .degraded)
         response = newer
         now = 198
         status.networkChanged(false)
         status.networkChanged(true)
         await status.waitForAttempt()
-        precondition(status.display.summary == .ok)
+        precondition(status.display.summary == .degraded, "replay must not restore green")
         now = 200
         status.clockAdvanced()
         precondition(status.display == .unavailable(.expired))
@@ -546,6 +557,9 @@ struct RelayStatusCheck {
         status.clockAdvanced()
         precondition(status.display == .live(green) && calls == 1)
         time = 5
+        status.clockAdvanced()
+        precondition(status.display == .live(green) && calls == 1, "server thresholds are strict")
+        time = 5.25
         // Let the scheduled heartbeat timer deliver the update (no tick or poll).
         for _ in 0..<200 where status.display.summary == .ok {
             try await Task.sleep(for: .milliseconds(10))
@@ -572,18 +586,117 @@ struct RelayStatusCheck {
         precondition(delayed.display == .live(aged), "request time counts against green")
         delayed.stop()
 
-        let wecomGreen = try parse(good.replacingOccurrences(of: "T17:14:47Z", with: "T17:14:02Z"))
         time = 0
-        let wecom = RelayStatusStore(loadSnapshot: { wecomGreen }, now: { time }, jitter: { 3 })
+        let wecomAtSample = try parse(good.replacingOccurrences(of: "T17:14:47Z", with: "T17:14:02Z")
+            .replacingOccurrences(of: #""snapshot_age_s": 2"#, with: #""snapshot_age_s": 0"#))
+        let wecom = RelayStatusStore(loadSnapshot: { wecomAtSample }, now: { time }, jitter: { 3 })
         wecom.start(monitorNetwork: false)
         await wecom.waitForAttempt()
-        precondition(wecom.display == .live(wecomGreen))
-        time = 30 // 58s at collection + 2s wire age + 30s local elapsed.
+        precondition(wecom.display == .live(wecomAtSample))
+        time = 32.25 // 58s at collection + local elapsed crosses the 90s heartbeat line.
         wecom.clockAdvanced()
         guard case .live(let agedWeCom) = wecom.display else { preconditionFailure("snapshot still fresh") }
-        precondition(agedWeCom.wecom.reason == .heartbeatLate && agedWeCom.feishu == wecomGreen.feishu)
+        precondition(agedWeCom.wecom.reason == .heartbeatLate && agedWeCom.feishu == wecomAtSample.feishu)
         wecom.stop()
         print("APP-V2-R2-01=PASS · heartbeat timer, request time, both channels, replay and independent 75s expiry")
+    }
+
+    private struct ProjectionCase: Decodable {
+        struct Point: Decodable {
+            let elapsed: TimeInterval
+            let server: RelaySnapshot?
+            let localReasons: [String]?
+        }
+        let name: String
+        let points: [Point]
+    }
+
+    @MainActor
+    private static func serverProjection(_ fixtures: URL) async throws {
+        let data = try Data(contentsOf: fixtures.appendingPathComponent("relay-r3-projection.json"))
+        let cases = try JSONDecoder().decode([ProjectionCase].self, from: data)
+        for test in cases {
+            let initial = test.points[0].server!
+            let started: TimeInterval = 100
+            let deadline = initial.expiresAt(requestStartedAt: started)
+            var snapshot = initial
+            var next = started
+            for point in test.points {
+                let now = started + point.elapsed
+                let note = "\(test.name) at +\(point.elapsed)s"
+                guard let server = point.server else {
+                    precondition(now >= deadline, note)
+                    continue
+                }
+                precondition(now < deadline, note)
+                let projection = snapshot.projected(at: now, snapshotDeadline: deadline)
+                if projection.snapshot != snapshot {
+                    precondition(next <= now, "missed scheduled transition: \(note)")
+                }
+                next = projection.nextDeadline
+                snapshot = projection.snapshot
+                let reasons = [snapshot.feishu.reason.rawValue, snapshot.wecom.reason.rawValue]
+                let serverReasons = [server.feishu.reason.rawValue, server.wecom.reason.rawValue]
+                precondition(projection.nextDeadline > now && projection.nextDeadline <= deadline, note)
+                precondition(reasons == (point.localReasons ?? serverReasons), note)
+                if point.localReasons == nil {
+                    precondition(snapshot.summary == server.summary, note)
+                } else {
+                    precondition(reasons != serverReasons, note)
+                }
+                precondition(snapshot.feishu.lastHeartbeat == server.feishu.lastHeartbeat &&
+                             snapshot.wecom.lastHeartbeat == server.wecom.lastHeartbeat &&
+                             snapshot.certificate == server.certificate, note)
+            }
+        }
+        print("SERVER_PROJECTION=PASS · \(cases.count) public-v1 timelines, including private-evidence limits")
+
+        // Exercise the store's real scheduled timer, not just the projector.
+        // Jump close to the threshold, reschedule, then let it fire autonomously.
+        for (id, threshold) in [("APP-V2-R3-01", 5.0), ("APP-V2-R3-02", 10.0)] {
+            let points = cases.first { $0.name == id }!.points
+            let initial = points[0].server!
+            let expected = points.first { $0.elapsed == 20 }!.server!
+            var clock: TimeInterval = 0
+            var calls = 0
+            let status = RelayStatusStore(loadSnapshot: {
+                calls += 1
+                return initial
+            }, now: { clock }, jitter: { 0 })
+            status.start(monitorNetwork: false)
+            defer { status.stop() }
+            await status.waitForAttempt()
+            precondition(status.display == .live(initial))
+            clock = threshold - 0.05
+            status.clockAdvanced()
+            precondition(status.display == .live(initial))
+            await Task.yield()
+            clock = threshold + 0.25
+            for _ in 0..<200 where status.display.summary == initial.summary {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            clock = 20
+            guard case .live(let result) = status.display else { preconditionFailure(id) }
+            precondition(result.feishu.reason == expected.feishu.reason && result.wecom.reason == expected.wecom.reason &&
+                         result.summary == expected.summary && calls == 1, id)
+            print("\(id)=PASS · scheduled row and summary update before the next poll")
+        }
+
+        // The lease deadline itself is private; the next server response does
+        // clear green and must not let the retained history become "down".
+        let lease = cases.first { $0.name == "private lease cutoff" }!.points
+        var clock: TimeInterval = 0
+        var response = lease[0].server!
+        let status = RelayStatusStore(loadSnapshot: { response }, now: { clock }, jitter: { 0 })
+        status.start(monitorNetwork: false)
+        defer { status.stop() }
+        await status.waitForAttempt()
+        precondition(status.display.summary == .ok)
+        clock = 20
+        response = lease.first { $0.elapsed == clock }!.server!
+        status.manualRefresh()
+        await status.waitForAttempt()
+        precondition(status.display == .live(response) && status.display.summary == .unknown)
     }
 
     @MainActor

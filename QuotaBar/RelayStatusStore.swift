@@ -126,9 +126,9 @@ final class RelayStatusStore: ObservableObject {
             } else {
                 displayDeadline = expires
                 if case .live(let snapshot) = display {
-                    let aged = snapshot.agingHeartbeats(at: time, snapshotDeadline: expires)
-                    if aged != snapshot { display = .live(aged) }
-                    displayDeadline = min(expires, aged.nextHeartbeatDeadline(snapshotDeadline: expires) ?? .infinity)
+                    let projection = snapshot.projected(at: time, snapshotDeadline: expires)
+                    if projection.snapshot != snapshot { display = .live(projection.snapshot) }
+                    displayDeadline = projection.nextDeadline
                 }
             }
         }
@@ -195,7 +195,7 @@ final class RelayStatusStore: ObservableObject {
                     expires = deadline
                     // Include time spent in the request/helper, and use the
                     // clamped deadline so repeats cannot extend green.
-                    display = .live(snapshot.agingHeartbeats(at: time, snapshotDeadline: deadline))
+                    display = .live(snapshot.projected(at: time, snapshotDeadline: deadline).snapshot)
                 } else {
                     fail(.expired, at: time)
                 }

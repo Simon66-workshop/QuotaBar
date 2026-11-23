@@ -50,7 +50,8 @@ enum RelayReason: String {
     }
 
     static let heartbeatOK: Int64 = 90 * RelayTimestamp.microsecondsPerSecond
-    private static let heartbeatDown: Int64 = 180 * RelayTimestamp.microsecondsPerSecond
+    static let pongOK: Int64 = 60 * RelayTimestamp.microsecondsPerSecond
+    static let heartbeatDown: Int64 = 180 * RelayTimestamp.microsecondsPerSecond
 
     func matchesHeartbeatAge(_ collected: Int64?, snapshotAge: Int) -> Bool {
         let second = RelayTimestamp.microsecondsPerSecond
@@ -76,8 +77,10 @@ enum RelayReason: String {
 struct RelayLink: Equatable {
     enum Channel { case feishu, wecom }
 
-    private(set) var state: RelayLinkState
+    var state: RelayLinkState { reason.state }
     private(set) var reason: RelayReason
+    private let receivedReason: RelayReason
+    private let channel: Channel
     private let heartbeat: RelayTimestamp?
     var lastHeartbeat: Date? { heartbeat?.date }
 
@@ -86,6 +89,7 @@ struct RelayLink: Equatable {
     }
 
     init(from decoder: Decoder, observedAt: RelayTimestamp, snapshotAge: Int, channel: Channel) throws {
+        self.channel = channel
         let values = try decoder.relayFields(Keys.self)
         let wireState = RelayLinkState(rawValue: try values.decode(String.self, forKey: .state))
         let wireReason = RelayReason(rawValue: try values.decode(String.self, forKey: .reason))
@@ -94,27 +98,46 @@ struct RelayLink: Equatable {
         if let wireState, let wireReason, wireReason.state == wireState,
            channel == .wecom || (wireReason != .pongStale && wireReason != .pongLate),
            wireReason.matchesHeartbeatAge(collectedHeartbeatAge, snapshotAge: snapshotAge) {
-            state = wireState
             reason = wireReason
         } else {
-            state = .unknown
             reason = .sourceUnavailable
         }
+        receivedReason = reason
     }
 
-    func heartbeatDeadline(observedAt: RelayTimestamp, observationTime: TimeInterval) -> TimeInterval? {
-        guard state == .ok, let heartbeat else { return nil }
-        // v1 exposes heartbeat evidence, but not the WeCom pong age.
-        let collectedHeartbeatAge = observedAt.microsecondsSince1970 - heartbeat.microsecondsSince1970
-        let remaining = RelayReason.heartbeatOK - max(0, collectedHeartbeatAge)
-        return observationTime + Double(remaining) / Double(RelayTimestamp.microsecondsPerSecond)
-    }
-
-    mutating func ageHeartbeat(at time: TimeInterval, observedAt: RelayTimestamp, observationTime: TimeInterval) {
-        if let deadline = heartbeatDeadline(observedAt: observedAt, observationTime: observationTime), time >= deadline {
-            state = .degraded
-            reason = .heartbeatLate
+    mutating func project(at time: TimeInterval, observedAt: RelayTimestamp,
+                          observationTime: TimeInterval) -> TimeInterval? {
+        // A transitioning or unknown row can contain a historical heartbeat.
+        guard receivedReason == .ready || (receivedReason.state == .degraded && receivedReason != .transitioning),
+              let heartbeat else { return nil }
+        let collectedAge = max(0, observedAt.microsecondsSince1970 - heartbeat.microsecondsSince1970)
+        func cutoff(_ limit: Int64) -> TimeInterval {
+            // Server thresholds are strict (>), not inclusive.
+            (observationTime + Double(limit - collectedAge) / Double(RelayTimestamp.microsecondsPerSecond)).nextUp
         }
+
+        // Keep the response reason as the baseline: a locally inferred yellow
+        // does not prevent a higher-priority heartbeat reason later.
+        var cutoffs: [(RelayReason, TimeInterval)] = [(.heartbeatStale, cutoff(RelayReason.heartbeatDown))]
+        if receivedReason == .ready {
+            cutoffs.append((.heartbeatLate, cutoff(RelayReason.heartbeatOK)))
+            if channel == .wecom {
+                // The public sample age bounds pong age from below. Exact pong
+                // age (including an earlier red deadline) and lease expiry
+                // aren't on the v1 wire; only a new response can prove those.
+                cutoffs.append((.pongLate, cutoff(RelayReason.pongOK)))
+            }
+        }
+        reason = receivedReason
+        var next: TimeInterval?
+        for (candidate, deadline) in cutoffs {
+            if time >= deadline {
+                reason = candidate
+                break
+            }
+            next = min(next ?? deadline, deadline)
+        }
+        return next
     }
 }
 
@@ -196,18 +219,12 @@ struct RelaySnapshot: Decodable, Equatable {
         requestStartedAt + (Self.freshness - Double(age))
     }
 
-    func nextHeartbeatDeadline(snapshotDeadline: TimeInterval) -> TimeInterval? {
-        let observationTime = snapshotDeadline - Self.freshness
-        return [feishu.heartbeatDeadline(observedAt: observation, observationTime: observationTime),
-                wecom.heartbeatDeadline(observedAt: observation, observationTime: observationTime)].compactMap { $0 }.min()
-    }
-
-    func agingHeartbeats(at time: TimeInterval, snapshotDeadline: TimeInterval) -> Self {
+    func projected(at time: TimeInterval, snapshotDeadline: TimeInterval) -> (snapshot: Self, nextDeadline: TimeInterval) {
         let observationTime = snapshotDeadline - Self.freshness
         var aged = self
-        aged.feishu.ageHeartbeat(at: time, observedAt: observation, observationTime: observationTime)
-        aged.wecom.ageHeartbeat(at: time, observedAt: observation, observationTime: observationTime)
-        return aged
+        let feishuDeadline = aged.feishu.project(at: time, observedAt: observation, observationTime: observationTime)
+        let wecomDeadline = aged.wecom.project(at: time, observedAt: observation, observationTime: observationTime)
+        return (aged, min(snapshotDeadline, feishuDeadline ?? .infinity, wecomDeadline ?? .infinity))
     }
 
     static func parse(_ data: Data) throws -> Self {

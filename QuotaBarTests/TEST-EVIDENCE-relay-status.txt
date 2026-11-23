@@ -826,3 +826,52 @@ ECS/nginx and legacy GO-only scripts/packaging were not tested.
 No network, ECS contact, real Keychain read, QuotaBar install/start/stop,
 commit, push, deployment or service restart. Test scratch was in TMPDIR,
 not the checkout.
+
+== App V2 round 3 P1 remediation (2026-11-23 UTC / Nov 22 New York) ==
+Full App HEAD baseline: 6ef428424c5a26273d97a1ac0735aefd68862fef.
+Tested the working-tree changes, not a new commit. macOS 27.2 (26B123)
+arm64; CLT Apple Swift 6.4 (swiftlang-6.4.0.34.1, driver 1.168.6).
+macOS SDK 26.5 used for the App checks and isolated HEAD comparison.
+The launcher reproduced the default SDK 27.0 SwiftUIMacros.StateMacro
+probe failure and built successfully using its 26.5 fallback.
+/usr/bin/python3 3.9.6 generated and checked the fixture and compared PNGs.
+
+Contract baseline: 0cdf242d42fdf92db5a40f6b3a0d3d71a574d7b4
+(local feat/relay-status-server Git object), server/relay-status/common.py
+project_snapshot(). make-relay-r3-fixtures.py ran only the pure projection,
+with no server process. Regeneration matched Fixtures/relay-r3-projection.json
+(SHA-256 4e124f6311d993cacbc3d355c027ada8e19ea1c04ef7b0c2116c348981bab9d2).
+
+APP-V2-R3-01: PASS. WeCom sample age 55s, sample-time last pong age 0s.
+After +20s with just one load, exact HEAD stayed ready vs server pong_late;
+patched App matched pong_late. The production timer path changed the row
+and summary before polling, just past the 60s sample-based line. The table
+also checked 60s equality and heartbeat_late taking priority past 90s.
+APP-V2-R3-02: PASS. Feishu heartbeat age 170s. After +20s with one load,
+exact HEAD stayed heartbeat_late vs server heartbeat_stale; patched App
+matched heartbeat_stale. The scheduled timer changed both row and summary
+to red just past 180s, while the snapshot and other link were still valid.
+The table also checked 180s equality, nonzero wire age, red priority,
+existing unit/lease reasons, and no red inference from transitioning or
+unknown historical timestamps.
+
+check-relay-status.sh: PASS. Ten server-generated timelines / 59 points
+covering public-evidence projection, 75s snapshot expiry, and explicit
+wire limits. v1 does not expose exact pong age or the lease cutoff:
+server-only earlier pong transitions and lease-expiry gray cannot be
+timed locally. A new response did clear green on lease expiry; yellow or
+red server evidence retained its priority. Request/helper elapsed time,
+same-observation replay, synthetic HTTP and helper/IPC also passed.
+New York and UTC showed the same Shanghai time. All 17 offscreen PNGs were
+generated in TMPDIR and matched the tracked previews byte for byte.
+run.sh: PASS (278 checks). check-memory.sh: PASS (native counters).
+check-relay-signature.sh: PASS (disposable ad-hoc fixtures).
+check-launcher.sh: PASS (fake-home failure paths; unlaunched arm64
+candidate compiled, ad-hoc signed and verified). Shell syntax,
+plist/project lint and git diff --check: PASS.
+
+No P0 listed; APP-V2-R3-03/04/05 unchanged. No wire or server changes.
+Live menu bar/production panel, actual Keychain ACL, ECS/nginx and
+GO-only scripts were not tested. No network, real Keychain read, ECS
+contact, QuotaBar install/start/stop, service restart, commit, push or
+deployment. Scratch was outside the checkout in TMPDIR.
