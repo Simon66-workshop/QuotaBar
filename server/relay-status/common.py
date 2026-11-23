@@ -175,7 +175,8 @@ def validate_timestamp(value, observed):
 
 
 def project_snapshot(doc, current_boot, current_mono):
-    if (not exact(doc, "schema_version observed_at boot_id observed_boottime feishu wecom certificate")
+    if (not exact(doc, "schema_version observed_at boot_id observed_boottime lease_clear_for_s "
+                       "feishu wecom certificate")
             or type(doc["schema_version"]) is not int or doc["schema_version"] != 1
             or not BOOT_PATTERN.fullmatch(current_boot) or doc["boot_id"] != current_boot
             or not number(doc["observed_boottime"]) or doc["observed_boottime"] < 0
@@ -184,6 +185,12 @@ def project_snapshot(doc, current_boot, current_mono):
     age = current_mono - doc["observed_boottime"]
     if not 0 <= age <= SNAPSHOT_MAX_AGE:
         raise ValueError("stale snapshot")
+    # The collector translates the lease cutoff using the full observation
+    # time. The API only needs elapsed boot time, not wall time or the lease file.
+    lease_clear_for_s = doc["lease_clear_for_s"]
+    if lease_clear_for_s is not None and (not number(lease_clear_for_s) or lease_clear_for_s <= 0):
+        raise ValueError("invalid lease cutoff")
+    lease_expired = lease_clear_for_s is not None and age >= lease_clear_for_s
     observed = parse_date(doc["observed_at"])
     public_connections = {}
     for name, heartbeat_ok in (("feishu", FEISHU_OK_AGE), ("wecom", WECOM_HEARTBEAT_OK_AGE)):
@@ -219,6 +226,8 @@ def project_snapshot(doc, current_boot, current_mono):
                     state, reason = "degraded", "heartbeat_late"
                 elif pong is not None and pong + age > WECOM_PONG_OK_AGE:
                     state, reason = "degraded", "pong_late"
+                elif lease_expired:
+                    state, reason = "unknown", "source_unavailable"
         public_connections[name] = {
             "state": state, "reason": reason, "last_heartbeat_at": status["last_heartbeat_at"],
         }

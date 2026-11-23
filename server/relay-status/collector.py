@@ -99,22 +99,25 @@ def load_units():
 
 
 def lease_status(sample, now, policy):
+    """Return the lease state and seconds until an otherwise clear lease becomes unknown."""
     doc, mtime = sample
     if doc is None:
-        return "clear" if mtime is None and policy.absent_lease_clear else "unknown"
+        return ("clear" if mtime is None and policy.absent_lease_clear else "unknown"), None
     if doc.get("state") != "LEASE" or type(doc.get("ecs_stopped")) is not bool:
-        return "unknown"
+        return "unknown", None
     expiry = doc.get("expires_at")
     if not number(expiry):
         try:
             expiry = parse_date(expiry)
         except UNAVAILABLE:
-            return "unknown"
+            return "unknown", None
     if not 0 < expiry or not rfc3339(expiry):
-        return "unknown"
+        return "unknown", None
     if expiry <= now:
-        return "clear" if policy.expired_lease_clear else "unknown"
-    return "stopped" if doc["ecs_stopped"] else "clear"
+        return ("clear" if policy.expired_lease_clear else "unknown"), None
+    if doc["ecs_stopped"]:
+        return "stopped", None
+    return "clear", None if policy.expired_lease_clear else expiry - now
 
 
 def connection(name, unit, sample, lease, now, mono, policy):
@@ -248,8 +251,9 @@ def collect():
     lease_sample = source(LEASE_FILE, mode=0o644, missing_ok=True)
     after = load_units()
     now, mono, observed_boottime = time.time(), time.monotonic(), boot_clock()
-    lease = lease_status(lease_sample, now, policy)
+    lease, lease_clear_for_s = lease_status(lease_sample, now, policy)
     doc = {"schema_version": 1, "boot_id": current_boot, "observed_boottime": observed_boottime,
+           "lease_clear_for_s": lease_clear_for_s,
            "observed_at": rfc3339(now), "certificate": certificate(expiry, now)}
     for name, service, sample in zip(("feishu", "wecom"), UNITS, samples):
         unit = after.get(service) if before.get(service) == after.get(service) else None

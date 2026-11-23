@@ -60,7 +60,7 @@ def connection(name, sample, unit=ACTIVE_UNIT, lease="clear", policy=CONFIRMED):
 def private_snapshot():
     return {
         "schema_version": 1, "observed_at": common.rfc3339(NOW), "boot_id": BOOT,
-        "observed_boottime": MONO, "feishu": connection("feishu", feishu()),
+        "observed_boottime": MONO, "lease_clear_for_s": None, "feishu": connection("feishu", feishu()),
         "wecom": connection("wecom", wecom()), "certificate": collector.certificate(NOW + 200, NOW),
     }
 
@@ -175,9 +175,17 @@ class StateTests(unittest.TestCase):
                                (lease(NOW+1, "true"), "unknown"), (lease(NOW+1, state="OTHER"), "unknown"),
                                (lease("n/a"), "unknown"), ((None, None), "clear"), ((None, -1), "unknown")):
             with self.subTest(expected=result):
-                self.assertEqual(collector.lease_status(sample, NOW, CONFIRMED), result)
-        self.assertEqual(collector.lease_status(lease(NOW), NOW, collector.Policy()), "unknown")
-        self.assertEqual(collector.lease_status((None, None), NOW, collector.Policy()), "unknown")
+                self.assertEqual(collector.lease_status(sample, NOW, CONFIRMED), (result, None))
+        strict = collector.Policy(absent_lease_clear=True)
+        for sample, result in (
+            (lease(NOW + 1, False), ("clear", 1)),
+            (lease(NOW + 1), ("stopped", None)),
+            (lease(NOW, False), ("unknown", None)),
+            ((None, None), ("clear", None)),
+        ):
+            with self.subTest(expected=result):
+                self.assertEqual(collector.lease_status(sample, NOW, strict), result)
+        self.assertEqual(collector.lease_status((None, None), NOW, collector.Policy()), ("unknown", None))
 
     def test_unit_instance_changed_during_collect(self):
         replacement = collector.Unit("active", FAKE_PID, ACTIVE_UNIT.started, "b" * 32)
@@ -517,6 +525,18 @@ class APITests(unittest.TestCase):
             self.assert_response(self.send(request(), snapshot=read), 503,
                                  {"error": "service_unavailable"})
 
+    def test_api_rejects_missing_or_malformed_private_lease_cutoff(self):
+        for cutoff in (None, True, 0, -1, "10", float("inf")):
+            with self.subTest(cutoff=cutoff):
+                doc = private_snapshot()
+                if cutoff is None:
+                    del doc["lease_clear_for_s"]
+                else:
+                    doc["lease_clear_for_s"] = cutoff
+                read = lambda: common.project_snapshot(doc, BOOT, MONO)
+                self.assert_response(self.send(request(), snapshot=read), 503,
+                                     {"error": "service_unavailable"})
+
     def test_api_rejects_green_incompatible_with_observation(self):
         for name, cases in (
             ("feishu", ((89.9, 200), (90, 200), (91, 503), (181, 503), (-5, 200), (-6, 503))),
@@ -572,6 +592,58 @@ class APITests(unittest.TestCase):
         public = json.loads(body)
         self.assertEqual((public["feishu"]["reason"], public["wecom"]["reason"]), ("ready", "pong_late"))
 
+        # An expired lease only removes green; current-instance yellow takes priority.
+        doc["lease_clear_for_s"] = 6
+        _, body = self.assert_response(self.send(request(), snapshot=read), 200)
+        public = json.loads(body)
+        self.assertEqual((public["feishu"]["reason"], public["wecom"]["reason"]),
+                         ("source_unavailable", "pong_late"))
+
+    def test_api_expires_lease_dependent_green_without_recollecting(self):
+        # Use a fractional observation time so deriving the deadline from
+        # the public, whole-second observed_at would be detectably wrong.
+        observed = NOW + 0.25
+        units = dict.fromkeys(collector.UNITS, ACTIVE_UNIT)
+        for expired_clear, expiry in (
+            (False, observed + 10), (False, common.rfc3339(NOW + 11)),
+            (True, observed + 10),
+        ):
+            with self.subTest(expired_clear=expired_clear, expiry=expiry):
+                lease = ({"state": "LEASE", "ecs_stopped": False, "expires_at": expiry}, NOW)
+                policy = collector.Policy(True, True, expired_lease_clear=expired_clear)
+                with (mock.patch.object(collector, "boot_id", return_value=BOOT),
+                      mock.patch.object(collector, "boot_clock", return_value=MONO),
+                      mock.patch.object(collector, "read_policy", return_value=policy),
+                      mock.patch.object(collector.pwd, "getpwnam", return_value=mock.Mock(pw_uid=1234)),
+                      mock.patch.object(collector.grp, "getgrnam", return_value=mock.Mock(gr_gid=1234)),
+                      mock.patch.object(collector, "leaf_expiry", return_value=None),
+                      mock.patch.object(collector, "load_units", return_value=units),
+                      mock.patch.object(collector, "source", side_effect=[feishu(), wecom(), lease]),
+                      mock.patch.object(collector.time, "time", return_value=observed),
+                      mock.patch.object(collector.time, "monotonic", return_value=MONO),
+                      mock.patch.object(collector, "atomic_write") as write):
+                    collector.collect()
+                blob = write.call_args.args[1]
+                doc = common.decode_object(blob)
+                deadline = (common.parse_date(expiry) if isinstance(expiry, str) else expiry) - observed
+                for delay in (0, deadline - 0.125, deadline, deadline + 0.125, 25):
+                    with self.subTest(delay=delay):
+                        def read():
+                            return common.project_snapshot(doc, BOOT, MONO + delay)
+
+                        _, body = self.assert_response(self.send(request(), snapshot=read), 200)
+                        public = json.loads(body)
+                        self.assertEqual(set(public), {"schema_version", "observed_at", "snapshot_age_s",
+                                                       "feishu", "wecom", "certificate"})
+                        expected = ("unknown", "source_unavailable") if (
+                            not expired_clear and delay >= deadline) else ("ok", "ready")
+                        for name in ("feishu", "wecom"):
+                            self.assertEqual(public[name], {
+                                "state": expected[0], "reason": expected[1],
+                                "last_heartbeat_at": common.rfc3339(NOW),
+                            })
+                self.assertEqual(doc, common.decode_object(blob))
+
     def test_api_turns_yellow_heartbeat_and_pong_red_in_a_fresh_snapshot(self):
         doc = private_snapshot()
         doc["feishu"] = connection("feishu", feishu(age=170))
@@ -616,6 +688,7 @@ class APITests(unittest.TestCase):
             with self.subTest(name=name, reason=before):
                 self.assertEqual(status["reason"], before)
                 doc = private_snapshot()
+                doc["lease_clear_for_s"] = 10
                 doc[name] = status
                 result = common.project_snapshot(doc, BOOT, MONO + 25)[name]
                 self.assertEqual(result["reason"], after)

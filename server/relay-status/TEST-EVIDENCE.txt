@@ -209,3 +209,36 @@ NOT RUN: isolated Ubuntu nginx/systemd runtime matrix, live install/rollback,
 or independent re-audit. No production approval. NO_DEPLOY / NO_COMMIT / NO_PUSH.
 No external network, ECS contact, QuotaBar operation, real Keychain access,
 service restart, raw credential written or emitted, or repo-local temp dirs.
+
+== Server S1-01 remediation (2026-11-23T01:17:48Z) ==
+Baseline HEAD (feat/relay-status-server): dbbad3b21cd28bc670c886544570a060434d731b
+Scope: uncommitted server/relay-status candidate; P0 none, P2/P3 unchanged.
+Candidate SHA-256 (nginx-gate.py candidate_sha, excludes this evidence):
+b755244c8727546ac7aca75486372c0f3d98de757d223c2b23728dc4407ba048
+Host: macOS 27.2 (26B123), arm64. Selected macOS SDK: 27.0 (xcrun;
+no SDK compilation). Python 3.14.6 and system /usr/bin/python3 3.9.6.
+
+S1-01 red/green regression: the baseline wrongly returned ready at and after
+the lease cutoff (including +25s) for both numeric and RFC 3339 expiry input.
+After the fix, the same collected snapshot gives HTTP 200 for both channels:
+ready before the cutoff, unknown/source_unavailable at and after it under
+expired_lease_is_clear=false, and still ready with otherwise fresh evidence
+under expired_lease_is_clear=true. Verified fractional cutoff, preserved
+heartbeat history and higher-priority yellow/red, unchanged public v1 keys,
+and no snapshot mutation. Missing (including old-format) or malformed
+private cutoff gives fixed HTTP 503; a fresh collector snapshot is needed
+after a private-format change.
+
+PASS: PYTHONDONTWRITEBYTECODE=1 python3 -B server/relay-status/tests/run.py
+  Trusted host TMPDIR, Python 3.14.6: 58/58 (1.192s).
+  Mode-1777 TMPDIR with trusted HOME, Python 3.14.6: 58/58 (1.218s).
+  TMPDIR unset with trusted HOME, /usr/bin/python3 3.9.6: 58/58 (1.503s).
+  Alternate fixture roots were under the original host TMPDIR and removed.
+PASS: bash -n on deploy-common.sh, install.sh and rollback.sh; install and
+  rollback --dry-run; rollback rejected legacy --apply and missing receipt
+  before apply logic; git diff --check.
+
+NOT RUN: isolated Ubuntu 22.04 nginx/systemd runtime, live install/rollback
+or independent re-audit. No production approval. NO_DEPLOY / NO_COMMIT / NO_PUSH.
+No external network, ECS contact, QuotaBar operation, real Keychain access,
+service restart, raw credential written or emitted, or repo-local temp dirs.
