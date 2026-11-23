@@ -572,6 +572,55 @@ class APITests(unittest.TestCase):
         public = json.loads(body)
         self.assertEqual((public["feishu"]["reason"], public["wecom"]["reason"]), ("ready", "pong_late"))
 
+    def test_api_turns_yellow_heartbeat_and_pong_red_in_a_fresh_snapshot(self):
+        doc = private_snapshot()
+        doc["feishu"] = connection("feishu", feishu(age=170))
+        doc["wecom"] = connection("wecom", wecom(age=10, pong=160))
+        original = json.dumps(doc)
+        for delay, state, heartbeat_reason, pong_reason in (
+            (0, "degraded", "heartbeat_late", "pong_late"),
+            (10, "degraded", "heartbeat_late", "pong_late"),
+            (10.125, "down", "heartbeat_stale", "pong_stale"),
+            (25, "down", "heartbeat_stale", "pong_stale"),
+        ):
+            with self.subTest(delay=delay):
+                def read():
+                    return common.project_snapshot(doc, BOOT, MONO + delay)
+
+                _, body = self.assert_response(self.send(request(), snapshot=read), 200)
+                public = json.loads(body)
+                self.assertEqual(public["snapshot_age_s"], int(delay))
+                for name, reason in (("feishu", heartbeat_reason), ("wecom", pong_reason)):
+                    with self.subTest(channel=name):
+                        self.assertEqual(public[name], {
+                            "state": state, "reason": reason,
+                            "last_heartbeat_at": doc[name]["last_heartbeat_at"],
+                        })
+        self.assertEqual(json.dumps(doc), original)
+
+    def test_response_time_staleness_respects_evidence_precedence(self):
+        stopped = collector.Unit("inactive", 0, 0, "")
+        transitioning = collector.Unit("activating", 0, 0, "")
+        for name, status, before, after in (
+            ("wecom", connection("wecom", wecom(age=170)), "heartbeat_late", "heartbeat_stale"),
+            ("wecom", connection("wecom", wecom(pong=170, state="reconnecting")),
+             "reconnecting", "pong_stale"),
+            ("feishu", connection("feishu", feishu(age=170), unit=stopped), "unit_down", "unit_down"),
+            ("feishu", connection("feishu", feishu(age=170), unit=stopped, lease="stopped"),
+             "paused_by_lease", "paused_by_lease"),
+            ("feishu", connection("feishu", feishu(age=170), unit=transitioning),
+             "transitioning", "transitioning"),
+            ("feishu", connection("feishu", feishu(age=170), unit=None),
+             "source_unavailable", "source_unavailable"),
+        ):
+            with self.subTest(name=name, reason=before):
+                self.assertEqual(status["reason"], before)
+                doc = private_snapshot()
+                doc[name] = status
+                result = common.project_snapshot(doc, BOOT, MONO + 25)[name]
+                self.assertEqual(result["reason"], after)
+                self.assertEqual(result["state"], "down" if after.endswith("_stale") else status["state"])
+
     def test_fixed_429_contract_and_nginx_mapping(self):
         header, _ = self.assert_response(api.response(429), 429, {"error": "rate_limited"})
         self.assertIn(b"\r\nRetry-After: 30", header)

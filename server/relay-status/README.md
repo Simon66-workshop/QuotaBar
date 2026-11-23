@@ -23,7 +23,7 @@
 | 本机叶证书剩余时间 | >14 天 | >0 且 ≤14 天 | ≤0；按完整 24 小时向下取整 |
 | 快照时效 | 同一 boot、年龄 ≤75s 可读 | — | >75s、未来、boot 不符或缺损 → HTTP 503，不造业务红灯 |
 
-unit 确认 failed/inactive 优先判红；活跃的有效停机 lease 仅解释已停，或对运行中的实例产生冲突黄，不替代观测。unit 过渡为黄。当前实例心跳缺失、来源不可用、时间矛盾、未来 >5 秒等为灰；可保留可信历史的时间，但不沿用旧绿。企微有效 pong 年龄是 `last_pong_age + 文件年龄`；`source_mono - last_pong_age >= unit.started` 不用墙钟容差。同文件的 mtime 与源 monotonic 对照，不能将 monotonic 当日历时间。飞书 timestamp 和 mtime 分别不得超前 5 秒以上，再比较二者差值。API 先按采集时刻验证绿灯证据，再将单调时钟经过的时间加到各路证据年龄；超过本路心跳或 pong 绿灯阈值则降黄，即使 75 秒快照 TTL 尚未到期。快照本身不改写。飞书还需 `connection_ready=true` 且为已验证的 `heartbeat_ack`。未知的 lease 或连接证据不能被当作「无阻断」或正常。
+unit 确认 failed/inactive 优先判红；活跃的有效停机 lease 仅解释已停，或对运行中的实例产生冲突黄，不替代观测。unit 过渡为黄。当前实例心跳缺失、来源不可用、时间矛盾、未来 >5 秒等为灰；可保留可信历史的时间，但不沿用旧绿。企微有效 pong 年龄是 `last_pong_age + 文件年龄`；`source_mono - last_pong_age >= unit.started` 不用墙钟容差。同文件的 mtime 与源 monotonic 对照，不能将 monotonic 当日历时间。飞书 timestamp 和 mtime 分别不得超前 5 秒以上，再比较二者差值。API 先按采集时刻验证绿灯证据，再以单调时钟经过的时间更新可信证据的年龄。即使 75 秒快照 TTL 尚未到期，也先判心跳或 pong 是否超过 180 秒转红，再判绿灯是否应转黄。已确认的停机、unit 过渡和来源未知状态不变，快照本身不改写。飞书还需 `connection_ready=true` 且为已验证的 `heartbeat_ack`。未知的 lease 或连接证据不能被当作「无阻断」或正常。
 
 `source-policy.example.json` 的开关全关。在 `/etc/quotabar-relay-status/source-policy.json` 缺失或无效时采用此保守默认。可观察到可信超时/停机时仍会按规则显示黄/红。**只在脱敏样本与负责人确认后**，才可将对应项加到 root:root 0600 策略文件：
 

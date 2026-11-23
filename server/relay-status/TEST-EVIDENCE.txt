@@ -174,3 +174,38 @@ NO_DEPLOY / NO_COMMIT / NO_PUSH. No external network, ECS, QuotaBar operation,
 real Keychain access, service restart, live install/rollback/reload, or
 production approval. No real credential was generated; temporary test/build
 artifacts were under the host TMPDIR and removed.
+
+== Server S-01 remediation (2026-11-23T01:09:57Z) ==
+Baseline HEAD (feat/relay-status-server): 3ef3a020b26c8dea2357eb0642d98ed98482a499
+Scope: uncommitted server/relay-status candidate only; P0 none, P2/P3 unchanged.
+Candidate SHA-256 (nginx-gate.py candidate_sha, excludes this evidence):
+3cbaa1a8df506d7acd6eb0866af56698f43c40f71009d6aa51f6177a921a7bb1
+Host: macOS 27.2 (26B123), arm64. Selected macOS SDK: 27.0 (reported by
+xcrun; no SDK compilation). Python 3.14.6 and system /usr/bin/python3 3.9.6.
+
+S-01 red/green regression: with the new tests and unchanged baseline projector,
+both Feishu heartbeat and WeCom effective pong incorrectly stayed yellow just
+above 180s and at 195s (170s at collection, +25s). With the fix, exactly 180s
+still returns yellow; at both 180.125s and 195s, HTTP 200 reports Feishu
+down/heartbeat_stale and WeCom down/pong_stale. Verified unchanged source
+snapshot, heartbeat precedence when both WeCom observations are stale,
+stale pong overriding reconnecting,
+and preservation of unit_down, paused_by_lease, transitioning and unknown.
+Existing green-to-yellow, collection-evidence validation and >75s TTL rejection
+remain covered.
+
+PASS: PYTHONDONTWRITEBYTECODE=1 python3 -B server/relay-status/tests/run.py
+  Trusted host TMPDIR, Python 3.14.6: 56/56 (1.344s).
+  Mode-1777 TMPDIR with trusted HOME, Python 3.14.6: 56/56 (1.345s).
+  TMPDIR unset with trusted HOME, /usr/bin/python3 3.9.6: 56/56 (1.621s).
+  The latter two simulate fixture path handling on macOS, not Linux. Both
+  alternate fixture roots were created under the original host TMPDIR.
+PASS: bash -n on deploy-common.sh, install.sh, rollback.sh and README snippet;
+  install/rollback --dry-run (no environment preflight); rollback rejected
+  legacy --apply and missing confirmation without entering apply logic;
+  git diff --check.
+
+NOT RUN: isolated Ubuntu nginx/systemd runtime matrix, live install/rollback,
+or independent re-audit. No production approval. NO_DEPLOY / NO_COMMIT / NO_PUSH.
+No external network, ECS contact, QuotaBar operation, real Keychain access,
+service restart, raw credential written or emitted, or repo-local temp dirs.

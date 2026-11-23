@@ -201,20 +201,24 @@ def project_snapshot(doc, current_boot, current_mono):
         collection_limit = min(heartbeat_ok, WECOM_PONG_OK_AGE) if name == "wecom" else heartbeat_ok
         if state == "ok" and (heartbeat_age is None or heartbeat_age > collection_limit):
             raise ValueError("contradictory green heartbeat evidence")
+        pong = status["effective_pong_age_s"] if name == "wecom" else None
         if name == "wecom":
-            pong = status["effective_pong_age_s"]
             if (pong is not None and (not number(pong) or pong < 0)
                     or state == "ok" and (pong is None or heartbeat_age > pong + 1
                                           or pong > WECOM_PONG_OK_AGE)):
                 raise ValueError("contradictory pong evidence")
-        if state == "ok":
-            # Age the observed evidence with the unrounded monotonic elapsed
-            # time, not the public (floored) snapshot_age_s. Do not mutate
-            # the snapshot or turn an already non-green observation green.
-            if heartbeat_age + age > heartbeat_ok:
-                state, reason = "degraded", "heartbeat_late"
-            elif name == "wecom" and pong + age > WECOM_PONG_OK_AGE:
-                state, reason = "degraded", "pong_late"
+        if state in ("ok", "degraded") and reason != "transitioning":
+            # Only these observations establish current-instance evidence.
+            # Use unrounded monotonic elapsed time and check red before yellow.
+            if heartbeat_age is not None and heartbeat_age + age > CONNECTION_DOWN_AGE:
+                state, reason = "down", "heartbeat_stale"
+            elif pong is not None and pong + age > CONNECTION_DOWN_AGE:
+                state, reason = "down", "pong_stale"
+            elif state == "ok":
+                if heartbeat_age + age > heartbeat_ok:
+                    state, reason = "degraded", "heartbeat_late"
+                elif pong is not None and pong + age > WECOM_PONG_OK_AGE:
+                    state, reason = "degraded", "pong_late"
         public_connections[name] = {
             "state": state, "reason": reason, "last_heartbeat_at": status["last_heartbeat_at"],
         }
