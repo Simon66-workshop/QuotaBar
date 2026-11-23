@@ -242,3 +242,26 @@ NOT RUN: isolated Ubuntu 22.04 nginx/systemd runtime, live install/rollback
 or independent re-audit. No production approval. NO_DEPLOY / NO_COMMIT / NO_PUSH.
 No external network, ECS contact, QuotaBar operation, real Keychain access,
 service restart, raw credential written or emitted, or repo-local temp dirs.
+
+== APP-V2-R4-01 aggregate green window (2026-11-23 UTC / Nov 22 New York) ==
+Full server HEAD baseline: 0cdf242d42fdf92db5a40f6b3a0d3d71a574d7b4.
+Full App HEAD baseline: f83c70905e0d684e79e035862bd4972fa5e01682.
+Tested both uncommitted worktrees. Server: macOS 27.2 (26B123) arm64,
+Python 3.14.6 and /usr/bin/python3 3.9.6, standard host TMPDIR. No SDK used
+for Python; App checks used CLT Apple Swift 6.4 (driver 1.168.6), macOS SDK 26.5.
+Server binary git diff SHA-256 excluding this evidence file:
+  ace6b1a88356b8edaff88ece0700da26073802d1832531a1915959d2eb8b3eba
+
+PASS: PYTHONDONTWRITEBYTECODE=1 python3 -B server/relay-status/tests/run.py,
+59/59 with each Python version. API dispatch confirms the authenticated 200
+header QuotaBar-Green-For-Ms, with unchanged strict v1 JSON; no header on error
+responses. Covered heartbeat precedence, effective pong before public-sample
+cutoff, fractional lease, conservative millisecond rounding, strict pong
+boundary, and zero when green is no longer guaranteed. App regenerated its
+10 timelines from this worktree, byte-for-byte; the real App timer test
+passed for both private cutoffs with no new request.
+git diff --check: PASS. No nginx/collector/deployment configuration modified.
+
+NOT RUN: live ECS/nginx, isolated Linux runtime, install/rollback or independent
+acceptance. No network, ECS contact, real Keychain read, QuotaBar install/start/
+stop, service restart, commit, push or deployment.

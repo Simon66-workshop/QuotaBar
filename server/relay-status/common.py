@@ -175,6 +175,11 @@ def validate_timestamp(value, observed):
 
 
 def project_snapshot(doc, current_boot, current_mono):
+    return project_snapshot_response(doc, current_boot, current_mono)[0]
+
+
+def project_snapshot_response(doc, current_boot, current_mono):
+    """Return the strict v1 body and the aggregate green window in whole ms."""
     if (not exact(doc, "schema_version observed_at boot_id observed_boottime lease_clear_for_s "
                        "feishu wecom certificate")
             or type(doc["schema_version"]) is not int or doc["schema_version"] != 1
@@ -193,6 +198,7 @@ def project_snapshot(doc, current_boot, current_mono):
     lease_expired = lease_clear_for_s is not None and age >= lease_clear_for_s
     observed = parse_date(doc["observed_at"])
     public_connections = {}
+    green_until = min(SNAPSHOT_MAX_AGE, lease_clear_for_s if lease_clear_for_s is not None else math.inf)
     for name, heartbeat_ok in (("feishu", FEISHU_OK_AGE), ("wecom", WECOM_HEARTBEAT_OK_AGE)):
         status = doc[name]
         keys = "state reason last_heartbeat_at"
@@ -231,6 +237,10 @@ def project_snapshot(doc, current_boot, current_mono):
         public_connections[name] = {
             "state": state, "reason": reason, "last_heartbeat_at": status["last_heartbeat_at"],
         }
+        if state == "ok":
+            green_until = min(green_until, heartbeat_ok - heartbeat_age)
+            if pong is not None:
+                green_until = min(green_until, WECOM_PONG_OK_AGE - pong)
     cert = doc["certificate"]
     if not exact(cert, "state expires_at days_remaining"):
         raise ValueError("invalid certificate")
@@ -249,7 +259,9 @@ def project_snapshot(doc, current_boot, current_mono):
             raise ValueError("invalid certificate lifetime")
     else:
         raise ValueError("invalid certificate state")
+    green_for_ms = (max(0, math.floor((green_until - age) * 1_000))
+                    if all(link["state"] == "ok" for link in public_connections.values()) else 0)
     return {
         "schema_version": 1, "observed_at": doc["observed_at"],
         "snapshot_age_s": math.floor(age), **public_connections, "certificate": cert,
-    }
+    }, green_for_ms

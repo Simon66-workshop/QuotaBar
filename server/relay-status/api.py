@@ -18,7 +18,7 @@ import time
 
 from common import (
     DAY, SNAPSHOT, SNAPSHOT_LIMIT, SOCKET, boot_clock, boot_id, decode_object, exact,
-    number, project_snapshot, read_regular,
+    number, project_snapshot_response, read_regular,
 )
 
 PATH = b"/api/relay-status/v1"
@@ -110,12 +110,12 @@ def load_credentials():
 
 def snapshot():
     raw, _ = read_regular(SNAPSHOT, SNAPSHOT_LIMIT, mode=0o640)
-    return project_snapshot(decode_object(raw), boot_id(), boot_clock())
+    return project_snapshot_response(decode_object(raw), boot_id(), boot_clock())
 
 
-def response(code, payload=None, head=False):
+def response(code, payload=None, head=False, *, green_for_ms=0):
     if code == 200:
-        phrase, headers = "OK", ()
+        phrase, headers = "OK", (("QuotaBar-Green-For-Ms", str(green_for_ms)),)
     else:
         phrase, message, headers = ERRORS[code]
         payload = {"error": message}
@@ -151,7 +151,8 @@ def dispatch(raw, trailing, credentials, read_snapshot, now):
     if len(auth) != 1 or not credentials.allows(auth[0], now):
         return response(401)
     try:
-        return response(200, read_snapshot())
+        payload, green_for_ms = read_snapshot()
+        return response(200, payload, green_for_ms=green_for_ms)
     except INVALID:
         return response(503)
 

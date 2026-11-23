@@ -451,7 +451,7 @@ class CertificateTests(unittest.TestCase):
 class APITests(unittest.TestCase):
     def setUp(self):
         self.creds = api.Credentials.from_document(credentials_document())
-        self.project = lambda: common.project_snapshot(private_snapshot(), BOOT, MONO)
+        self.project = lambda: common.project_snapshot_response(private_snapshot(), BOOT, MONO)
 
     def send(self, req, snapshot=None, trailing=b""):
         return api.dispatch(req.removesuffix(b"\r\n\r\n"), trailing, self.creds, snapshot or self.project, NOW)
@@ -461,6 +461,7 @@ class APITests(unittest.TestCase):
         self.assertTrue(header.startswith(f"HTTP/1.1 {code} ".encode("ascii")))
         self.assertIn(b"\r\nCache-Control: no-store\r\n", header)
         self.assertIn(b"\r\nContent-Type: application/json\r\n", header)
+        self.assertEqual(b"\r\nQuotaBar-Green-For-Ms: " in header, code == 200)
         for leak in (FAKE_PATH.encode(), FAKE_SECRET.encode(), str(FAKE_PID).encode(), TOKEN, OLD_TOKEN):
             self.assertNotIn(leak, reply)
         if payload is not None:
@@ -515,11 +516,36 @@ class APITests(unittest.TestCase):
                 401, {"error": "unauthorized"})
             self.assertIn(b"\r\nWWW-Authenticate: Bearer", header)
         forbidden_reads.assert_not_called()
-        self.assert_response(self.send(request()), 200, self.project())
+        self.assert_response(self.send(request()), 200, self.project()[0])
+
+    def test_aggregate_green_header_uses_unrounded_lease_and_pong_cutoffs(self):
+        for heartbeat, pong, lease, age, expected in (
+            (0, 0, None, 0, 60000),
+            (85, 0, None, 0, 5000),  # Feishu heartbeat is the earliest cutoff.
+            (0, 55, None, 0, 5000),  # Earlier than the public WeCom sample.
+            (0, 55, None, 4.125, 875),
+            (0, 55, None, 5, 0),     # Still ready at the strict pong boundary.
+            (0, 55, None, 5.125, 0),
+            (0, 0, 10.1259, 0, 10125),
+            (0, 0, 10.1259, 4.25, 5875),
+            (0, 0, 10.1259, 10.125, 0),  # Positive sub-ms lifetime floors to zero.
+            (0, 0, 10, 10, 0),
+        ):
+            with self.subTest(heartbeat=heartbeat, pong=pong, lease=lease, age=age):
+                doc = private_snapshot()
+                doc["feishu"] = connection("feishu", feishu(age=heartbeat))
+                doc["wecom"] = connection("wecom", wecom(age=0, pong=pong))
+                doc["lease_clear_for_s"] = lease
+                read = lambda: common.project_snapshot_response(doc, BOOT, MONO + age)
+                header, body = self.assert_response(self.send(request(), snapshot=read), 200)
+                self.assertIn(f"QuotaBar-Green-For-Ms: {expected}".encode("ascii"), header.split(b"\r\n"))
+                self.assertEqual(json.loads(body), common.project_snapshot(doc, BOOT, MONO + age))
+                self.assertNotIn(b"lease_clear_for_s", body)
+                self.assertNotIn(b"effective_pong_age_s", body)
 
     def test_http_503_missing_bad_or_stale_snapshot(self):
         def stale():
-            return common.project_snapshot(private_snapshot(), BOOT, MONO+75.001)
+            return common.project_snapshot_response(private_snapshot(), BOOT, MONO+75.001)
         for read in (stale, mock.Mock(side_effect=FileNotFoundError(FAKE_PATH)),
                      lambda: common.decode_object(b"{invalid")):
             self.assert_response(self.send(request(), snapshot=read), 503,
@@ -533,7 +559,7 @@ class APITests(unittest.TestCase):
                     del doc["lease_clear_for_s"]
                 else:
                     doc["lease_clear_for_s"] = cutoff
-                read = lambda: common.project_snapshot(doc, BOOT, MONO)
+                read = lambda: common.project_snapshot_response(doc, BOOT, MONO)
                 self.assert_response(self.send(request(), snapshot=read), 503,
                                      {"error": "service_unavailable"})
 
@@ -550,7 +576,7 @@ class APITests(unittest.TestCase):
                     if name == "wecom":
                         doc[name]["effective_pong_age_s"] = min(60, max(0, age))
                     def read():
-                        return common.project_snapshot(doc, BOOT, MONO)
+                        return common.project_snapshot_response(doc, BOOT, MONO)
                     self.assert_response(self.send(request(), snapshot=read), code)
         # Equal serialized age is valid regardless of observation fraction.
         doc = private_snapshot()
@@ -571,7 +597,7 @@ class APITests(unittest.TestCase):
         ):
             with self.subTest(delay=delay):
                 def read():
-                    return common.project_snapshot(doc, BOOT, MONO + delay)
+                    return common.project_snapshot_response(doc, BOOT, MONO + delay)
 
                 _, body = self.assert_response(self.send(request(), snapshot=read), 200)
                 public = json.loads(body)
@@ -582,12 +608,12 @@ class APITests(unittest.TestCase):
                         "last_heartbeat_at": doc[name]["last_heartbeat_at"],
                     })
         self.assertEqual(json.dumps(doc), original)
-        stale = lambda: common.project_snapshot(doc, BOOT, MONO + 75.125)
+        stale = lambda: common.project_snapshot_response(doc, BOOT, MONO + 75.125)
         self.assert_response(self.send(request(), snapshot=stale), 503, {"error": "service_unavailable"})
 
         # The earlier pong deadline does not alter the Feishu projection.
         doc["feishu"] = connection("feishu", feishu(age=80))
-        read = lambda: common.project_snapshot(doc, BOOT, MONO + 6)
+        read = lambda: common.project_snapshot_response(doc, BOOT, MONO + 6)
         _, body = self.assert_response(self.send(request(), snapshot=read), 200)
         public = json.loads(body)
         self.assertEqual((public["feishu"]["reason"], public["wecom"]["reason"]), ("ready", "pong_late"))
@@ -629,7 +655,7 @@ class APITests(unittest.TestCase):
                 for delay in (0, deadline - 0.125, deadline, deadline + 0.125, 25):
                     with self.subTest(delay=delay):
                         def read():
-                            return common.project_snapshot(doc, BOOT, MONO + delay)
+                            return common.project_snapshot_response(doc, BOOT, MONO + delay)
 
                         _, body = self.assert_response(self.send(request(), snapshot=read), 200)
                         public = json.loads(body)
@@ -657,7 +683,7 @@ class APITests(unittest.TestCase):
         ):
             with self.subTest(delay=delay):
                 def read():
-                    return common.project_snapshot(doc, BOOT, MONO + delay)
+                    return common.project_snapshot_response(doc, BOOT, MONO + delay)
 
                 _, body = self.assert_response(self.send(request(), snapshot=read), 200)
                 public = json.loads(body)
@@ -722,7 +748,7 @@ class APITests(unittest.TestCase):
                 thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01})
                 thread.start()
                 try:
-                    for raw, code, body in ((request(), 200, self.project()),
+                    for raw, code, body in ((request(), 200, self.project()[0]),
                                             (request(authorization=None), 401, {"error": "unauthorized"}),
                                             (b"G" * api.HEADER_LIMIT, 400, {"error": "bad_request"})):
                         with socket.socket(socket.AF_UNIX) as sock:
