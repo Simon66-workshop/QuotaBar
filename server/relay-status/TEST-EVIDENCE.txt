@@ -1,0 +1,293 @@
+Date (UTC): 2026-11-22T17:31:24Z
+Python 3.14.6
+Command: python3 -m unittest discover -s server/relay-status/tests -v
+
+test_fixed_429_contract_and_nginx_mapping (test_relay_status.APITests.test_fixed_429_contract_and_nginx_mapping) ... ok
+test_http_400_and_405 (test_relay_status.APITests.test_http_400_and_405) ... ok
+test_http_401_and_200 (test_relay_status.APITests.test_http_401_and_200) ... ok
+test_http_503_missing_bad_or_stale_snapshot (test_relay_status.APITests.test_http_503_missing_bad_or_stale_snapshot) ... ok
+test_invalid_credentials (test_relay_status.APITests.test_invalid_credentials) ... ok
+test_tokens_and_constant_two_comparisons (test_relay_status.APITests.test_tokens_and_constant_two_comparisons) ... ok
+test_unix_socket_roundtrip_and_header_limit_without_tcp (test_relay_status.APITests.test_unix_socket_roundtrip_and_header_limit_without_tcp) ... ok
+test_certificate_threshold_and_full_days (test_relay_status.CertificateTests.test_certificate_threshold_and_full_days) ... ok
+test_leaf_probe_pins_loopback_and_sni_and_uses_public_der_only (test_relay_status.CertificateTests.test_leaf_probe_pins_loopback_and_sni_and_uses_public_der_only) ... ok
+test_atomic_replace_preserves_open_old_inode_and_mode (test_relay_status.ReadAndContractTests.test_atomic_replace_preserves_open_old_inode_and_mode) ... ok
+test_disk_snapshot_through_api_uses_mode_and_monotonic_freshness (test_relay_status.ReadAndContractTests.test_disk_snapshot_through_api_uses_mode_and_monotonic_freshness) ... ok
+test_file_missing_truncated_bad_oversized_and_duplicate (test_relay_status.ReadAndContractTests.test_file_missing_truncated_bad_oversized_and_duplicate) ... ok
+test_fstat_mtime_ignores_embedded_time (test_relay_status.ReadAndContractTests.test_fstat_mtime_ignores_embedded_time) ... ok
+test_generator_writes_only_private_bundle_and_refuses_overwrite (test_relay_status.ReadAndContractTests.test_generator_writes_only_private_bundle_and_refuses_overwrite) ... ok
+test_public_whitelist_and_injected_data_rejection (test_relay_status.ReadAndContractTests.test_public_whitelist_and_injected_data_rejection) ... ok
+test_snapshot_freshness_edges_and_boot_id (test_relay_status.ReadAndContractTests.test_snapshot_freshness_edges_and_boot_id) ... ok
+test_symlinks_hardlinks_writable_directory_and_fifo_are_rejected (test_relay_status.ReadAndContractTests.test_symlinks_hardlinks_writable_directory_and_fifo_are_rejected) ... ok
+test_current_instance_and_clock_validation (test_relay_status.StateTests.test_current_instance_and_clock_validation) ... ok
+test_feishu_threshold_edges (test_relay_status.StateTests.test_feishu_threshold_edges) ... ok
+test_lease_expiry_and_ambiguity (test_relay_status.StateTests.test_lease_expiry_and_ambiguity) ... ok
+test_unconfirmed_missing_and_unrecognized_evidence_is_not_green (test_relay_status.StateTests.test_unconfirmed_missing_and_unrecognized_evidence_is_not_green) ... ok
+test_unit_instance_changed_during_collect (test_relay_status.StateTests.test_unit_instance_changed_during_collect) ... ok
+test_unit_precedence_and_lease (test_relay_status.StateTests.test_unit_precedence_and_lease) ... ok
+test_unit_show_does_not_lose_known_down_when_other_unit_missing (test_relay_status.StateTests.test_unit_show_does_not_lose_known_down_when_other_unit_missing) ... ok
+test_wecom_heartbeat_threshold_edges (test_relay_status.StateTests.test_wecom_heartbeat_threshold_edges) ... ok
+test_wecom_pong_uses_mtime_and_threshold_edges (test_relay_status.StateTests.test_wecom_pong_uses_mtime_and_threshold_edges) ... ok
+
+----------------------------------------------------------------------
+Ran 26 tests in 0.043s
+
+OK
+
+== App APP-01 / APP-02 audit follow-up (2026-11-22T17:45:22Z) ==
+Server compatibility baseline: isolated archive of server HEAD a181197.
+Command: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s server/relay-status/tests -v
+Python 3.14.6: PASS, 26 tests (0.052s), including synthetic Unix socket
+round-trip and wire-contract checks; bash -n for top-level server scripts: PASS.
+The App-only changes did not modify server implementation. This baseline does
+not cover concurrent uncommitted server changes, ECS, nginx or systemd runtime.
+No external network, server script execution, deployment, restart, commit or push.
+
+== Server independent-audit remediation (2026-11-22T17:50:17Z) ==
+Base HEAD: a181197ce76ac701b530d0885ed645a6c126720c
+Scope: this uncommitted server/relay-status candidate (app note above is separate).
+Candidate SHA-256 (nginx-gate.py candidate_sha, excludes this evidence):
+89aa1194296e6da2fa3e8f5d1338abdd83df2996aa4da4917e6c3c1c807b40cc
+Host: Darwin arm64; Python 3.14.6.
+PASS: python3 -B -m unittest discover -s server/relay-status/tests -v
+  43 tests (0.128s), including synthetic disk and Unix socket round trips.
+  P0-01: pre-start pong, exactly at current start, and fractional sides.
+  P0-02: future timestamp and mtime checked independently, inclusive +5.
+  P0-03: both green heartbeat ages at 90/91 serialized seconds and 181s,
+         fixed 503 for contradictions, independent of response-time TTL.
+  P1-01: unrelated config change, multiply referenced include, wrong
+         context/port/host, wrong launcher and stale/incomplete approval.
+  P1-02: process generation identity, unchanged/old workers and stage ordering.
+  P1-04: candidate/runtime-bound approval rejects missing/non-PASS isolation results.
+PASS: bash -n separately on deploy-common.sh, install.sh, rollback.sh;
+      install/rollback --dry-run; legacy single-phase --apply and malformed
+      confirmation rejected by rollback argument parser; git diff --check.
+PASS (guard only): isolated HTTPS probe rejected this non-VM host before
+      making a connection. This is not execution of its protocol cases.
+
+BLOCKED / NOT RUN (P1-03, P1-04): no matching disposable Ubuntu 22.04
+nginx+systemd runtime available in the offline workspace. Real H1/H2 DATA
+handling, real LoadCredential, cross-UID socket privileges, per-IP/aggregate
+429 and interrupted install/rollback remain unproven. See tests/ISOLATED-LINUX.md.
+No approval report generated; no production approval or readiness claim.
+NO_DEPLOY / NO_COMMIT / NO_PUSH. No external network, ECS, real Keychain,
+QuotaBar install/start or status-service apply, rollback or reload.
+
+== App audit APP-01 through APP-04: server compatibility rerun (2026-11-22T17:59:08Z) ==
+Server implementation unchanged by this App remediation. Tested an exact writable
+archive of server commit 3b4d5d24a2aae509dbfe9faaefa3a476f9d7088f.
+Python 3.14.6: PASS, 43 tests (0.142s), including the synthetic Unix socket round
+trip and deploy-gate checks.
+Command: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s server/relay-status/tests -v
+A preliminary run against the concurrently edited server worktree was not
+a stable candidate and also could not create fixtures there under the App sandbox;
+the result above covers the named commit only, not ongoing server changes.
+Isolated Ubuntu nginx/systemd runtime gates remain NOT RUN. No external network,
+ECS contact, install, app launch, real Keychain access, commit, push or deployment.
+
+== App audit dc5df1c APP-01--04: offline server compatibility rerun (2026-11-22T18:13Z) ==
+No server implementation changes were made by this App task. Python 3.14.6.
+  python3 -B -m unittest discover -s server/relay-status/tests -v
+Exact git archive 3b4d5d24a2aae509dbfe9faaefa3a476f9d7088f: PASS, 43 tests,
+including the synthetic Unix socket exchange.
+Separate copy of the existing dirty server worktree at that HEAD: FAIL,
+43 tests run (3 failures, 2 errors). Input manifest SHA-256 (excluding this
+evidence file): 90cb571daeb6ccb2b8e8e9ec47f3ef975fe21d2f5afb7a301946a26746d2539b.
+  - WeCom 89.9s/90s green cases and disk-snapshot HTTP 200 assertions failed.
+  - Approval fixture lacks the new systemd argument; rollback fixture's expected
+    script substring is absent.
+This FAIL covers the captured snapshot only, not later concurrent edits. Neither
+rerun exercised live nginx/systemd, ECS, external network, installation or reload.
+Linux integration and production authorization remain NOT RUN / NOT GRANTED.
+
+== Server v2 P1-01 through P1-04 remediation (2026-11-23T00:49:11Z) ==
+Baseline HEAD: e0cf3f63773807cb071c0b2832c92103a9bf553c
+Scope: uncommitted server/relay-status candidate only.
+Candidate SHA-256 (nginx-gate.py candidate_sha, excludes this evidence):
+acf9a91267a4008829d3732689d3e62ba3ebbf3b451d046020eb530cd556fba0
+Source and writable isolated copy under TMPDIR matched that candidate hash.
+Host: macOS 27.2 (26B123), arm64. Active macOS SDK: 27.0 (xcrun;
+no SDK compilation). Discovery: Python 3.14.6; the shell's atomic rename
+wrapper used /usr/bin/python3 3.9.6. Ubuntu Python/systemd/nginx not run.
+
+PASS: PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s server/relay-status/tests -v
+  52 tests in 0.466s; 0 failures, 0 errors. Unix socket I/O was local only.
+  P1-01: mocked fresh H1/H2 requests independently check healthy site and
+         unauthenticated 410 with exact body/no-store; reject fallback 404,
+         wrong body and missing no-store; distinguish pre/post backend cleanup.
+  P1-02: matrix, CLI and validator agree on eight keys. Reject missing,
+         non-PASS, extra and drifted approval evidence. Synthetic systemd
+         baseline drift and shell stubs prove the reload commands are gated.
+  P1-03: exact retired tree accepted; leftovers, modified route and symlink
+         refused. Retired inspection yields the same nginx baseline. Real
+         filesystem rename fixture confirms that failure at either step keeps
+         the 410, and success atomically replaces the existing route.
+  P1-04: coherent WeCom pong/heartbeat cases and unknown private snapshot
+         project without changing production green criteria; stubbed rollback
+         verifies no stop/removal without matching route and valid witness.
+PASS: bash -n on deploy-common.sh, install.sh and rollback.sh; both dry-runs;
+      rejected legacy rollback --apply and malformed confirmation; git diff --check.
+PASS (guard only): retirement probe refused this non-VM host before connecting.
+
+NOT RUN: real isolated Ubuntu 22.04 matrix, including H1/H2 TLS, shared change
+freeze/drift, and live install -> rollback -> reinstall. No isolation approval
+report or production approval was generated. The two old P0 findings are P2
+under v2 and were not addressed; other P2/P3 findings were not targeted.
+NO_DEPLOY / NO_COMMIT / NO_PUSH. No external network, ECS, QuotaBar operation,
+real Keychain access, or live install/rollback/reload. No raw token or secret
+was persisted or emitted; temporary test files were under TMPDIR and removed.
+
+== Server P0/P1 remediation (2026-11-23T01:01:11Z) ==
+Baseline HEAD (feat/relay-status-server): aeafa50221bf6b22b647e01b1b5f9a1d995416ae
+Local origin/main: 5d405863cea61bd5b0fb2b79bdcc8ff7b3e94d5d
+Scope: uncommitted server/relay-status candidate. Candidate SHA-256
+(nginx-gate.py candidate_sha, excludes this evidence):
+ace6630826b1ac4ee96853ed29b3298ebb0c4d2d3194c1f5e47056001f48c5dc
+Host: macOS 27.2 (26B123), arm64. macOS SDK 27.0; Apple Swift 6.4
+(swiftlang-6.4.0.34.1). Python 3.14.6 and /usr/bin/python3 3.9.6.
+
+PASS: python3 -B server/relay-status/tests/run.py
+  Trusted TMPDIR, Python 3.14.6: 54/54 (1.268s).
+  TMPDIR mode 1777 with a separate short trusted HOME, Python 3.14.6:
+    54/54 (1.362s). This is a permissions simulation on macOS, not Linux.
+  TMPDIR unset with a short trusted HOME, Python 3.9.6: 54/54 (1.413s).
+  P0-01: initial provisioning and rotation in synthetic subprocess tests
+    use a real stdin pipe and suppress child output. Real filesystem writes
+    contain only 0600 verify.json; no raw file is created. Existing verify.json
+    blocks overwrite; a failed handoff removes the digest; the old digest
+    expires at the 24h boundary. Native writer built against the macOS SDK,
+    with expected SecKeychainOpen deprecation warning. Six invalid inputs
+    were silently rejected before any Keychain operation.
+  P0-02: unchanged private snapshot served at +25s returns HTTP 200 with
+    Feishu heartbeat_late (110s) and WeCom pong_late (80s). Exact and fractional
+    evidence boundaries, independent channel expiry, heartbeat precedence,
+    immutable projection and HTTP 503 past the 75s TTL were checked.
+  P1-01: trusted, short fixture path with synthetic Unix socket round trip;
+    1777 ancestor still rejected by the unchanged production reader even
+    with a private child. No test fixture directory remained in the repo.
+PASS: bash -n on deploy-common.sh, install.sh, rollback.sh and README snippet;
+  install/rollback --dry-run; git diff --check and new-file whitespace checks.
+
+NOT RUN: real login Keychain add/update, QuotaBar read authorization, or isolated
+Ubuntu 22.04 nginx/systemd runtime matrix. P2/P3 remain out of scope.
+NO_DEPLOY / NO_COMMIT / NO_PUSH. No external network, ECS, QuotaBar operation,
+real Keychain access, service restart, live install/rollback/reload, or
+production approval. No real credential was generated; temporary test/build
+artifacts were under the host TMPDIR and removed.
+
+== Server S-01 remediation (2026-11-23T01:09:57Z) ==
+Baseline HEAD (feat/relay-status-server): 3ef3a020b26c8dea2357eb0642d98ed98482a499
+Scope: uncommitted server/relay-status candidate only; P0 none, P2/P3 unchanged.
+Candidate SHA-256 (nginx-gate.py candidate_sha, excludes this evidence):
+3cbaa1a8df506d7acd6eb0866af56698f43c40f71009d6aa51f6177a921a7bb1
+Host: macOS 27.2 (26B123), arm64. Selected macOS SDK: 27.0 (reported by
+xcrun; no SDK compilation). Python 3.14.6 and system /usr/bin/python3 3.9.6.
+
+S-01 red/green regression: with the new tests and unchanged baseline projector,
+both Feishu heartbeat and WeCom effective pong incorrectly stayed yellow just
+above 180s and at 195s (170s at collection, +25s). With the fix, exactly 180s
+still returns yellow; at both 180.125s and 195s, HTTP 200 reports Feishu
+down/heartbeat_stale and WeCom down/pong_stale. Verified unchanged source
+snapshot, heartbeat precedence when both WeCom observations are stale,
+stale pong overriding reconnecting,
+and preservation of unit_down, paused_by_lease, transitioning and unknown.
+Existing green-to-yellow, collection-evidence validation and >75s TTL rejection
+remain covered.
+
+PASS: PYTHONDONTWRITEBYTECODE=1 python3 -B server/relay-status/tests/run.py
+  Trusted host TMPDIR, Python 3.14.6: 56/56 (1.344s).
+  Mode-1777 TMPDIR with trusted HOME, Python 3.14.6: 56/56 (1.345s).
+  TMPDIR unset with trusted HOME, /usr/bin/python3 3.9.6: 56/56 (1.621s).
+  The latter two simulate fixture path handling on macOS, not Linux. Both
+  alternate fixture roots were created under the original host TMPDIR.
+PASS: bash -n on deploy-common.sh, install.sh, rollback.sh and README snippet;
+  install/rollback --dry-run (no environment preflight); rollback rejected
+  legacy --apply and missing confirmation without entering apply logic;
+  git diff --check.
+
+NOT RUN: isolated Ubuntu nginx/systemd runtime matrix, live install/rollback,
+or independent re-audit. No production approval. NO_DEPLOY / NO_COMMIT / NO_PUSH.
+No external network, ECS contact, QuotaBar operation, real Keychain access,
+service restart, raw credential written or emitted, or repo-local temp dirs.
+
+== Server S1-01 remediation (2026-11-23T01:17:48Z) ==
+Baseline HEAD (feat/relay-status-server): dbbad3b21cd28bc670c886544570a060434d731b
+Scope: uncommitted server/relay-status candidate; P0 none, P2/P3 unchanged.
+Candidate SHA-256 (nginx-gate.py candidate_sha, excludes this evidence):
+b755244c8727546ac7aca75486372c0f3d98de757d223c2b23728dc4407ba048
+Host: macOS 27.2 (26B123), arm64. Selected macOS SDK: 27.0 (xcrun;
+no SDK compilation). Python 3.14.6 and system /usr/bin/python3 3.9.6.
+
+S1-01 red/green regression: the baseline wrongly returned ready at and after
+the lease cutoff (including +25s) for both numeric and RFC 3339 expiry input.
+After the fix, the same collected snapshot gives HTTP 200 for both channels:
+ready before the cutoff, unknown/source_unavailable at and after it under
+expired_lease_is_clear=false, and still ready with otherwise fresh evidence
+under expired_lease_is_clear=true. Verified fractional cutoff, preserved
+heartbeat history and higher-priority yellow/red, unchanged public v1 keys,
+and no snapshot mutation. Missing (including old-format) or malformed
+private cutoff gives fixed HTTP 503; a fresh collector snapshot is needed
+after a private-format change.
+
+PASS: PYTHONDONTWRITEBYTECODE=1 python3 -B server/relay-status/tests/run.py
+  Trusted host TMPDIR, Python 3.14.6: 58/58 (1.192s).
+  Mode-1777 TMPDIR with trusted HOME, Python 3.14.6: 58/58 (1.218s).
+  TMPDIR unset with trusted HOME, /usr/bin/python3 3.9.6: 58/58 (1.503s).
+  Alternate fixture roots were under the original host TMPDIR and removed.
+PASS: bash -n on deploy-common.sh, install.sh and rollback.sh; install and
+  rollback --dry-run; rollback rejected legacy --apply and missing receipt
+  before apply logic; git diff --check.
+
+NOT RUN: isolated Ubuntu 22.04 nginx/systemd runtime, live install/rollback
+or independent re-audit. No production approval. NO_DEPLOY / NO_COMMIT / NO_PUSH.
+No external network, ECS contact, QuotaBar operation, real Keychain access,
+service restart, raw credential written or emitted, or repo-local temp dirs.
+
+== APP-V2-R4-01 aggregate green window (2026-11-23 UTC / Nov 22 New York) ==
+Full server HEAD baseline: 0cdf242d42fdf92db5a40f6b3a0d3d71a574d7b4.
+Full App HEAD baseline: f83c70905e0d684e79e035862bd4972fa5e01682.
+Tested both uncommitted worktrees. Server: macOS 27.2 (26B123) arm64,
+Python 3.14.6 and /usr/bin/python3 3.9.6, standard host TMPDIR. No SDK used
+for Python; App checks used CLT Apple Swift 6.4 (driver 1.168.6), macOS SDK 26.5.
+Server binary git diff SHA-256 excluding this evidence file:
+  ace6b1a88356b8edaff88ece0700da26073802d1832531a1915959d2eb8b3eba
+
+PASS: PYTHONDONTWRITEBYTECODE=1 python3 -B server/relay-status/tests/run.py,
+59/59 with each Python version. API dispatch confirms the authenticated 200
+header QuotaBar-Green-For-Ms, with unchanged strict v1 JSON; no header on error
+responses. Covered heartbeat precedence, effective pong before public-sample
+cutoff, fractional lease, conservative millisecond rounding, strict pong
+boundary, and zero when green is no longer guaranteed. App regenerated its
+10 timelines from this worktree, byte-for-byte; the real App timer test
+passed for both private cutoffs with no new request.
+git diff --check: PASS. No nginx/collector/deployment configuration modified.
+
+NOT RUN: live ECS/nginx, isolated Linux runtime, install/rollback or independent
+acceptance. No network, ECS contact, real Keychain read, QuotaBar install/start/
+stop, service restart, commit, push or deployment.
+
+== APP-V2-R5-01 mixed-row green window (2026-11-23 UTC / Nov 22 New York) ==
+Full server HEAD baseline: 800114cce1517dc0237d8c09a68c239a787948af.
+Full App HEAD baseline: 4797688ad714b1fac044f69d78b081e898968d3c.
+Full local origin/main merge base: 5d405863cea61bd5b0fb2b79bdcc8ff7b3e94d5d.
+Tested uncommitted worktrees on macOS 27.2 (26B123), arm64. Python 3.14.6
+and /usr/bin/python3 3.9.6; no SDK for Python. App/cross-check used macOS
+SDK 26.5 and CLT Apple Swift 6.4 (swiftlang-6.4.0.34.1, driver 1.168.6).
+Server binary git diff SHA-256 excluding this evidence file:
+  79abc17c9905a57ab584f99faeb16f0f0f7c78bc93c6f19d1643c3454cae7ffd
+
+PASS: PYTHONDONTWRITEBYTECODE=1 python3 -B server/relay-status/tests/run.py,
+60/60 on each Python. Authenticated 200 header covered both mixed row
+orders, the fractional and zero deadline boundaries, and no green rows.
+Feishu unit_down and WeCom heartbeat just collected with a 55s effective
+pong: server HEAD returned 0 ms; fixed returns 5000 ms at t=0, 875 ms at
++4.125s and 0 ms at +5s; at +20s WeCom is pong_late and Feishu is still red.
+Fixed App revoked the lone green on its own timer at +5s with one load;
+the menu-bar summary stayed red. The existing two-green cutoff tests passed.
+Strict public v1 body unchanged; no private pong/lease data exposed.
+Working-tree git diff --check passed. No nginx/collector/deploy changes.
+
+NOT RUN: live ECS/nginx, isolated Linux runtime, install/rollback or
+independent acceptance. No external network, ECS contact, real Keychain
+read, raw credential persisted/emitted, QuotaBar install/start/stop,
+service restart, commit, push or deployment. Scratch used TMPDIR.

@@ -1,0 +1,7 @@
+round 1 sha a181197ce76ac701b530d0885ed645a6c126720c Sun Nov 22 12:36:12 EST 2026
+round 1 VERDICT: FAIL
+round 2 sha 3b4d5d24a2aae509dbfe9faaefa3a476f9d7088f Sun Nov 22 12:50:57 EST 2026
+round 2 VERDICT: FAIL
+round 3 sha e7ff870b26b9d1390feb0251734c76b21a3de045 Sun Nov 22 13:26:04 EST 2026
+round 3 VERDICT: FAIL
+STOPPED by executor Sun Nov 22 13:40:13 EST 2026: recurring freshness/scope findings across rounds; reassess
