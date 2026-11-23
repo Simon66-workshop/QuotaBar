@@ -3,9 +3,13 @@
 # compile/sign/verify a real candidate without installing or running it.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+LAUNCHER="$ROOT/Start QuotaBar.command"
+if ! test -x "$LAUNCHER"; then
+  echo 'Start QuotaBar.command must be executable for Finder Open.' >&2
+  exit 1
+fi
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/quotabar-launcher-check.XXXXXX")"
 trap 'rm -rf -- "$WORK"' EXIT
-LAUNCHER="$ROOT/Start QuotaBar.command"
 mkdir -p "$WORK"/{lifecycle,compiler,default-sdk,fallback-sdk,override-sdk}
 
 cat > "$WORK/lifecycle/blocked" <<'STUB'
@@ -63,7 +67,7 @@ expect_failure() {
   : > "$WORK/trace"
   if output="$(HOME="$WORK/home" QUOTABAR_SDK="$sdk" QUOTABAR_TEST_REJECT="$reject" \
       QUOTABAR_TEST_NORMAL=1 QUOTABAR_TEST_WORK="$WORK" QUOTABAR_TEST_TRACE="$WORK/trace" \
-      PATH="$WORK/lifecycle:$WORK/compiler:/usr/bin:/bin:/usr/sbin:/sbin" bash "$LAUNCHER" </dev/null 2>&1)"; then
+      PATH="$WORK/lifecycle:$WORK/compiler:/usr/bin:/bin:/usr/sbin:/sbin" "$LAUNCHER" </dev/null 2>&1)"; then
     echo 'Expected the launcher to fail before replacement.' >&2
     exit 1
   fi
@@ -90,6 +94,6 @@ echo 'APP_02_FAILURE_PATH=PASS · old bundle unchanged; no stop, quarantine chan
 : > "$WORK/trace"
 HOME="$WORK/home" QUOTABAR_TEST_NORMAL=0 QUOTABAR_TEST_TRACE="$WORK/trace" \
   PATH="$WORK/lifecycle:/usr/bin:/bin:/usr/sbin:/sbin" \
-  bash "$LAUNCHER" --check-build
+  "$LAUNCHER" --check-build
 [[ ! -s "$WORK/trace" ]]
 diff -r "$WORK/original.app" "$OLD"

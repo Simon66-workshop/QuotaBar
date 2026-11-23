@@ -743,3 +743,40 @@ NOT RUN: protected GO-only scripts in their separate worktree, actual
 replacement/rollback or launch, trusted signer or real Keychain ACL, live
 menu bar/VoiceOver/glass, ECS/nginx. No network, ECS contact, real Keychain
 read, QuotaBar install/start/stop, commit, push or deployment.
+
+== App V2 P1 remediation (2026-11-23T01:02:49Z) ==
+Full HEAD baseline: e0b871198453ea11123a75fd5ea34f5f177bb046.
+Tested the working-tree fixes, not a new commit. macOS 27.2 (26B123)
+arm64; CLT Apple Swift 6.4 (swiftlang-6.4.0.34.1; driver 1.168.6).
+SDK: default macOS 27.0 probe failed to expand SwiftUI @State; the
+launcher automatically selected local macOS 26.5. macOS 26.5 was also
+selected for the standalone checks via QUOTABAR_SDK or SDKROOT.
+/usr/bin/python3 3.9.6 verified documentation alignment and PNG bytes.
+
+APP-V2-01: PASS. Without execute permission, the new test failed with
+exit 1 and a Finder-specific diagnostic before compilation. Git reports
+the mode-only diff 100644 => 100755; applying it to a clean HEAD export
+made the launcher executable without changing its bytes. The test now
+invokes the executable directly. Its four failure cases left the old
+synthetic bundle untouched and did not stop an app, clear quarantine, or
+launch it. The real --check-build compiled, signed ad hoc with Hardened
+Runtime, and verified a disposable candidate without running it.
+The Git directory is read-only; the mode change is unstaged and HEAD
+still records 100644. Finder right-click Open itself was not exercised.
+
+APP-V2-02: PASS. Install.txt and README.md now identify the same offline
+command, bash QuotaBarTests/check-launcher.sh, which passed from repo-app.
+The unmodified legacy build-candidate.sh rejected repo-app before build,
+with its expected GO worktree diagnostic.
+
+Related App reruns: run.sh PASS (278 checks); check-memory.sh PASS
+(native page counters); check-relay-status.sh PASS (synthetic HTTP,
+polling and helper checks; matching Shanghai times in New York and UTC;
+17 offscreen PNGs byte-identical to tracked previews);
+check-relay-signature.sh PASS (disposable ad-hoc fixtures only).
+Shell syntax, plist/project lint and git diff --check PASS.
+No P0 findings; APP-V2-03/04/05 remain unchanged. Offscreen fragments do
+not validate the production panel's short-window bottom scroll.
+GO-only build/render and live checks were not run. All test scratch was
+in TMPDIR. No network, ECS contact, app install/start/stop, real Keychain
+read, commit, push or deployment.

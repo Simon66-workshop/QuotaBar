@@ -7,4 +7,4 @@ Then the menu bar shows connected services, Google quota (or GO —), disks, and
 G shared Grok / Cursor / Bot weekly pool · O Codex · AC / AT / AF Claude
 GO Google / Antigravity Gemini Models used % · D fullest internal disk · E external disks · M RAM
 Panel header must say v1.8.28 (build 41). See README for GO semantics and unavailable behavior.
-Local upgrade review: use QuotaBarTests/build-candidate.sh only. Do not install or launch the candidate.
+Local upgrade review: run `bash QuotaBarTests/check-launcher.sh` from this checkout for the offline launcher check. Do not install or launch the candidate.
