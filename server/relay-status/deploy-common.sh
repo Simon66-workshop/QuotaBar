@@ -46,12 +46,44 @@ publish_nginx() {
     # Unlike mv, rename cannot fall back to non-atomic copying.
     /usr/bin/python3 -IB -c 'import os, sys; os.rename(*sys.argv[1:])' "$1" "$2"
 }
+# Unlike the retired nginx gate (which also allows draining workers' limits),
+# reinstall requires exactly the files left by completed backend cleanup.
+fully_retired_tree() (
+    local dir
+    for dir in "$BASE" "$NGINX_TREE" "$NGINX_TREE/http" "$NGINX_TREE/https"; do
+        [[ -d "$dir" && ! -L "$dir" && $(stat -c '%u %g %a' "$dir") == '0 0 755' ]] || return 1
+    done
+    shopt -s dotglob nullglob
+    set -- "$BASE"/*
+    [[ $# == 1 && "$1" == "$NGINX_TREE" ]] || return 1
+    set -- "$NGINX_TREE"/*
+    [[ $# == 2 ]] || return 1
+    set -- "$NGINX_TREE/http"/*
+    [[ $# == 0 ]] || return 1
+    set -- "$NGINX_TREE/https"/*
+    [[ $# == 1 && "$1" == "$VHOST" ]] &&
+        regular_match "$VHOST" "$HERE/nginx/retired.conf" &&
+        [[ $(stat -c '%u %g %a %h' "$VHOST") == '0 0 644 1' ]]
+)
+activate_nginx() {
+    if [[ "$1" == retired ]]; then
+        # Limits have no effect on the 410. The route rename is the final
+        # switch; even a failure between the two never exposes the fallback.
+        publish_nginx "$2/http/limits.conf" "$HTTP" || return
+        publish_nginx "$2/https/location.conf" "$VHOST"
+    else
+        publish_nginx "$2" "$NGINX_TREE"
+    fi
+}
 systemd_reload() {
     nginx_gate systemd || die "Production systemd baseline has drift; no daemon-reload."
     /usr/bin/systemctl daemon-reload
     nginx_gate systemd || die "Production systemd baseline changed; stop and review."
 }
-nginx_reload() { /usr/bin/systemctl reload nginx.service >/dev/null 2>&1; }
+nginx_reload() {
+    nginx_gate systemd || die "Production systemd baseline has drift; no shared nginx reload."
+    /usr/bin/systemctl reload nginx.service >/dev/null 2>&1
+}
 
 begin_apply() {
     [[ $(uname -s) == Linux && $(id -u) == 0 ]] || die "--apply requires Linux root."

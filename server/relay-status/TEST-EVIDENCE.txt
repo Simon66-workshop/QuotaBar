@@ -99,3 +99,40 @@ evidence file): 90cb571daeb6ccb2b8e8e9ec47f3ef975fe21d2f5afb7a301946a26746d2539b
 This FAIL covers the captured snapshot only, not later concurrent edits. Neither
 rerun exercised live nginx/systemd, ECS, external network, installation or reload.
 Linux integration and production authorization remain NOT RUN / NOT GRANTED.
+
+== Server v2 P1-01 through P1-04 remediation (2026-11-23T00:49:11Z) ==
+Baseline HEAD: e0cf3f63773807cb071c0b2832c92103a9bf553c
+Scope: uncommitted server/relay-status candidate only.
+Candidate SHA-256 (nginx-gate.py candidate_sha, excludes this evidence):
+acf9a91267a4008829d3732689d3e62ba3ebbf3b451d046020eb530cd556fba0
+Source and writable isolated copy under TMPDIR matched that candidate hash.
+Host: macOS 27.2 (26B123), arm64. Active macOS SDK: 27.0 (xcrun;
+no SDK compilation). Discovery: Python 3.14.6; the shell's atomic rename
+wrapper used /usr/bin/python3 3.9.6. Ubuntu Python/systemd/nginx not run.
+
+PASS: PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s server/relay-status/tests -v
+  52 tests in 0.466s; 0 failures, 0 errors. Unix socket I/O was local only.
+  P1-01: mocked fresh H1/H2 requests independently check healthy site and
+         unauthenticated 410 with exact body/no-store; reject fallback 404,
+         wrong body and missing no-store; distinguish pre/post backend cleanup.
+  P1-02: matrix, CLI and validator agree on eight keys. Reject missing,
+         non-PASS, extra and drifted approval evidence. Synthetic systemd
+         baseline drift and shell stubs prove the reload commands are gated.
+  P1-03: exact retired tree accepted; leftovers, modified route and symlink
+         refused. Retired inspection yields the same nginx baseline. Real
+         filesystem rename fixture confirms that failure at either step keeps
+         the 410, and success atomically replaces the existing route.
+  P1-04: coherent WeCom pong/heartbeat cases and unknown private snapshot
+         project without changing production green criteria; stubbed rollback
+         verifies no stop/removal without matching route and valid witness.
+PASS: bash -n on deploy-common.sh, install.sh and rollback.sh; both dry-runs;
+      rejected legacy rollback --apply and malformed confirmation; git diff --check.
+PASS (guard only): retirement probe refused this non-VM host before connecting.
+
+NOT RUN: real isolated Ubuntu 22.04 matrix, including H1/H2 TLS, shared change
+freeze/drift, and live install -> rollback -> reinstall. No isolation approval
+report or production approval was generated. The two old P0 findings are P2
+under v2 and were not addressed; other P2/P3 findings were not targeted.
+NO_DEPLOY / NO_COMMIT / NO_PUSH. No external network, ECS, QuotaBar operation,
+real Keychain access, or live install/rollback/reload. No raw token or secret
+was persisted or emitted; temporary test files were under TMPDIR and removed.

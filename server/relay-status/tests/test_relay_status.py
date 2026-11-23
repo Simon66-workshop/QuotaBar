@@ -216,7 +216,7 @@ class StateTests(unittest.TestCase):
 
 class ReadAndContractTests(unittest.TestCase):
     def setUp(self):
-        temp = tempfile.TemporaryDirectory(prefix=".status-fixture-", dir=ROOT / "tests")
+        temp = tempfile.TemporaryDirectory(prefix="qb-status-", dir=Path(tempfile.gettempdir()).resolve())
         self.addCleanup(temp.cleanup)
         self.folder = Path(temp.name)
         self.target = self.folder / "input.json"
@@ -234,7 +234,9 @@ class ReadAndContractTests(unittest.TestCase):
                 self.assertEqual(self.read(), (None, -1))
 
     def test_fstat_mtime_ignores_embedded_time(self):
-        self.target.write_text(json.dumps(wecom(age=12, pong=47)[0]), encoding="ascii")
+        data, _ = wecom(age=12, pong=47)
+        del data["secret"]
+        self.target.write_text(json.dumps(data), encoding="ascii")
         os.utime(self.target, (NOW - 12, NOW - 12))
         sample = self.read()
         self.assertAlmostEqual(sample[1], NOW - 12)
@@ -309,7 +311,7 @@ class ReadAndContractTests(unittest.TestCase):
     def test_disk_snapshot_through_api_uses_mode_and_monotonic_freshness(self):
         creds = api.Credentials.from_document(credentials_document())
         doc = private_snapshot()
-        doc["wecom"] = UNKNOWN
+        doc["wecom"] = {**UNKNOWN, "effective_pong_age_s": None}
         original_reader = common.read_regular
 
         def fixture_reader(path, size, *, mode):
@@ -337,19 +339,37 @@ class ReadAndContractTests(unittest.TestCase):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         output = io.StringIO()
+        token_bytes = io.BytesIO()
+        real_fdopen = os.fdopen
+        token_file = self.folder / "token"
+
+        @contextlib.contextmanager
+        def capture_token(handle, mode):
+            with real_fdopen(handle, mode) as stream:
+                if os.path.samestat(os.fstat(handle), token_file.stat()):
+                    # Exercise real file creation/permissions without persisting even
+                    # the synthetic raw token. The digest stream writes normally.
+                    wrapper = mock.Mock(wraps=stream)
+                    wrapper.write.side_effect = token_bytes.write
+                    yield wrapper
+                else:
+                    yield stream
+
         with (contextlib.redirect_stdout(output), contextlib.redirect_stderr(output),
+              mock.patch.object(module.os, "fdopen", side_effect=capture_token),
               mock.patch.object(module.secrets, "token_urlsafe", return_value=TOKEN.decode("ascii"))):
             module.generate(self.folder)
-        self.assertEqual(output.getvalue(), "")
-        raw = (self.folder / "token").read_bytes().strip()
+            with self.assertRaises(FileExistsError):
+                module.generate(self.folder)
+        self.assertTrue(not output.getvalue(), "generator produced output")
+        raw = token_bytes.getvalue().strip()
+        self.assertTrue(raw == TOKEN, "raw token did not go to the private stream")
         credential = (self.folder / "verify.json").read_bytes()
-        self.assertNotIn(raw, credential)
+        self.assertTrue(raw not in credential, "credential document contains a raw token")
         self.assertTrue(api.Credentials.from_document(json.loads(credential)).allows(b"Bearer "+raw, NOW))
         for filename in ("token", "verify.json"):
             self.assertEqual(stat.S_IMODE((self.folder / filename).stat().st_mode), 0o600)
-        with self.assertRaises(FileExistsError):
-            module.generate(self.folder)
-        self.assertTrue((self.folder / "token").read_bytes().strip() == raw)
+        self.assertEqual(token_file.stat().st_size, 0)
 
 
 class CertificateTests(unittest.TestCase):
@@ -460,11 +480,17 @@ class APITests(unittest.TestCase):
                                  {"error": "service_unavailable"})
 
     def test_api_rejects_green_incompatible_with_observation_not_response_age(self):
-        for name in ("feishu", "wecom"):
-            for age, code in ((89.9, 200), (90, 200), (90.001, 503), (181, 503), (-5, 200), (-6, 503)):
+        for name, cases in (
+            ("feishu", ((89.9, 200), (90, 200), (91, 503), (181, 503), (-5, 200), (-6, 503))),
+            ("wecom", ((59.9, 200), (60, 200), (61, 503), (89.9, 503), (90, 503), (181, 503),
+                       (-5, 200), (-6, 503))),
+        ):
+            for age, code in cases:
                 with self.subTest(name=name, age=age):
                     doc = private_snapshot()
                     doc[name]["last_heartbeat_at"] = common.rfc3339(NOW - age)
+                    if name == "wecom":
+                        doc[name]["effective_pong_age_s"] = min(60, max(0, age))
                     # Green at collection remains valid while this immutable
                     # snapshot is served, up to the separate 75s snapshot TTL.
                     def read():
@@ -491,7 +517,7 @@ class APITests(unittest.TestCase):
         self.assertNotIn("X-Forwarded-For", location)
 
     def test_unix_socket_roundtrip_and_header_limit_without_tcp(self):
-        tmp = Path("/private/tmp") if sys.platform == "darwin" else Path("/tmp")
+        tmp = Path(tempfile.gettempdir()).resolve()
         with tempfile.TemporaryDirectory(prefix="qb-", dir=tmp) as directory:
             path = Path(directory) / "s"
             previous = os.umask(0o117)

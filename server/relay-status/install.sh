@@ -7,7 +7,7 @@ source "$HERE/deploy-common.sh"
 case "${1:---dry-run}" in
     --dry-run)
         say "DRY RUN: no environment preflight; no files, users, nginx or units changed."
-        say "After approval: validate current nginx, credentials, account and empty include slots."
+        say "After approval: validate current nginx, credentials, account and empty or fully retired include slots."
         say "Install the isolated collector, timer, API and tmpfiles; start only these new status units."
         say "Verify snapshot and socket; activate only the dedicated 443 location and http limits."
         say "Require the shared change freeze, approved nginx/systemd baselines and candidate-bound isolation report."
@@ -19,7 +19,12 @@ esac
 
 [[ $(uname -s) == Linux && $(id -u) == 0 ]] || die "--apply requires Linux root."
 begin_apply
-nginx_gate inactive || die "Initial nginx review gate failed; nothing installed or reloaded."
+mode=inactive
+if ! absent "$BASE"; then
+    fully_retired_tree || die "Only an exact, fully cleaned retirement tree can be reinstalled."
+    mode=retired
+fi
+nginx_gate "$mode" || die "Initial nginx review gate failed; nothing installed or reloaded."
 for exe in /usr/bin/python3 /usr/bin/systemctl /usr/bin/openssl /usr/bin/unshare /usr/bin/mount; do
     [[ -x "$exe" ]] || die "Required existing system executable is missing."
 done
@@ -45,7 +50,7 @@ PY
    $(id -Gn quotabar-status) == quotabar-status ]] ||
     die "Pre-provision the dedicated non-root status identity with no supplementary groups."
 getent group www-data >/dev/null || die "Verify the documented nginx worker group."
-for path in "$BASE" "$RUN" "$TMPFILES"; do
+for path in "$RUN" "$TMPFILES"; do
     absent "$path" || die "An install target already exists; do not overwrite it."
 done
 for unit in "${UNITS[@]}"; do
@@ -55,7 +60,7 @@ for unit in "${UNITS[@]}"; do
 done
 
 # Reserve the private installation tree before copying anything into it.
-mkdir -m 0755 -- "$BASE"
+if [[ "$mode" == inactive ]]; then mkdir -m 0755 -- "$BASE"; fi
 stage=
 install_exit() {
     local rc=$?
@@ -65,7 +70,8 @@ install_exit() {
     fi
 }
 trap install_exit EXIT
-install -d -m 0755 "$BASE/templates" "$NGINX_TREE"
+install -d -m 0755 "$BASE/templates"
+if [[ "$mode" == inactive ]]; then install -d -m 0755 "$NGINX_TREE"; fi
 for file in "${PY_FILES[@]}"; do
     install -m 0644 "$HERE/$file" "$BASE/$file"
 done
@@ -86,20 +92,29 @@ systemd_reload
 systemctl start "$COLLECTOR"
 [[ $(stat -c '%U %G %a' "$RUN/snapshot.json") == 'root quotabar-status 640' ]] ||
     die "Unexpected snapshot ownership or mode."
-systemctl enable --now "$API" "$TIMER"
+systemctl start "$API" "$TIMER"
 for ((i=0; i<25; i++)); do
     [[ -S "$RUN/api/status.sock" ]] && break
     sleep 0.2
 done
 [[ -S "$RUN/api/status.sock" && $(stat -c '%U %G %a' "$RUN/api/status.sock") == 'quotabar-status www-data 660' ]] ||
     die "API did not create the expected Unix socket."
+/usr/bin/python3 -IB - "$RUN/api/status.sock" <<'PY' || die "New API failed the local unauthenticated socket probe."
+import socket
+import sys
+with socket.socket(socket.AF_UNIX) as conn:
+    conn.settimeout(2)
+    conn.connect(sys.argv[1])
+    conn.sendall(b"GET /api/relay-status/v1 HTTP/1.1\r\nHost: localhost\r\n\r\n")
+    with conn.makefile("rb") as response:
+        sys.exit(0 if response.readline(128).startswith(b"HTTP/1.1 401 ") else 1)
+PY
+systemctl enable --no-reload "$API" "$TIMER"
 new_nginx_stage
 install -m 0644 "$BASE/templates/limits.conf" "$stage/http/limits.conf"
 install -m 0644 "$BASE/templates/location.conf" "$stage/https/location.conf"
 nginx_gate_staged "$stage" active || die "Complete isolated nginx candidate failed; no activation."
-# Both fragments become eligible together, and only after full validation.
-publish_nginx "$stage" "$NGINX_TREE"
-stage=
+activate_nginx "$mode" "$stage" || die "Atomic nginx publication failed; no reload."
 nginx_gate active || die "Activated files no longer match approved config; no reload."
 nginx_reload || die "nginx reload failed; confirm live configuration before further changes."
 say "Status components installed; verify nginx TLS, routing, privacy and response gates separately."

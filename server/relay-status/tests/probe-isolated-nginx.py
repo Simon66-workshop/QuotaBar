@@ -33,10 +33,11 @@ def request(ver, source, expect, *extra, path=ROUTE, trace=False, auth=True):
         *(["--trace-ascii", "/dev/stderr"] if trace else []),
         "--write-out", "\n%{http_version} %{http_code}", "https://" + HOST + path,
     ])
-    outcome = result.stdout.rsplit(b"\n", 1)[-1].decode("ascii")
-    check(result.returncode == 0 and outcome == f"{ver} {expect}", f"HTTP/{ver} expected {expect}, got {outcome}")
-    if expect in (200, 400, 401, 405, 429, 503) and path == ROUTE:
-        check(b"\ncache-control: no-store" in result.stdout.lower(), "missing Cache-Control no-store")
+    outcome = result.stdout.rsplit(b"\n", 1)[-1]
+    check(result.returncode == 0 and outcome == f"{ver} {expect}".encode(), f"expected HTTP/{ver} {expect}")
+    if expect in (200, 400, 401, 405, 410, 429, 503) and path == ROUTE:
+        headers = result.stdout.partition(b"\r\n\r\n")[0].lower().splitlines()
+        check(b"cache-control: no-store" in headers, "missing Cache-Control no-store")
     return result
 
 
@@ -93,13 +94,19 @@ def active():
     print("PASS: isolated systemd credential through authenticated 200; www-data/nobody; HTTP/1.1 and lengthless HTTP/2; both rate limits")
 
 
-def inactive():
-    for identity in ("www-data",):
-        status_on_socket(identity, 200)  # route has gone, backend must still work
+def retired(*, backend_live):
     for ver in ("1.1", "2"):
-        check(b"quotabar-lab-site" in request(ver, 2, 200, path="/").stdout, "site marker missing")
-        check(b"quotabar-lab-baseline-404" in request(ver, 2, 404).stdout, "route still hits upstream")
-    print("PASS: isolated site stays healthy; old route serves approved fallback; backend still available")
+        # Each request invokes a separate curl process, with no auth header.
+        check(b"quotabar-lab-site" in request(ver, 2, 200, path="/", auth=False).stdout, "site marker missing")
+        reply = request(ver, 2, 410, auth=False)
+        body = reply.stdout.partition(b"\r\n\r\n")[2].rsplit(b"\n", 1)[0]
+        check(body == b'{"error":"status_retired"}', "unexpected retirement response body")
+    if backend_live:
+        status_on_socket("www-data", 200)
+    else:
+        check(not os.path.lexists(SOCKET), "retired API socket remains")
+    print("PASS: site healthy; exact unauthenticated 410 with no-store; backend "
+          + ("still available" if backend_live else "socket removed"))
 
 
 if __name__ == "__main__":
@@ -107,7 +114,11 @@ if __name__ == "__main__":
         check(os.geteuid() == 0 and sys.platform == "linux" and MARKER.read_text().strip() == "DISPOSABLE",
               "requires a marked disposable Ubuntu VM")
         check(re.search(r'(?m)^VERSION_ID="22\.04"$', Path("/etc/os-release").read_text()), "requires Ubuntu 22.04")
-        check(len(sys.argv) == 2 and sys.argv[1] in {"active", "inactive"}, "usage: active|inactive")
-        (active if sys.argv[1] == "active" else inactive)()
+        check(len(sys.argv) == 2 and sys.argv[1] in {"active", "retired", "retired-clean"},
+              "usage: active|retired|retired-clean")
+        if sys.argv[1] == "active":
+            active()
+        else:
+            retired(backend_live=sys.argv[1] == "retired")
     except (OSError, ValueError, subprocess.SubprocessError) as err:
         sys.exit("isolated nginx test failed: " + (str(err) if isinstance(err, ValueError) else type(err).__name__))

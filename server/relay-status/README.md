@@ -40,7 +40,7 @@ unit 确认 failed/inactive 优先判红；活跃的有效停机 lease 仅解释
    - 只在现有 `66workshop.cn` 的 HTTPS 443 server 中一次：`include /opt/quotabar-relay-status/nginx/https/*.conf;`
 
    获批窗口内由运维确认当前线上配置与待审磁盘配置一致（仅允许上述两个空 include 的惰性接线）。`nginx -T` 只读磁盘，**不是已加载配置的证明**。审查 systemd nginx unit/启动参数、继承的 rewrite、real-IP、日志、鉴权、安全头、以及 `-T` 不展开的证书等外部引用。配置、外部引用和其它 nginx 发布须在检查至 reload 窗口冻结；不要将脚本的功能锁当作共享站点发布锁。
-4. **只接受已批准配置版本**：空 slot 时在目标主机的获批窗口执行 `/usr/bin/python3 -IB nginx-gate.py inspect`，输出只含四个摘要，不会写批准文件。确认完整配置和 launcher 后，把输出及核准的隔离报告原始字节的 `isolation_report_sha256` 写入专用目录中 root:root 0600 的 `nginx-review.json`；隔离报告为同目录的 `isolation-pass.json`。不要把配置内容或凭据写进证据。脚本以完整 `nginx -T` 文件序列、相同 launcher 和候选摘要验证基线，且目标 deb 包版本和架构摘要必须与隔离机相符，再检查**唯一**合法 include 上下文，添加后只允许这两个文件的精确字节差异；不支持/无法证明的 nginx 拓扑中止。当前仅支持 Ubuntu 默认 nginx 启停参数、默认配置路径。不能靠为了通过而重签未评审磁盘配置。
+4. **只接受已批准配置版本**：首次安装在空 slot 时，在目标主机的获批窗口执行 `/usr/bin/python3 -IB nginx-gate.py inspect`；已完成回滚的重装可用 `inspect-retired` 保留 410 地采集同口径摘要。命令只输出五个摘要，不写批准文件。确认完整配置、systemd 基线和 launcher 后，把输出及核准的隔离报告原始字节的 `isolation_report_sha256` 写入专用目录中 root:root 0600 的 `nginx-review.json`；隔离报告为同目录的 `isolation-pass.json`。不要把配置内容或凭据写进证据。脚本以完整 `nginx -T` 文件序列、相同 launcher 和候选摘要验证基线，且目标 deb 包版本和架构摘要必须与隔离机相符，再检查**唯一**合法 include 上下文，添加后只允许这两个文件的精确字节差异；不支持/无法证明的 nginx 拓扑中止。当前仅支持 Ubuntu 默认 nginx 启停参数、默认配置路径。不能靠为了通过而重签未评审磁盘配置。
 5. **先 dry-run，再单独获批执行**：`./install.sh` 和 `./rollback.sh` 默认不调用 systemd/nginx、不写文件。实际安装 `./install.sh --apply` 先检查审查门槛及既有文件，再启动新增组件，验证快照和 socket；紧接 reload 前再次验证完整配置、两个片段和 include 上下文。它不编辑共享 vhost，也不会启停 `relay-*`。安装后用独立新连接确认网站和状态路由，不能用 reload 命令退出码代替。
 
 
@@ -52,9 +52,13 @@ unit 确认 failed/inactive 优先判红；活跃的有效停机 lease 仅解释
 
 ### 回滚
 
-1. **撤路由**：获批执行 `./rollback.sh --remove-route`。暂移两个片段，验证完整配置回到已批准基线，记录旧 worker，再请求 reload；即使 reload 返回成功，也不碰 timer、API、运行文件或凭据。语法/基线检查失败时只恢复本次暂移的片段，不 reload；发出 reload 后遇到失败或中断不猜测在线配置，保留后端。
-2. **独立验收**：确认同一 nginx master 的旧 workers 已全部退出；用新 TLS 连接分别确认网站关键页与撤路由前记录的正常结果相符，以及原 URL 已回到已批准基线的响应、**不再进入本功能 upstream**。应在后端仍健康时证明这一点：对照授权的直连 Unix socket 探针和撤路由后的站点响应；若结果不具区分力，须在获批窗口使用临时本地 upstream 连接计数等不收集请求内容的观测。不能用单个 404、502、503 或已挂掉的 API 当撤路由证明。保留脱敏的时间、状态、基线摘要和验收人，不记录 token。
-3. **拆后端**：只有上述确认通过后才执行 `./rollback.sh --remove-backend --confirmed-live RECEIPT`。阶段 1 打印的一次性回执绑定旧 worker 和审批；脚本再次核对完整基线、回执与 worker 代际后，才停用本功能 unit、删除运行文件和 digest。保留专用用户、源策略、空 include、锁及审查证据。没有验收、共享配置有漂移或不能区分路由时停止，保持后端。
+1. **退役路由**：获批执行 `./rollback.sh --remove-route`。记录旧 worker，隔离校验完整退役配置，再原子发布专用 410 并重验基线后请求 reload；旧 worker 排空前限速片段可以留在盘上。即使 reload 返回成功，也不碰 timer、API、运行文件或凭据。检查失败不 reload；遇到失败或中断不猜测在线配置，保留后端。
+2. **独立验收**：确认同一 nginx master 的旧 workers 已全部退出。分开建立新 TLS 连接，确认网站关键页正常，且原状态 URL 在**不带 Authorization** 时返回专用 410、固定正文 `{"error":"status_retired"}` 和 `Cache-Control: no-store`。另用获准的 Unix socket 直连独立确认后端仍健康。404 fallback、502、503 或已挂掉的 API 都不能当退役证据。仅保留脱敏时间、状态、基线摘要和验收人。
+3. **拆后端**：只有上述确认通过后才执行 `./rollback.sh --remove-backend --confirmed-live RECEIPT`。再次核对完整基线、回执与 worker 代际后，才停用本功能 unit、删除运行文件、摘要和限速片段。保留专用 410、用户、源策略、锁和审查证据，防止旧客户端的 Authorization 落入网站 fallback。再次确认网站正常、旧 URL 仍返回同一 410。没有验收或有漂移就保持后端。
+
+### 重装
+
+无需也不要删除 410。完成两阶段回滚后，确认只剩精确的退役目录、HTTP slot 空且无残留本功能 unit 或运行目录。重新预置凭据摘要，按当前候选重走获批闸门，再执行 `./install.sh --apply`。脚本先准备并核验快照、API socket 和隔离候选，之后先发布不影响 410 的限速片段，最后原子替换 410 为代理路由，再重验并请求 reload。用新连接确认网站和状态路由，不能用 reload 退出码代替。
 
 安装在 reload 前失败时，优先检查暂存片段，之后仍按两阶段回滚。硬中断可能遗留专用目录内的暂存文件；先核实归属、日志与 live nginx，再续阶段 1。若核准配置已变化，重新走审查流程，不硬删或绕过。任何阶段都不触碰生产转发器。
 

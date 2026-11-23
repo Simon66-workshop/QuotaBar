@@ -30,6 +30,11 @@ SLOTS = {
     f"{BASE}/nginx/https/*.conf": LOCATION,
 }
 TEMPLATES = dict(zip(SLOTS.values(), ("limits.conf", "location.conf")))
+ISOLATION_CHECKS = (
+    "load_credential", "socket_identities", "http1_http2_body", "rate_per_ip_global",
+    "install_interrupt", "rollback_before_confirmation", "rollback_live_and_cleanup",
+    "systemd_change_freeze",
+)
 REVIEW = CONFIG / "nginx-review.json"
 MARKER = re.compile(rb"(?m)^# configuration file (/[^\r\n]+):\n")
 HEX = re.compile(r"[0-9a-f]{64}")
@@ -302,25 +307,26 @@ def approved_baseline(review_raw, report, candidate, launcher, runtime, systemd)
             and review["launcher_sha256"] == launcher and review["candidate_sha256"] == candidate
             and review["runtime_sha256"] == runtime and review["systemd_sha256"] == systemd)
     results = decode_object(report)
-    checks = ("load_credential", "socket_identities", "http1_http2_body", "rate_per_ip_global",
-              "install_interrupt", "rollback_before_confirmation", "rollback_live_and_cleanup",
-              "systemd_change_freeze")
     require(sha(report) == review["isolation_report_sha256"]
-            and exact(results, "candidate_sha256 runtime_sha256 platform " + " ".join(checks))
+            and exact(results, "candidate_sha256 runtime_sha256 platform " + " ".join(ISOLATION_CHECKS))
             and results["platform"] == "Ubuntu 22.04"
             and results["candidate_sha256"] == candidate and results["runtime_sha256"] == runtime
-            and all(results[key] == "PASS" for key in checks))
+            and all(results[key] == "PASS" for key in ISOLATION_CHECKS))
     return review["baseline_sha256"]
 
 
 def main(mode):
-    require(mode in {"inspect", "inactive", "active", "retired", "systemd"})
+    if mode == "isolation-checks":
+        print("\n".join(ISOLATION_CHECKS))
+        return
+    inspect_mode = mode in {"inspect", "inspect-retired"}
+    require(inspect_mode or mode in {"inactive", "active", "retired", "systemd"})
     candidate = candidate_sha()
     runtime = runtime_sha()
     launcher = launcher_sha(capture(["/usr/bin/systemctl", "show", "nginx.service",
                                      "--property=FragmentPath,DropInPaths,ExecStart,ExecReload"]))
     systemd = systemd_sha()
-    if mode != "inspect":
+    if not inspect_mode:
         review_raw, _ = read_regular(REVIEW, 2048, mode=0o600, root_only_parents=True)
         report, _ = read_regular(CONFIG / "isolation-pass.json", 8192, mode=0o600, root_only_parents=True)
         baseline = approved_baseline(review_raw, report, candidate, launcher, runtime, systemd)
@@ -330,15 +336,15 @@ def main(mode):
     files = dump_files(raw)
     # Also reject spoofed dump delimiters or files edited while generating it.
     require(all(Path(path).read_bytes() == content for path, content in files.items()))
-    if mode == "inspect":
-        baseline = fingerprint(files.items())
-        verify(files, "inactive", baseline, {})
+    snippets = {p: (HERE / "nginx" / n).read_bytes() for p, n in TEMPLATES.items()}
+    snippets["retired"] = (HERE / "nginx/retired.conf").read_bytes()
+    if inspect_mode:
+        baseline = fingerprint((path, data) for path, data in files.items() if path not in TEMPLATES)
+        verify(files, "inactive" if mode == "inspect" else "retired", baseline, snippets)
         print(json.dumps({"baseline_sha256": baseline, "launcher_sha256": launcher,
                           "candidate_sha256": candidate, "runtime_sha256": runtime,
                           "systemd_sha256": systemd}, indent=2))
         return
-    snippets = {p: (HERE / "nginx" / n).read_bytes() for p, n in TEMPLATES.items()}
-    snippets["retired"] = (HERE / "nginx/retired.conf").read_bytes()
     verify(files, mode, baseline, snippets)
 
 

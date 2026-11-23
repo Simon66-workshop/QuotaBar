@@ -9,7 +9,7 @@ case "${1:---dry-run}" in
         [[ $# -le 1 ]] || die "$usage"
         say "DRY RUN: no environment preflight; no files, nginx or units changed."
         say "Phase 1 (--remove-route): verify approved baselines, atomically retire the proxy with a quiet exact 410, and request reload."
-        say "Independently verify old workers exited, website health, and the 410 without using a production Bearer."
+        say "Independently verify old workers exited, website health and the exact no-store 410 without Authorization; verify the backend is still healthy."
         say "Phase 2 (--remove-backend --confirmed-live RECEIPT): recheck baselines and worker turnover, then remove the status backend."
         say "Keep the exact retirement route so lingering clients cannot pass credentials to the site's fallback."
         exit 0 ;;
@@ -83,7 +83,7 @@ nginx_workers verify "$pending" "$3" || die "Live confirmation required; no back
 for unit in "$TIMER" "$API"; do
     if [[ -f "$UNIT_DIR/$unit" ]]; then
         systemctl stop "$unit"
-        systemctl disable "$unit"
+        systemctl disable --no-reload "$unit"
     fi
 done
 if [[ -f "$UNIT_DIR/$COLLECTOR" ]]; then systemctl stop "$COLLECTOR"; fi
